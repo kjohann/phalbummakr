@@ -4,6 +4,10 @@ Local issue tracker until the repo is published. Each issue is one file. Vocabul
 
 Status: `todo` · `doing` · `done`. Update the status here and in the issue file.
 
+Feedback on a completed issue goes in an addendum (`NNN-addendum.md`) with extra
+acceptance criteria; see [AGENTS.md](../AGENTS.md#changing-requirements). Add each
+addendum to the Addenda table.
+
 ## MVP
 
 Each issue is a thin vertical slice that leaves the app runnable.
@@ -22,6 +26,11 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 010 | [Layouts and the Layout Library](010-layouts.md)             | 006, 009   | todo   |
 | 011 | [Undo and redo](011-undo-redo.md)                            | 006        | todo   |
 | 012 | [Page Export](012-page-export.md)                            | 007, 009   | todo   |
+
+## Addenda
+
+| Addendum | Issue | Status |
+| -------- | ----- | ------ |
 
 ## After the MVP
 
