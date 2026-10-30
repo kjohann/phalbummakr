@@ -1,27 +1,21 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useRef, useState } from "react";
-import { Layer, Rect, Stage } from "react-konva";
+import { useEffect, useState } from "react";
+import { libraryName, openLibrary, restoreLastLibrary, type Library } from "../core";
+import AlbumView from "./AlbumView";
+import { tauriLibraryPorts } from "./tauriLibraryPorts";
 
 type BridgeState = "connecting" | "connected" | "unavailable";
 
+type LibraryState =
+  | { status: "restoring" }
+  | { status: "closed" }
+  | { status: "open"; library: Library };
+
 export default function App() {
-  const viewportRef = useRef<HTMLDivElement>(null);
-  const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const [bridgeState, setBridgeState] = useState<BridgeState>("connecting");
-
-  useEffect(() => {
-    const element = viewportRef.current;
-    if (!element) return;
-
-    const observer = new ResizeObserver(([entry]) => {
-      setViewport({
-        width: entry.contentRect.width,
-        height: entry.contentRect.height,
-      });
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
+  const [libraryState, setLibraryState] = useState<LibraryState>({ status: "restoring" });
+  const [opening, setOpening] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -37,8 +31,32 @@ export default function App() {
     };
   }, []);
 
-  const pageHeight = Math.min(viewport.height * 0.82, (viewport.width * 0.62) / 0.707);
-  const pageWidth = pageHeight * 0.707;
+  useEffect(() => {
+    let active = true;
+    restoreLastLibrary(tauriLibraryPorts)
+      .then((library) => {
+        if (active) setLibraryState(library ? { status: "open", library } : { status: "closed" });
+      })
+      .catch(() => {
+        if (active) setLibraryState({ status: "closed" });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function handleOpenLibrary() {
+    setOpening(true);
+    setError(null);
+    try {
+      const library = await openLibrary(tauriLibraryPorts);
+      if (library) setLibraryState({ status: "open", library });
+    } catch (cause) {
+      setError(`Could not open the Library: ${String(cause)}`);
+    } finally {
+      setOpening(false);
+    }
+  }
 
   return (
     <main className="app-shell">
@@ -46,42 +64,41 @@ export default function App() {
         <div className="wordmark" aria-label="phalbummakr">
           <span className="wordmark-mark" aria-hidden="true" />
           <span>phalbummakr</span>
-        </div>
-        <div className={`bridge-status bridge-status-${bridgeState}`} role="status">
-          <span className="status-dot" aria-hidden="true" />
-          {bridgeState === "connecting" && "Connecting to desktop"}
-          {bridgeState === "connected" && "Desktop ready"}
-          {bridgeState === "unavailable" && "Browser preview"}
-        </div>
-      </header>
-      <section className="workspace" aria-label="Album workspace">
-        <div className="workspace-label">UNTITLED ALBUM</div>
-        <div className="canvas-viewport" ref={viewportRef}>
-          {viewport.width > 0 && viewport.height > 0 && (
-            <Stage width={viewport.width} height={viewport.height} aria-label="Empty page">
-              <Layer>
-                <Rect
-                  x={(viewport.width - pageWidth) / 2}
-                  y={(viewport.height - pageHeight) / 2}
-                  width={pageWidth}
-                  height={pageHeight}
-                  fill="#fffefa"
-                  stroke="#d8d8d1"
-                  strokeWidth={1}
-                  shadowColor="#1e2926"
-                  shadowBlur={24}
-                  shadowOpacity={0.1}
-                  shadowOffsetY={8}
-                />
-              </Layer>
-            </Stage>
+          {libraryState.status === "open" && (
+            <span className="library-name" title={libraryState.library.root}>
+              {libraryName(libraryState.library)}
+            </span>
           )}
         </div>
-        <div className="workspace-footer">
-          <span>PAGE 01</span>
-          <span>EMPTY PAGE</span>
+        <div className="topbar-actions">
+          {libraryState.status === "open" && (
+            <button type="button" className="button-quiet" onClick={handleOpenLibrary} disabled={opening}>
+              Open another Library…
+            </button>
+          )}
+          <div className={`bridge-status bridge-status-${bridgeState}`} role="status">
+            <span className="status-dot" aria-hidden="true" />
+            {bridgeState === "connecting" && "Connecting to desktop"}
+            {bridgeState === "connected" && "Desktop ready"}
+            {bridgeState === "unavailable" && "Browser preview"}
+          </div>
         </div>
-      </section>
+      </header>
+      {error && (
+        <p className="error-banner" role="alert">
+          {error}
+        </p>
+      )}
+      {libraryState.status === "open" && <AlbumView key={libraryState.library.root} />}
+      {libraryState.status === "closed" && (
+        <section className="welcome" aria-label="Open a Library">
+          <h1>Open a Library</h1>
+          <p>Pick the folder that holds your Photos. If it isn't a Library yet, you can make it one.</p>
+          <button type="button" className="button-primary" onClick={handleOpenLibrary} disabled={opening}>
+            Open Library…
+          </button>
+        </section>
+      )}
     </main>
   );
 }

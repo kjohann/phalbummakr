@@ -11,7 +11,7 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | #   | Issue                                                        | Depends on | Status |
 | --- | ------------------------------------------------------------ | ---------- | ------ |
 | 001 | [Scaffold the app](001-scaffold.md)                          | –          | done   |
-| 002 | [Open or create a Library](002-open-library.md)              | 001        | todo   |
+| 002 | [Open or create a Library](002-open-library.md)              | 001        | done   |
 | 003 | [Browse Photos in the Library](003-browse-photos.md)         | 002        | todo   |
 | 004 | [Create and open an Album](004-create-album.md)              | 002        | todo   |
 | 005 | [Spread view and page operations](005-spreads-and-pages.md)  | 004        | todo   |
