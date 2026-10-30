@@ -13,6 +13,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, onBusyCh
   const [names, setNames] = useState<string[]>([]);
   const [current, setCurrent] = useState<{ filename: string; album: Album } | null>(null);
   const [creating, setCreating] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"saved" | "pending" | "saving" | "error">("saved");
@@ -78,6 +79,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, onBusyCh
       setSaveStatus("saved");
       setCurrent({ filename: name, album });
       setCreating(false);
+      setSettingsOpen(false);
     } catch (cause) {
       setError(`Could not open Album: ${String(cause)}`);
     } finally {
@@ -105,6 +107,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, onBusyCh
       setNames((previous) => [...new Set([...previous, album.name])].sort());
       setCurrent({ filename: album.name, album });
       setCreating(false);
+      setSettingsOpen(false);
     } catch (cause) {
       setError(`Could not create Album: ${String(cause)}`);
     } finally {
@@ -112,8 +115,21 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, onBusyCh
     }
   }
 
+  function changeAlbum(update: (album: Album) => Album) {
+    if (!current) return;
+    try {
+      const album = update(current.album);
+      serializeAlbum(album);
+      setError(null);
+      setSaveStatus("pending");
+      setCurrent({ ...current, album });
+    } catch (cause) {
+      setError(`Could not update Album: ${String(cause)}`);
+    }
+  }
+
   return (
-    <section className="workspace" aria-label="Album workspace">
+    <section className="workspace album-workspace" aria-label="Album workspace">
       <div className="album-toolbar">
         <h1>Albums</h1>
         <button type="button" className="button-quiet" disabled={locked || creating} onClick={() => {
@@ -159,18 +175,47 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, onBusyCh
           <div className="album-toolbar"><h2>{current.album.name}</h2><span>{current.album.pages.length} Pages</span></div>
           <p className="album-details">A4 landscape - 297 x 210 mm - {current.album.pageFormat.dpi} DPI</p>
           <div className="album-toolbar">
-            <label>Page 1 side{" "}
-              <select value={current.album.startingSide} disabled={busy || saveStatus === "saving" || saveStatus === "error"}
-                onChange={(event) => {
-                  setSaveStatus("pending");
-                  setCurrent({ ...current, album: { ...current.album, startingSide: event.target.value === "left" ? "left" : "right" } });
-                }}>
-                <option value="right">Right</option><option value="left">Left</option>
-              </select>
-            </label>
+            <div className="album-settings-wrapper">
+              <button type="button" className="button-quiet" aria-expanded={settingsOpen}
+                aria-controls="album-settings" onClick={() => setSettingsOpen(!settingsOpen)}>Album settings</button>
+              {settingsOpen && (
+                <form id="album-settings" className="album-form album-settings" aria-label="Album settings"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const form = new FormData(event.currentTarget);
+                    changeAlbum((album) => ({ ...album, pageFormat: {
+                      ...album.pageFormat,
+                      bleedMm: Number(form.get("bleedMm")),
+                      safeZoneMm: Number(form.get("safeZoneMm")),
+                      dpi: Number(form.get("dpi")),
+                    } }));
+                  }}>
+                  <h3>Album settings</h3>
+                  <fieldset disabled={busy || saveStatus === "saving" || saveStatus === "error"}>
+                    <label>Page 1 side
+                      <select value={current.album.startingSide} onChange={(event) => {
+                        const startingSide = event.target.value === "left" ? "left" : "right";
+                        changeAlbum((album) => ({ ...album, startingSide }));
+                      }}>
+                        <option value="right">Right</option><option value="left">Left</option>
+                      </select>
+                    </label>
+                    <p className="album-details">Page Format: A4 landscape (297 x 210 mm)</p>
+                    <label>Bleed (mm)<input name="bleedMm" type="number" min="0" step="any"
+                      defaultValue={current.album.pageFormat.bleedMm} required /></label>
+                    <label>Safe Zone (mm)<input name="safeZoneMm" type="number" min="0" max="104.99" step="any"
+                      defaultValue={current.album.pageFormat.safeZoneMm} required /></label>
+                    <label>Export resolution (DPI)<input name="dpi" type="number" min="1" step="any"
+                      defaultValue={current.album.pageFormat.dpi} required /></label>
+                    <button type="submit" className="button-primary">Apply print settings</button>
+                  </fieldset>
+                </form>
+              )}
+            </div>
             <span role="status">{saveStatus === "saved" ? "Saved" : saveStatus === "error" ? "Not saved" : "Saving..."}</span>
           </div>
-          <AlbumView key={current.filename} album={current.album} />
+          <AlbumView key={current.filename} album={current.album} onChange={changeAlbum}
+            disabled={busy || saveStatus === "saving" || saveStatus === "error"} />
         </>
       ) : <p className="photo-empty">Open an Album or create a new one.</p>}
     </section>

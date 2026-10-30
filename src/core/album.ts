@@ -29,6 +29,68 @@ export interface AlbumOptions {
   dpi?: number;
 }
 
+export interface Spread {
+  left: Page | null;
+  right: Page | null;
+}
+
+export function albumSpreads(album: Album): Spread[] {
+  const spreads: Spread[] = [{
+    left: album.startingSide === "left" ? album.pages[0] : null,
+    right: album.startingSide === "right" ? album.pages[0] : null,
+  }];
+  for (let index = 1; index < album.pages.length; index += 2) {
+    spreads.push({ left: album.pages[index], right: album.pages[index + 1] ?? null });
+  }
+  return spreads;
+}
+
+function pageIndex(album: Album, id: string): number {
+  const index = album.pages.findIndex((page) => page.id === id);
+  if (index === -1) throw new Error("Page not found in Album.");
+  return index;
+}
+
+function unusedPageId(album: Album): string {
+  const ids = new Set(album.pages.map((page) => page.id));
+  let number = 1;
+  while (ids.has(`page-${number}`)) number += 1;
+  return `page-${number}`;
+}
+
+export function addPage(album: Album, afterId: string): Album {
+  const index = pageIndex(album, afterId);
+  validatePageCount(album.pages.length + 1);
+  const pages = [...album.pages];
+  pages.splice(index + 1, 0, { id: unusedPageId(album), background: "#ffffff", slots: [] });
+  return { ...album, pages };
+}
+
+export function duplicatePage(album: Album, id: string): Album {
+  const index = pageIndex(album, id);
+  validatePageCount(album.pages.length + 1);
+  const pages = [...album.pages];
+  pages.splice(index + 1, 0, { ...structuredClone(album.pages[index]), id: unusedPageId(album) });
+  return { ...album, pages };
+}
+
+export function deletePage(album: Album, id: string): Album {
+  const index = pageIndex(album, id);
+  validatePageCount(album.pages.length - 1);
+  return { ...album, pages: album.pages.filter((_, position) => position !== index) };
+}
+
+export function movePage(album: Album, id: string, toIndex: number): Album {
+  const index = pageIndex(album, id);
+  if (!Number.isInteger(toIndex) || toIndex < 0 || toIndex >= album.pages.length) {
+    throw new Error("Page position must be within the Album.");
+  }
+  const pages = [...album.pages];
+  const [page] = pages.splice(index, 1);
+  pages.splice(toIndex, 0, page);
+  return { ...album, pages };
+}
+
 export function pageDimensions(format: PageFormat): { widthMm: number; heightMm: number } {
   const dimensions = { A4: { widthMm: 297, heightMm: 210 } };
   return { ...dimensions[format.size] };

@@ -46,17 +46,37 @@ Names must be valid Windows filenames (up to 100 characters).
 
 Albums live in `Albums/<name>.album.json` under the Library, with a versioned JSON
 model owned by the TypeScript domain core. Use the Album list to open an existing
-Album, **Refresh Albums** to pick up disk changes, and the Page selector to browse
-its Pages. Unsupported schema versions or content are rejected rather than
+Album and **Refresh Albums** to pick up disk changes. Unsupported schema versions or content are rejected rather than
 silently discarded. Creating an Album never overwrites an existing file.
 
-Changing **Page 1 side** autosaves after 500 ms without another change. Album and
+The editor shows facing Pages, with a horizontally scrollable Spread strip below
+it. Select a Page from the strip, the Page selector, or the editor itself. Page 1
+is alone on its chosen side; the opposite side is blocked out as **Inside cover**.
+Remaining Pages pair in order, with **No Page** marking an unmatched final side.
+These placeholders are not editable Pages and are not saved in the Album.
+
+**Add Page** and **Duplicate Page** insert after the selected Page and select the
+result. **Delete Page** selects the next Page, or the previous one at the end;
+the last Page cannot be deleted. Drag a Page thumbnail onto another to move it to
+that position, or use **Earlier** / **Later** with the keyboard. Page numbers and
+Spreads update from the new order, while Page identities remain stable. The
+selected thumbnail scrolls into view. The editor keeps the trim edge at A4
+proportions, with Bleed outside it and a dashed Safe Zone inside it.
+
+**Album settings** contains **Page 1 side** and the print settings. Starting-side
+changes apply immediately; use **Apply print settings** for Bleed, Safe Zone and
+DPI changes. The Page Format remains A4 landscape. All applied edits autosave
+after 500 ms without another change. Album and
 Library switching are blocked until saving finishes; save failures keep the
 changes in memory and offer **Retry save**. Closing the desktop window is also
 blocked during an Album operation or while changes remain unsaved. Each write
 uses a unique temporary file in `Albums/`, flushes it, then atomically replaces
 the destination. This keeps the previous file intact if replacement fails.
-Pages cannot yet be rearranged or filled; those are subsequent issues.
+Page edits pause during a write or after a save failure, but Page selection remains
+available. Pages cannot yet be filled; that is a subsequent issue.
+
+Tauri's native file-drop interception is disabled so HTML Page drag reordering
+can work on Windows. The app does not currently accept file drops from Explorer.
 
 ## Test and build
 
