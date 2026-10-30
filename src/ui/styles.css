@@ -149,6 +149,59 @@ body {
   padding: 0 16px 12px;
 }
 
+.photo-breadcrumbs {
+  flex-shrink: 0;
+  max-height: 100px;
+  overflow: auto;
+  padding: 4px 16px 12px;
+  color: #6f7771;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.photo-breadcrumbs button {
+  padding: 2px 0;
+  border: 0;
+  color: #415d50;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.photo-breadcrumbs button[aria-current="page"] {
+  color: #242a27;
+  font-weight: 700;
+}
+
+.folder-tile {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  color: #415d50;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.folder-tile .photo-name {
+  padding-top: 5px;
+  color: #242a27;
+}
+
+.folder-label {
+  color: #6f7771;
+}
+
+.folder-tile:hover .photo-preview {
+  background: #d9e0d6;
+}
+
 .photo-empty {
   margin: 16px;
   line-height: 1.6;

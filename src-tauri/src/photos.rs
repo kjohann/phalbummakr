@@ -20,6 +20,7 @@ pub struct Photo {
 #[derive(Debug, Serialize)]
 pub struct ScanResult {
     pub photos: Vec<Photo>,
+    pub folders: Vec<String>,
     pub warnings: Vec<String>,
 }
 
@@ -30,6 +31,7 @@ pub fn scan_library(root: &Path) -> Result<ScanResult, String> {
     }
     let mut result = ScanResult {
         photos: Vec::new(),
+        folders: Vec::new(),
         warnings: Vec::new(),
     };
     scan_folder(&root, &root, &mut result)?;
@@ -38,6 +40,7 @@ pub fn scan_library(root: &Path) -> Result<ScanResult, String> {
             .cmp(&b.capture_date)
             .then(a.path.cmp(&b.path))
     });
+    result.folders.sort();
     Ok(result)
 }
 
@@ -68,6 +71,13 @@ fn scan_folder(root: &Path, folder: &Path, result: &mut ScanResult) -> Result<()
                 || entry.file_name().eq_ignore_ascii_case("Exports")
             {
                 continue;
+            }
+            match relative_path(root, &path) {
+                Ok(relative) => result.folders.push(relative),
+                Err(error) => {
+                    result.warnings.push(format!("{}: {error}", path.display()));
+                    continue;
+                }
             }
             if let Err(error) = scan_folder(root, &path, result) {
                 result.warnings.push(format!("{}: {error}", path.display()));
@@ -105,12 +115,16 @@ fn revision(root: &Path, path: &str, metadata: &Metadata) -> Result<String, Stri
     Ok(format!("{:x}", hash.finalize()))
 }
 
-fn read_photo(root: &Path, path: &Path, warnings: &mut Vec<String>) -> Result<Photo, String> {
-    let relative = path.strip_prefix(root).map_err(|error| error.to_string())?;
-    let relative = relative
+fn relative_path(root: &Path, path: &Path) -> Result<String, String> {
+    path.strip_prefix(root)
+        .map_err(|error| error.to_string())?
         .to_str()
-        .ok_or("Photo path is not valid Unicode")?
-        .replace('\\', "/");
+        .map(|relative| relative.replace('\\', "/"))
+        .ok_or_else(|| "Library path is not valid Unicode".into())
+}
+
+fn read_photo(root: &Path, path: &Path, warnings: &mut Vec<String>) -> Result<Photo, String> {
+    let relative = relative_path(root, path)?;
     let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
     let (width, height) = image::image_dimensions(path).map_err(|error| error.to_string())?;
     let modified: DateTime<chrono::Utc> = metadata
@@ -445,6 +459,41 @@ mod tests {
             pair[0].capture_date < pair[1].capture_date
                 || (pair[0].capture_date == pair[1].capture_date && pair[0].path < pair[1].path)
         }));
+    }
+
+    #[test]
+    fn preserves_nested_and_empty_folders_and_rescans_folder_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::library::create_library(dir.path()).unwrap();
+        for folder in [
+            "holiday/beach",
+            "empty",
+            "notes",
+            "Exports/hidden",
+            "holiday/exports/hidden",
+            ".phalbummakr/hidden",
+            "holiday/.PHALBUMMAKR/hidden",
+        ] {
+            fs::create_dir_all(dir.path().join(folder)).unwrap();
+        }
+        write_photo(&dir.path().join("holiday/beach/same.png"));
+        write_photo(&dir.path().join("same.png"));
+        fs::write(dir.path().join("notes/readme.txt"), "not a Photo").unwrap();
+
+        let result = serde_json::to_value(scan_library(dir.path()).unwrap()).unwrap();
+        assert_eq!(
+            result["folders"],
+            serde_json::json!(["empty", "holiday", "holiday/beach", "notes"])
+        );
+        assert_eq!(result["photos"].as_array().unwrap().len(), 2);
+
+        fs::remove_dir(dir.path().join("empty")).unwrap();
+        fs::create_dir(dir.path().join("new")).unwrap();
+        let rescanned = serde_json::to_value(scan_library(dir.path()).unwrap()).unwrap();
+        assert_eq!(
+            rescanned["folders"],
+            serde_json::json!(["holiday", "holiday/beach", "new", "notes"])
+        );
     }
 
     #[test]

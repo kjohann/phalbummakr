@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import PhotoBrowser from "./PhotoBrowser";
@@ -34,7 +34,7 @@ afterEach(() => {
 
 function photo(index: number) {
   return {
-    path: `holiday/photo-${index}.jpg`,
+    path: `photo-${index}.jpg`,
     captureDate: 1_577_934_245_000 + index * 1000,
     width: 4000,
     height: 3000,
@@ -43,14 +43,86 @@ function photo(index: number) {
   };
 }
 
-it("renders only a small window of 2,500 Photos and lazily loads thumbnails as the user scrolls", async () => {
-  const photos = Array.from({ length: 2500 }, (_, index) => photo(index));
+it("browses immediate folders and Photos, including empty folders, with breadcrumbs back to the Library", async () => {
+  const photos = [
+    { ...photo(0), path: "root.jpg" },
+    { ...photo(1), path: "holiday/same.jpg" },
+    { ...photo(2), path: "holiday/beach/same.jpg" },
+    { ...photo(3), path: "holiday-extra/other.jpg" },
+  ];
   vi.mocked(invoke).mockImplementation(async (command) => {
-    if (command === "scan_photos") return { photos, warnings: [] };
+    if (command === "scan_photos") return {
+      photos, folders: ["empty", "holiday", "holiday/beach", "holiday-extra"], warnings: [],
+    };
     return "data:image/png;base64,dGVzdA==";
   });
   render(<PhotoBrowser root={"D:\\Photos"} />);
 
+  await screen.findByText("root.jpg");
+  expect(screen.queryByText("same.jpg")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Open folder beach" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Open folder holiday" }));
+  await screen.findByText("same.jpg");
+  expect(screen.queryByText("root.jpg")).toBeNull();
+  expect(screen.queryByText("other.jpg")).toBeNull();
+  expect(screen.getAllByRole("listitem")).toHaveLength(2);
+  fireEvent.click(screen.getByRole("button", { name: "Open folder beach" }));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("photo_thumbnail", {
+    root: "D:\\Photos", path: "holiday/beach/same.jpg", revision: photos[2].revision,
+  }));
+  expect(screen.getAllByRole("listitem")).toHaveLength(1);
+  const breadcrumbs = screen.getByRole("navigation", { name: "Photo folders" });
+  expect(within(breadcrumbs).getByText("beach").getAttribute("aria-current")).toBe("page");
+  fireEvent.click(within(breadcrumbs).getByRole("button", { name: "holiday" }));
+  expect(screen.getByRole("button", { name: "Open folder beach" })).toBeTruthy();
+  fireEvent.click(within(breadcrumbs).getByRole("button", { name: "Library" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open folder empty" }));
+  expect(screen.getByText("No Photos in this folder.")).toBeTruthy();
+  expect(screen.queryByRole("listitem")).toBeNull();
+  fireEvent.click(within(breadcrumbs).getByRole("button", { name: "Library" }));
+  await screen.findByText("root.jpg");
+});
+
+it("keeps the current folder on rescan and returns to a surviving ancestor with a notice if it disappears", async () => {
+  const scans = [
+    { photos: [{ ...photo(0), path: "holiday/beach/first.jpg" }], folders: ["holiday", "holiday/beach"], warnings: [] },
+    { photos: [{ ...photo(1), path: "holiday/beach/added.jpg" }], folders: ["holiday", "holiday/beach"], warnings: [] },
+    { photos: [{ ...photo(2), path: "holiday/parent.jpg" }], folders: ["holiday"], warnings: [] },
+    { photos: [{ ...photo(3), path: "root.jpg" }], folders: [], warnings: [] },
+  ];
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "scan_photos") return scans.shift();
+    return "data:image/png;base64,dGVzdA==";
+  });
+  render(<PhotoBrowser root={"D:\\Photos"} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open folder holiday" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open folder beach" }));
+  await screen.findByText("first.jpg");
+  fireEvent.click(screen.getByRole("button", { name: "Rescan" }));
+  await screen.findByText("added.jpg");
+  expect(screen.queryByText("first.jpg")).toBeNull();
+  expect(within(screen.getByRole("navigation")).getByText("beach").getAttribute("aria-current")).toBe("page");
+  fireEvent.click(screen.getByRole("button", { name: "Rescan" }));
+  await screen.findByText("parent.jpg");
+  expect(screen.getByText(/holiday\/beach.*no longer available/)).toBeTruthy();
+  expect(within(screen.getByRole("navigation")).getByText("holiday").getAttribute("aria-current")).toBe("page");
+  fireEvent.click(screen.getByRole("button", { name: "Rescan" }));
+  await screen.findByText("root.jpg");
+  expect(screen.getByText(/holiday.*no longer available/)).toBeTruthy();
+  expect(within(screen.getByRole("navigation")).getByText("Library").getAttribute("aria-current")).toBe("page");
+});
+
+it("renders only a small window of 2,500 Photos and lazily loads thumbnails as the user scrolls", async () => {
+  const photos = Array.from({ length: 2500 }, (_, index) => ({
+    ...photo(index), path: `holiday/photo-${index}.jpg`,
+  }));
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "scan_photos") return { photos, folders: ["holiday"], warnings: [] };
+    return "data:image/png;base64,dGVzdA==";
+  });
+  render(<PhotoBrowser root={"D:\\Photos"} />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "Open folder holiday" }));
   await screen.findByText("2,500 Photos");
   await waitFor(() => expect(screen.getAllByRole("img").length).toBeGreaterThan(0));
   expect(screen.getAllByRole("listitem").length).toBeLessThan(30);
@@ -64,6 +136,12 @@ it("renders only a small window of 2,500 Photos and lazily loads thumbnails as t
   }));
   expect(screen.queryByText("photo-0.jpg")).toBeNull();
   expect(screen.getAllByRole("listitem").length).toBeLessThan(30);
+
+  fireEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name: "Library" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open folder holiday" }));
+  await screen.findByText("photo-0.jpg");
+  expect(screen.queryByText("photo-2499.jpg")).toBeNull();
+  expect(screen.getByLabelText("Photo grid").scrollTop).toBe(0);
 });
 
 it("rescans added and removed Photos, reports warnings, and keeps the grid when a rescan fails", async () => {
@@ -73,11 +151,13 @@ it("rescans added and removed Photos, reports warnings, and keeps the grid when 
     scanned++;
     if (scanned === 3) throw new Error("Library disconnected");
     return {
-      photos: [photo(scanned === 1 ? 0 : 1)],
+      photos: [{ ...photo(scanned === 1 ? 0 : 1), path: `holiday/photo-${scanned === 1 ? 0 : 1}.jpg` }],
+      folders: ["holiday"],
       warnings: scanned === 1 ? [] : ["bad.jpg: invalid JPEG"],
     };
   });
   render(<PhotoBrowser root={"D:\\Photos"} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open folder holiday" }));
   await screen.findByText("photo-0.jpg");
   await waitFor(() => expect(screen.getByRole("button", { name: "Rescan" }).hasAttribute("disabled")).toBe(false));
   fireEvent.click(screen.getByRole("button", { name: "Rescan" }));
@@ -89,6 +169,27 @@ it("rescans added and removed Photos, reports warnings, and keeps the grid when 
   fireEvent.click(screen.getByRole("button", { name: "Rescan" }));
   await screen.findByText(/Could not scan the Library:.*Library disconnected/);
   expect(screen.getByText("photo-1.jpg")).toBeTruthy();
+  expect(within(screen.getByRole("navigation")).getByText("holiday").getAttribute("aria-current")).toBe("page");
+});
+
+it("cancels queued thumbnails when leaving a folder", async () => {
+  const photos = Array.from({ length: 100 }, (_, index) => ({
+    ...photo(index), path: `holiday/photo-${index}.jpg`,
+  }));
+  const release: (() => void)[] = [];
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "scan_photos") return { photos, folders: ["holiday"], warnings: [] };
+    await new Promise<void>((resolve) => release.push(resolve));
+    return "data:image/png;base64,dGVzdA==";
+  });
+  render(<PhotoBrowser root={"D:\\Photos"} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open folder holiday" }));
+  await waitFor(() => expect(release).toHaveLength(4));
+  fireEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name: "Library" }));
+  release.forEach((resolve) => resolve());
+  await screen.findByText("No Photos in this folder.");
+  await waitFor(() => expect(screen.queryByText("photo-0.jpg")).toBeNull());
+  expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "photo_thumbnail")).toHaveLength(4);
 });
 
 it("caps thumbnail work at four requests and cancels queued work after scrolling away", async () => {
@@ -96,7 +197,7 @@ it("caps thumbnail work at four requests and cancels queued work after scrolling
   const release: (() => void)[] = [];
   let paused = true;
   vi.mocked(invoke).mockImplementation(async (command) => {
-    if (command === "scan_photos") return { photos, warnings: [] };
+    if (command === "scan_photos") return { photos, folders: [], warnings: [] };
     if (paused) await new Promise<void>((resolve) => release.push(resolve));
     return "data:image/png;base64,dGVzdA==";
   });
@@ -111,11 +212,11 @@ it("caps thumbnail work at four requests and cancels queued work after scrolling
 });
 
 it("keeps thumbnail state during a pending rescan and reports thumbnail failures explicitly", async () => {
-  let finishScan: (result: { photos: ReturnType<typeof photo>[]; warnings: string[] }) => void = () => {};
+  let finishScan: (result: { photos: ReturnType<typeof photo>[]; folders: string[]; warnings: string[] }) => void = () => {};
   let scans = 0;
   vi.mocked(invoke).mockImplementation(async (command) => {
     if (command === "scan_photos") {
-      if (++scans === 1) return { photos: [photo(0)], warnings: [] };
+      if (++scans === 1) return { photos: [photo(0)], folders: [], warnings: [] };
       return new Promise((resolve) => { finishScan = resolve; });
     }
     throw new Error("Photo was deleted");
@@ -126,6 +227,6 @@ it("keeps thumbnail state during a pending rescan and reports thumbnail failures
   await screen.findByText("Scanning Library...");
   expect(screen.getByText("photo-0.jpg")).toBeTruthy();
   expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "photo_thumbnail")).toHaveLength(1);
-  finishScan({ photos: [], warnings: [] });
+  finishScan({ photos: [], folders: [], warnings: [] });
   await screen.findByText(/No Photos yet/);
 });

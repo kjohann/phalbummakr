@@ -14,7 +14,11 @@ Install dependencies with `npm install`, then start the desktop app with `npm ru
 
 Opening a Library scans its folders for JPEG and PNG Photos, excluding
 `.phalbummakr/`, `Exports/` and symbolic links. The photo browser sits beside the
-Album workspace, sorted by capture date (oldest first, then relative path for ties).
+Album workspace and starts at the Library root. Open folder tiles to browse
+subfolders, including empty folders; use the breadcrumbs to return to any ancestor
+or the Library root. Each view shows only its immediate folders (alphabetically
+first) and Photos, with Photos sorted by capture date (oldest first, then relative
+path for ties). The Photo count is for the current folder, not its descendants.
 Dates come from EXIF's original/digitized date, falling back to the file's modified
 time. EXIF wall-clock dates are treated as UTC so sorting and display do not change
 with the machine's timezone. Pixel sizes describe the original file; thumbnails
@@ -27,7 +31,10 @@ the Library root, relative Photo path, file size, modification time and thumbnai
 format version. Originals stay untouched; cached thumbnails can be deleted and
 rebuilt. Use **Rescan** after adding, removing or editing files. Scan warnings and
 thumbnail errors are shown in the photo browser; a failed rescan keeps the previous
-grid available.
+folder and grid available. A successful rescan keeps the current folder if it still
+exists; otherwise, it returns to the nearest available ancestor and shows a notice.
+Opening a folder resets the grid to the top. Folders and Photos are referenced
+where they live on disk; browsing never moves or copies originals.
 
 ## Test and build
 

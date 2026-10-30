@@ -11,5 +11,7 @@ export interface Photo {
 
 export interface PhotoScan {
   photos: Photo[];
+  /** All scanned folders relative to the Library root, with forward slashes, including empty folders. */
+  folders: string[];
   warnings: string[];
 }
