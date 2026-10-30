@@ -1,6 +1,8 @@
 mod library;
+mod photos;
 mod settings;
 
+use base64::Engine;
 use std::path::{Path, PathBuf};
 use tauri::Manager;
 
@@ -38,6 +40,36 @@ fn remember_library(app: tauri::AppHandle, root: String) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+async fn scan_photos(root: String) -> Result<photos::ScanResult, String> {
+    tauri::async_runtime::spawn_blocking(move || photos::scan_library(Path::new(&root)))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn photo_thumbnail(
+    app: tauri::AppHandle,
+    root: String,
+    path: String,
+    revision: String,
+) -> Result<String, String> {
+    let cache = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("thumbnails");
+    tauri::async_runtime::spawn_blocking(move || {
+        let bytes = photos::thumbnail(Path::new(&root), &cache, &path, &revision)?;
+        Ok(format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        ))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -47,7 +79,9 @@ pub fn run() {
             is_library,
             create_library,
             recall_library,
-            remember_library
+            remember_library,
+            scan_photos,
+            photo_thumbnail
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { libraryName, openLibrary, restoreLastLibrary, type Library } from "../core";
 import AlbumView from "./AlbumView";
+import PhotoBrowser from "./PhotoBrowser";
 import { tauriLibraryPorts } from "./tauriLibraryPorts";
 
 type BridgeState = "connecting" | "connected" | "unavailable";
@@ -89,7 +90,12 @@ export default function App() {
           {error}
         </p>
       )}
-      {libraryState.status === "open" && <AlbumView key={libraryState.library.root} />}
+      {libraryState.status === "open" && (
+        <div className="library-workspace" key={libraryState.library.root}>
+          <PhotoBrowser root={libraryState.library.root} />
+          <AlbumView />
+        </div>
+      )}
       {libraryState.status === "closed" && (
         <section className="welcome" aria-label="Open a Library">
           <h1>Open a Library</h1>
