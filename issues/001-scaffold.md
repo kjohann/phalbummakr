@@ -1,6 +1,6 @@
 # 001 – Scaffold the app
 
-Status: todo
+Status: done
 
 ## What
 
