@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import PhotoBrowser from "./PhotoBrowser";
+import { hasPhotoDrag, readPhotoDrag } from "./photoDrag";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
@@ -229,4 +230,29 @@ it("keeps thumbnail state during a pending rescan and reports thumbnail failures
   expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "photo_thumbnail")).toHaveLength(1);
   finishScan({ photos: [], folders: [], warnings: [] });
   await screen.findByText(/No Photos yet/);
+});
+
+it("lets a Photo tile be dragged with the Photo as its payload", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "scan_photos") return { photos: [{ ...photo(0), path: "holiday/tree.jpg", orientation: 6 }], folders: ["holiday"], warnings: [] };
+    return "data:image/png;base64,dGVzdA==";
+  });
+  render(<PhotoBrowser root={"D:\\Photos"} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open folder holiday" }));
+  const tile = (await screen.findByText("tree.jpg")).closest("figure")!;
+  expect(tile.getAttribute("draggable")).toBe("true");
+  const data = new Map<string, string>();
+  const dataTransfer = {
+    effectAllowed: "none",
+    get types() { return [...data.keys()]; },
+    setData: (type: string, value: string) => data.set(type, value),
+    getData: (type: string) => data.get(type) ?? "",
+  };
+  fireEvent.dragStart(tile, { dataTransfer });
+  expect(dataTransfer.effectAllowed).toBe("copy");
+  expect(hasPhotoDrag(dataTransfer as unknown as DataTransfer)).toBe(true);
+  expect(readPhotoDrag(dataTransfer as unknown as DataTransfer)).toEqual({
+    path: "holiday/tree.jpg", width: 4000, height: 3000, orientation: 6,
+  });
+  expect(readPhotoDrag({ types: [], getData: () => "" } as unknown as DataTransfer)).toBeNull();
 });

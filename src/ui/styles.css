@@ -615,3 +615,47 @@ body {
     padding-left: 18px;
   }
 }
+.toolbar-divider {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: #c9d0c8;
+}
+
+.slot-overlay {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  cursor: move;
+}
+
+.slot-overlay:hover,
+.slot-overlay:focus-visible {
+  border-color: #415d50;
+  outline: none;
+}
+
+.slot-overlay[aria-pressed="true"] {
+  border: 2px solid #415d50;
+}
+
+.slot-resize-handle {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 10px;
+  height: 10px;
+  border: 1px solid #ffffff;
+  background: #415d50;
+  cursor: nwse-resize;
+  visibility: hidden;
+}
+
+.slot-overlay[aria-pressed="true"] .slot-resize-handle,
+.slot-overlay:hover .slot-resize-handle {
+  visibility: visible;
+}
+
+.photo-tile[draggable="true"] {
+  cursor: grab;
+}

@@ -67,9 +67,7 @@ fn scan_folder(root: &Path, folder: &Path, result: &mut ScanResult) -> Result<()
             continue;
         }
         if kind.is_dir() {
-            if entry.file_name().eq_ignore_ascii_case(".phalbummakr")
-                || entry.file_name().eq_ignore_ascii_case("Exports")
-            {
+            if is_hidden_folder(&entry.file_name(), folder == root) {
                 continue;
             }
             match relative_path(root, &path) {
@@ -177,21 +175,22 @@ fn read_photo(root: &Path, path: &Path, warnings: &mut Vec<String>) -> Result<Ph
     Ok(photo)
 }
 
-pub fn thumbnail(
+/// Resolves a Photo path relative to the Library root, rejecting paths that
+/// escape the Library or point into folders the scan hides.
+fn resolve_photo(
     root: &Path,
-    cache: &Path,
     relative: &str,
-    expected_revision: &str,
-) -> Result<Vec<u8>, String> {
+) -> Result<(std::path::PathBuf, std::path::PathBuf), String> {
     let root = root.canonicalize().map_err(|error| error.to_string())?;
     let relative_path = Path::new(relative);
-    if relative_path.components().any(|part| match part {
-        Component::Normal(name) => {
-            name.eq_ignore_ascii_case(".phalbummakr") || name.eq_ignore_ascii_case("Exports")
-        }
-        _ => true,
-    }) || !is_photo(relative_path)
-    {
+    let hidden = relative_path
+        .components()
+        .enumerate()
+        .any(|(index, part)| match part {
+            Component::Normal(name) => is_hidden_folder(name, index == 0),
+            _ => true,
+        });
+    if hidden || !is_photo(relative_path) {
         return Err("Invalid Photo path.".into());
     }
     let path = root
@@ -201,63 +200,164 @@ pub fn thumbnail(
     if !path.starts_with(&root) || !crate::library::is_library(&root) {
         return Err("The Photo is outside the Library.".into());
     }
-    let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
-    let key = revision(&root, relative, &metadata)?;
-    if key != expected_revision {
-        return Err("The Photo changed. Rescan the Library to refresh it.".into());
-    }
-    let cached = cache.join(format!("{key}.png"));
-    match fs::read(&cached) {
+    Ok((root, path))
+}
+
+/// Folders the scan hides: app data and Exports anywhere, and Albums at the Library root.
+fn is_hidden_folder(name: &std::ffi::OsStr, at_root: bool) -> bool {
+    name.eq_ignore_ascii_case(".phalbummakr")
+        || name.eq_ignore_ascii_case("Exports")
+        || (at_root && name.eq_ignore_ascii_case("Albums"))
+}
+
+/// Returns a cached rendition of a Photo, generating and caching it when missing or corrupt.
+/// `render` receives the decoded image and its EXIF orientation, so it can downscale
+/// before orienting.
+fn cached_rendition(
+    root: &Path,
+    path: &Path,
+    relative: &str,
+    cache_file: &Path,
+    render: impl FnOnce(image::DynamicImage, u32) -> Result<Vec<u8>, String>,
+) -> Result<Vec<u8>, String> {
+    let key = revision(
+        root,
+        relative,
+        &fs::metadata(path).map_err(|error| error.to_string())?,
+    )?;
+    match fs::read(cache_file) {
         Ok(bytes) => {
             if image::load_from_memory(&bytes).is_ok() {
                 return Ok(bytes);
             }
             eprintln!(
-                "Rebuilding invalid thumbnail cache entry: {}",
-                cached.display()
+                "Rebuilding invalid image cache entry: {}",
+                cache_file.display()
             );
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(format!("Could not read thumbnail cache: {error}")),
+        Err(error) => return Err(format!("Could not read image cache: {error}")),
     }
     let mut warnings = Vec::new();
-    let photo = read_photo(&root, &path, &mut warnings)?;
+    let photo = read_photo(root, path, &mut warnings)?;
     for warning in warnings {
         eprintln!("{warning}");
     }
-    let decoded = image::ImageReader::open(&path)
+    let decoded = image::ImageReader::open(path)
         .map_err(|error| error.to_string())?
         .decode()
         .map_err(|error| error.to_string())?;
-    let small = decoded.thumbnail(256.min(decoded.width()), 256.min(decoded.height()));
-    let oriented = match photo.orientation {
-        2 => small.fliph(),
-        3 => small.rotate180(),
-        4 => small.flipv(),
-        5 => small.rotate90().fliph(),
-        6 => small.rotate90(),
-        7 => small.rotate90().flipv(),
-        8 => small.rotate270(),
-        _ => small,
-    };
-    let mut bytes = Cursor::new(Vec::new());
-    oriented
-        .write_to(&mut bytes, image::ImageFormat::Png)
-        .map_err(|error| error.to_string())?;
-    let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
-    if revision(&root, relative, &metadata)? != key {
-        return Err("The Photo changed while generating its thumbnail. Rescan the Library.".into());
+    let bytes = render(decoded, photo.orientation)?;
+    let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
+    if revision(root, relative, &metadata)? != key {
+        return Err("The Photo changed while it was being read. Rescan the Library.".into());
     }
+    let cache = cache_file.parent().expect("cache file has a folder");
     fs::create_dir_all(cache).map_err(|error| error.to_string())?;
     let mut temporary =
         tempfile::NamedTempFile::new_in(cache).map_err(|error| error.to_string())?;
     temporary
-        .write_all(bytes.get_ref())
+        .write_all(&bytes)
         .map_err(|error| error.to_string())?;
     temporary
-        .persist(cached)
+        .persist(cache_file)
         .map_err(|error| error.to_string())?;
-    Ok(bytes.into_inner())
+    Ok(bytes)
+}
+
+fn orient(image: image::DynamicImage, orientation: u32) -> image::DynamicImage {
+    match orientation {
+        2 => image.fliph(),
+        3 => image.rotate180(),
+        4 => image.flipv(),
+        5 => image.rotate90().fliph(),
+        6 => image.rotate90(),
+        7 => image.rotate90().flipv(),
+        8 => image.rotate270(),
+        _ => image,
+    }
+}
+
+pub fn thumbnail(
+    root: &Path,
+    cache: &Path,
+    relative: &str,
+    expected_revision: &str,
+) -> Result<Vec<u8>, String> {
+    let (root, path) = resolve_photo(root, relative)?;
+    let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
+    let key = revision(&root, relative, &metadata)?;
+    if key != expected_revision {
+        return Err("The Photo changed. Rescan the Library to refresh it.".into());
+    }
+    cached_rendition(
+        &root,
+        &path,
+        relative,
+        &cache.join(format!("{key}.png")),
+        |image, orientation| {
+            let small = orient(
+                image.thumbnail(256.min(image.width()), 256.min(image.height())),
+                orientation,
+            );
+            let mut bytes = Cursor::new(Vec::new());
+            small
+                .write_to(&mut bytes, image::ImageFormat::Png)
+                .map_err(|error| error.to_string())?;
+            Ok(bytes.into_inner())
+        },
+    )
+}
+
+const PREVIEW_LONG_EDGE: u32 = 2048;
+
+/// An upright JPEG of a Photo for the editor, at most 2048 px on the long edge.
+/// Keyed by the Photo's current file revision, so changed files get a new preview.
+pub fn preview(root: &Path, cache: &Path, relative: &str) -> Result<Vec<u8>, String> {
+    let (root, path) = resolve_photo(root, relative)?;
+    let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
+    let mut hash = Sha256::new();
+    // Bump the version when preview size, encoding or orientation handling changes.
+    hash.update(b"preview-v1-2048-jpeg\0");
+    hash.update(revision(&root, relative, &metadata)?.as_bytes());
+    let key = format!("{:x}", hash.finalize());
+    cached_rendition(
+        &root,
+        &path,
+        relative,
+        &cache.join(format!("{key}.jpg")),
+        |image, orientation| {
+            let image = orient(
+                if image.width().max(image.height()) > PREVIEW_LONG_EDGE {
+                    image.resize(
+                        PREVIEW_LONG_EDGE,
+                        PREVIEW_LONG_EDGE,
+                        image::imageops::FilterType::CatmullRom,
+                    )
+                } else {
+                    image
+                },
+                orientation,
+            );
+            // Pages are white, so transparent pixels are shown on white.
+            let mut rgb = image::RgbImage::new(image.width(), image.height());
+            for (x, y, pixel) in image.to_rgba8().enumerate_pixels() {
+                let alpha = pixel[3] as u32;
+                rgb.put_pixel(
+                    x,
+                    y,
+                    image::Rgb(std::array::from_fn(|channel| {
+                        ((pixel[channel] as u32 * alpha + 255 * (255 - alpha)) / 255) as u8
+                    })),
+                );
+            }
+            let mut bytes = Vec::new();
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 85)
+                .encode_image(&rgb)
+                .map_err(|error| error.to_string())?;
+            Ok(bytes)
+        },
+    )
 }
 
 #[cfg(test)]
@@ -439,6 +539,89 @@ mod tests {
             ".phalbummakr/hidden.png",
         ] {
             assert!(thumbnail(first.path(), cache.path(), invalid, &updated.revision).is_err());
+        }
+    }
+
+    #[test]
+    fn hides_the_library_root_albums_folder_but_not_nested_albums_folders() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        crate::library::create_library(dir.path()).unwrap();
+        for folder in ["Albums/inside", "holiday/Albums"] {
+            fs::create_dir_all(dir.path().join(folder)).unwrap();
+        }
+        write_photo(&dir.path().join("Albums/hidden.png"));
+        write_photo(&dir.path().join("Albums/inside/hidden.png"));
+        write_photo(&dir.path().join("holiday/Albums/kept.png"));
+
+        let result = serde_json::to_value(scan_library(dir.path()).unwrap()).unwrap();
+        assert_eq!(
+            result["folders"],
+            serde_json::json!(["holiday", "holiday/Albums"])
+        );
+        assert_eq!(result["photos"][0]["path"], "holiday/Albums/kept.png");
+        assert_eq!(result["photos"].as_array().unwrap().len(), 1);
+        assert!(thumbnail(dir.path(), cache.path(), "Albums/hidden.png", "any").is_err());
+        assert!(thumbnail(dir.path(), cache.path(), "albums/hidden.png", "any").is_err());
+        assert!(preview(dir.path(), cache.path(), "Albums/hidden.png").is_err());
+    }
+
+    #[test]
+    fn previews_are_upright_at_most_2048_pixels_cached_and_rebuilt_when_the_photo_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        crate::library::create_library(dir.path()).unwrap();
+        image::RgbImage::new(3000, 1500)
+            .save(dir.path().join("wide.jpg"))
+            .unwrap();
+        let jpeg = fs::read(dir.path().join("wide.jpg")).unwrap();
+        write_exif_photo(&dir.path().join("rotated.jpg"), 6);
+        let exif_segment_end = {
+            let rotated = fs::read(dir.path().join("rotated.jpg")).unwrap();
+            let length = u16::from_be_bytes([rotated[4], rotated[5]]) as usize;
+            rotated[..4 + length].to_vec()
+        };
+        let mut rotated_large = exif_segment_end;
+        rotated_large.extend_from_slice(&jpeg[2..]);
+        fs::write(dir.path().join("rotated-large.jpg"), rotated_large).unwrap();
+
+        let wide = image::load_from_memory(&preview(dir.path(), cache.path(), "wide.jpg").unwrap())
+            .unwrap();
+        assert_eq!((wide.width(), wide.height()), (2048, 1024));
+        let rotated = image::load_from_memory(
+            &preview(dir.path(), cache.path(), "rotated-large.jpg").unwrap(),
+        )
+        .unwrap();
+        assert_eq!((rotated.width(), rotated.height()), (1024, 2048));
+        let small =
+            image::load_from_memory(&preview(dir.path(), cache.path(), "rotated.jpg").unwrap())
+                .unwrap();
+        assert_eq!((small.width(), small.height()), (20, 40));
+
+        let first = preview(dir.path(), cache.path(), "wide.jpg").unwrap();
+        assert_eq!(fs::read_dir(cache.path()).unwrap().count(), 3);
+        assert_eq!(
+            preview(dir.path(), cache.path(), "wide.jpg").unwrap(),
+            first
+        );
+        image::RgbImage::new(100, 400)
+            .save(dir.path().join("wide.jpg"))
+            .unwrap();
+        let changed =
+            image::load_from_memory(&preview(dir.path(), cache.path(), "wide.jpg").unwrap())
+                .unwrap();
+        assert_eq!((changed.width(), changed.height()), (100, 400));
+        for invalid in [
+            "../wide.jpg",
+            ".phalbummakr/x.png",
+            "Exports/x.png",
+            "missing.jpg",
+            "notes.txt",
+        ] {
+            assert!(
+                preview(dir.path(), cache.path(), invalid).is_err(),
+                "{invalid}"
+            );
         }
     }
 

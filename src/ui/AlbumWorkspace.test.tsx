@@ -1,19 +1,26 @@
 // @vitest-environment jsdom
+import type { ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createAlbum, deserializeAlbum, serializeAlbum, type AlbumPorts } from "../core";
 import AlbumWorkspace from "./AlbumWorkspace";
 
 vi.mock("react-konva", () => ({
-  Stage: () => null,
-  Layer: () => null,
+  Stage: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  Layer: ({ children }: { children: ReactNode }) => <>{children}</>,
   Rect: () => null,
+  Image: ({ image }: { image: HTMLImageElement }) => <img alt="Placement" src={image.src} />,
 }));
 
 beforeEach(() => {
   HTMLElement.prototype.scrollIntoView = vi.fn();
+  // A 1278 x 800 editor gives a scale of 2 px per mm, so an A4 trim Page is 594 x 420 px.
   vi.stubGlobal("ResizeObserver", class {
-    observe() {}
+    constructor(private callback: ResizeObserverCallback) {}
+    observe(target: Element) {
+      this.callback([{ target, contentRect: new DOMRectReadOnly(0, 0, 1278, 800) } as ResizeObserverEntry], this);
+    }
+    unobserve() {}
     disconnect() {}
   });
 });
@@ -243,4 +250,84 @@ it("shows listing failures and allows the user to retry", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Refresh Albums" }));
   await screen.findByRole("button", { name: "Open Album Existing" });
   expect(screen.queryByRole("alert")).toBeNull();
+});
+
+function previews() {
+  return { preview: vi.fn(async (_root: string, path: string) => `data:image/jpeg;base64,${btoa(path)}`) };
+}
+
+function drag(element: Element, dx: number, dy: number) {
+  fireEvent.mouseDown(element, { button: 0, clientX: 100, clientY: 100 });
+  fireEvent.mouseMove(window, { clientX: 100 + dx, clientY: 100 + dy });
+  fireEvent.mouseUp(window, { clientX: 100 + dx, clientY: 100 + dy });
+}
+
+it("adds, moves, resizes and deletes Photo Slots on the selected Page and persists their Page fractions", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  await screen.findByRole("heading", { name: "Existing" });
+  expect((screen.getByRole("button", { name: "Delete Slot" }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  expect(slot.getAttribute("aria-pressed")).toBe("true");
+  // 59.4 px is 0.1 of the 594 px trim width; 42 px is 0.1 of the 420 px trim height.
+  drag(slot, 59.4, 42);
+  drag(screen.getByRole("button", { name: "Resize Page 1 Photo Slot 1" }), 59.4, -42);
+  await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Saved"));
+  const [saved] = deserializeAlbum(files.get("Existing")!).pages[0].slots;
+  expect(saved.x).toBeCloseTo(0.4, 9);
+  expect(saved.y).toBeCloseTo(0.4, 9);
+  expect(saved.width).toBeCloseTo(0.5, 9);
+  expect(saved.height).toBeCloseTo(0.3, 9);
+
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  fireEvent.keyDown(screen.getByRole("button", { name: "Page 1 Photo Slot 2" }), { key: "Delete" });
+  expect(screen.queryByRole("button", { name: "Page 1 Photo Slot 2" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Delete Slot" }));
+  expect(screen.queryByRole("button", { name: /^Page 1 Photo Slot/ })).toBeNull();
+  await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Saved"));
+  expect(deserializeAlbum(files.get("Existing")!).pages[0].slots).toEqual([]);
+});
+
+function photoDrop(photo: { path: string; width: number; height: number; orientation: number }) {
+  const data = new Map([["application/x-phalbummakr-photo", JSON.stringify(photo)]]);
+  return { dataTransfer: { types: [...data.keys()], getData: (type: string) => data.get(type) ?? "", dropEffect: "none" } };
+}
+
+it("places a dropped Photo in a Photo Slot, replaces it on a second drop, and draws it from its preview", async () => {
+  vi.stubGlobal("Image", class {
+    onload: (() => void) | null = null;
+    naturalWidth = 2048;
+    naturalHeight = 1365;
+    private url = "";
+    get src() { return this.url; }
+    set src(url: string) { this.url = url; queueMicrotask(() => this.onload?.()); }
+  });
+  const { ports, files } = disk();
+  const photoPorts = previews();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={photoPorts} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  await screen.findByRole("heading", { name: "Existing" });
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  const tree = photoDrop({ path: "2024/tree.jpg", width: 6000, height: 4000, orientation: 1 });
+  fireEvent.dragOver(slot, tree);
+  expect(tree.dataTransfer.dropEffect).toBe("copy");
+  fireEvent.drop(slot, tree);
+  expect((await screen.findByRole("img", { name: "Placement" })).getAttribute("src")).toBe(`data:image/jpeg;base64,${btoa("2024/tree.jpg")}`);
+  expect(photoPorts.preview).toHaveBeenCalledWith("D:\\Photos", "2024/tree.jpg");
+  await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Saved"));
+  const placement = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!;
+  expect(placement.photoPath).toBe("2024/tree.jpg");
+  expect(placement.crop.y).toBe(0);
+  expect(placement.crop.x + placement.crop.width / 2).toBeCloseTo(0.5, 9);
+
+  fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }), photoDrop({ path: "snow.png", width: 4000, height: 6000, orientation: 1 }));
+  await waitFor(() => expect(screen.getByRole("img", { name: "Placement" }).getAttribute("src")).toBe(`data:image/jpeg;base64,${btoa("snow.png")}`));
+  await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Saved"));
+  const [replaced] = deserializeAlbum(files.get("Existing")!).pages[0].slots;
+  expect(replaced.placement!.photoPath).toBe("snow.png");
+  expect(screen.getAllByRole("img", { name: "Placement" })).toHaveLength(1);
 });

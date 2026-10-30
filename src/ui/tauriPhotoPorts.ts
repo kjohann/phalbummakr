@@ -17,6 +17,7 @@ function drain() {
 
 export const tauriPhotoPorts = {
   scan: (root: string) => invoke<PhotoScan>("scan_photos", { root }),
+  preview: (root: string, path: string) => invoke<string>("photo_preview", { root, path }),
   thumbnail(root: string, photo: Photo, signal: AbortSignal): Promise<string> {
     return new Promise((resolve, reject) => {
       pending.push(async () => {

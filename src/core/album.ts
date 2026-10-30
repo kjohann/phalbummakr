@@ -1,3 +1,5 @@
+import { validateSlots, type Slot } from "./slots";
+
 export interface PageFormat {
   size: "A4";
   orientation: "landscape";
@@ -9,7 +11,7 @@ export interface PageFormat {
 export interface Page {
   id: string;
   background: "#ffffff";
-  slots: [];
+  slots: Slot[];
 }
 
 export interface Album {
@@ -175,9 +177,10 @@ function validateAlbum(value: unknown): asserts value is Album {
   const ids = new Set<string>();
   for (const page of value.pages) {
     if (!record(page, ["id", "background", "slots"]) || typeof page.id !== "string" || !page.id
-      || ids.has(page.id) || page.background !== "#ffffff" || !Array.isArray(page.slots) || page.slots.length !== 0) {
+      || ids.has(page.id) || page.background !== "#ffffff") {
       throw new Error("Invalid or unsupported Page content.");
     }
+    validateSlots(page.slots);
     ids.add(page.id);
   }
 }

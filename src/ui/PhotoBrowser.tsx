@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Photo, PhotoScan } from "../core";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
+import { writePhotoDrag } from "./photoDrag";
 
 const ROW_HEIGHT = 160;
 const dateFormat = new Intl.DateTimeFormat(undefined, {
@@ -31,9 +32,10 @@ function PhotoThumbnail({ root, photo }: { root: string; photo: Photo }) {
 
   const name = photo.path.split("/").pop()!;
   return (
-    <figure className="photo-tile" title={`${photo.path}\n${photo.width} x ${photo.height} pixels`}>
+    <figure className="photo-tile" title={`${photo.path}\n${photo.width} x ${photo.height} pixels`}
+      draggable onDragStart={(event) => writePhotoDrag(event.dataTransfer, photo)}>
       <div className="photo-preview">
-        {source && <img src={source} alt={name} loading="lazy" decoding="async" />}
+        {source && <img src={source} alt={name} loading="lazy" decoding="async" draggable={false} />}
         {!source && !error && <span className="photo-placeholder">Loading...</span>}
         {error && <span className="photo-failure" role="alert" title={error}>Thumbnail unavailable. Rescan to retry.</span>}
       </div>

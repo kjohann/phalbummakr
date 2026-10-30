@@ -19,7 +19,7 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 003 | [Browse Photos in the Library](003-browse-photos.md)         | 002        | done   |
 | 004 | [Create and open an Album](004-create-album.md)              | 002        | done   |
 | 005 | [Spread view and page operations](005-spreads-and-pages.md)  | 004        | done   |
-| 006 | [Photo Slots and placing Photos](006-photo-slots.md)         | 003, 005   | todo   |
+| 006 | [Photo Slots and placing Photos](006-photo-slots.md)         | 003, 005   | done   |
 | 007 | [Crop and Fit](007-crop-and-fit.md)                          | 006        | todo   |
 | 008 | [Usage badges and duplicate warning](008-usage.md)           | 006        | todo   |
 | 009 | [Text Slots](009-text-slots.md)                              | 005        | todo   |
@@ -32,6 +32,7 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | Addendum | Issue | Status |
 | -------- | ----- | ------ |
 | [004 addendum – Spread layout and Album settings](004-addendum.md) | 004 | done |
+| [004 addendum – Hide the Albums folder](004-addendum.md#section-2--hide-the-albums-folder) | 004 | done |
 
 ## After the MVP
 

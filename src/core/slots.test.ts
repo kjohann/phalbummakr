@@ -1,0 +1,115 @@
+import { expect, it } from "vitest";
+import { createAlbum, deserializeAlbum, serializeAlbum } from "./album";
+import { addPhotoSlot, deleteSlot, moveSlot, placePhoto, resizeSlot } from "./slots";
+
+function slotOf(album: ReturnType<typeof createAlbum>, page = 0) {
+  return album.pages[page].slots[0];
+}
+
+it("deletes a Slot and its Placement, leaving the other Slots", () => {
+  const album = addPhotoSlot(addPhotoSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1"), "page-1");
+  const deleted = deleteSlot(album, "page-1", "slot-1");
+  expect(deleted.pages[0].slots.map((slot) => slot.id)).toEqual(["slot-2"]);
+  expect(album.pages[0].slots).toHaveLength(2);
+  expect(() => deleteSlot(deleted, "page-1", "slot-1")).toThrow(/slot/i);
+  expect(addPhotoSlot(deleted, "page-1").pages[0].slots.map((slot) => slot.id)).toEqual(["slot-2", "slot-1"]);
+});
+
+it("resizes a Slot from its bottom-right corner, keeping a minimum size and stopping at the Bleed edge", () => {
+  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 1, bleedMm: 21 }), "page-1");
+  expect(slotOf(resizeSlot(album, "page-1", "slot-1", 0.5, 0.25))).toMatchObject({ x: 0.3, y: 0.3, width: 0.5, height: 0.25 });
+  const huge = slotOf(resizeSlot(album, "page-1", "slot-1", 10, 10));
+  expect(huge.width).toBeCloseTo(0.7707, 4);
+  expect(huge.height).toBeCloseTo(0.8, 6);
+  expect(slotOf(resizeSlot(album, "page-1", "slot-1", 0, -1))).toMatchObject({ width: 0.02, height: 0.02 });
+  expect(() => resizeSlot(album, "page-1", "slot-1", 0.5, Infinity)).toThrow(/size/i);
+});
+
+it("places a Photo with a centred Crop that fills the Slot, for landscape, portrait and rotated Photos", () => {
+  // A 0.4 x 0.4 Slot on A4 landscape is 118.8 x 84 mm (aspect 1.4143).
+  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1");
+  const landscape = { path: "2024/Christmas/tree.jpg", width: 6000, height: 4000, orientation: 1 };
+  const placed = slotOf(placePhoto(album, "page-1", "slot-1", landscape)).placement!;
+  expect(placed.photoPath).toBe("2024/Christmas/tree.jpg");
+  expect(placed.crop.x).toBeCloseTo(0.028571, 5);
+  expect(placed.crop.y).toBe(0);
+  expect(placed.crop.width).toBeCloseTo(0.942857, 5);
+  expect(placed.crop.height).toBe(1);
+
+  const portrait = slotOf(placePhoto(album, "page-1", "slot-1", { ...landscape, width: 4000, height: 6000 })).placement!.crop;
+  expect(portrait.x).toBe(0);
+  expect(portrait.y).toBeCloseTo(0.264310, 5);
+  expect(portrait.width).toBe(1);
+  expect(portrait.height).toBeCloseTo(0.471380, 5);
+  // EXIF orientation 6 stores a portrait Photo as landscape pixels.
+  expect(slotOf(placePhoto(album, "page-1", "slot-1", { ...landscape, orientation: 6 })).placement!.crop).toEqual(portrait);
+
+  // A 0.2 x 0.6 Slot is 59.4 x 126 mm (aspect 0.4714).
+  const tall = resizeSlot(album, "page-1", "slot-1", 0.2, 0.6);
+  const tallCrop = slotOf(placePhoto(tall, "page-1", "slot-1", landscape)).placement!.crop;
+  expect(tallCrop.x).toBeCloseTo(0.342857, 5);
+  expect(tallCrop.width).toBeCloseTo(0.314286, 5);
+  expect(tallCrop.height).toBe(1);
+});
+
+it("replaces the Photo in an occupied Slot and round trips Placements through JSON", () => {
+  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1");
+  const photo = { path: "a.jpg", width: 3000, height: 2000, orientation: 1 };
+  const replaced = placePhoto(placePhoto(album, "page-1", "slot-1", photo), "page-1", "slot-1", { ...photo, path: "b/c.png" });
+  expect(replaced.pages[0].slots).toHaveLength(1);
+  expect(slotOf(replaced).placement!.photoPath).toBe("b/c.png");
+  expect(slotOf(album).placement).toBeNull();
+  expect(deserializeAlbum(serializeAlbum(replaced))).toEqual(replaced);
+  for (const path of ["", "/abs.jpg", "C:/abs.jpg", "a\\b.jpg", "../out.jpg", "a/../../b.jpg"]) {
+    expect(() => placePhoto(album, "page-1", "slot-1", { ...photo, path })).toThrow(/path/i);
+  }
+  expect(() => placePhoto(album, "page-1", "slot-1", { ...photo, width: 0 })).toThrow(/size/i);
+  const json = JSON.parse(serializeAlbum(replaced));
+  for (const crop of [{ x: -0.1, y: 0, width: 1, height: 1 }, { x: 0.5, y: 0, width: 0.6, height: 1 }, { x: 0, y: 0, width: 0, height: 1 }]) {
+    json.pages[0].slots[0].placement.crop = crop;
+    expect(() => deserializeAlbum(JSON.stringify(json))).toThrow(/placement/i);
+  }
+  json.pages[0].slots[0].placement = { photoPath: "../x.jpg", crop: { x: 0, y: 0, width: 1, height: 1 } };
+  expect(() => deserializeAlbum(JSON.stringify(json))).toThrow(/placement/i);
+});
+
+it("keeps a placed Photo filling its Slot, around the same centre, when the Slot is resized", () => {
+  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1");
+  const placed = placePhoto(album, "page-1", "slot-1", { path: "a.jpg", width: 6000, height: 4000, orientation: 1 });
+  const moved = moveSlot(placed, "page-1", "slot-1", 0.1, 0.1);
+  expect(slotOf(moved).placement).toEqual(slotOf(placed).placement);
+  const crop = slotOf(resizeSlot(placed, "page-1", "slot-1", 0.2, 0.6)).placement!.crop;
+  expect(crop.x).toBeCloseTo(0.342857, 5);
+  expect(crop.width).toBeCloseTo(0.314286, 5);
+  expect(crop.y).toBeCloseTo(0, 9);
+  expect(crop.height).toBeCloseTo(1, 9);
+});
+
+it("moves a Slot freely within the Page and into the Bleed, but never past the Bleed edge", () => {
+  // 21 mm Bleed on 297 x 210 mm is 0.0707 of the width and 0.1 of the height.
+  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 1, bleedMm: 21 }), "page-1");
+  expect(slotOf(moveSlot(album, "page-1", "slot-1", 0.1, 0.55))).toMatchObject({ x: 0.1, y: 0.55, width: 0.4, height: 0.4 });
+  const pastTopLeft = slotOf(moveSlot(album, "page-1", "slot-1", -1, -1));
+  expect(pastTopLeft.x).toBeCloseTo(-0.0707, 4);
+  expect(pastTopLeft.y).toBeCloseTo(-0.1, 6);
+  const pastBottomRight = slotOf(moveSlot(album, "page-1", "slot-1", 5, 5));
+  expect(pastBottomRight.x).toBeCloseTo(0.6707, 4);
+  expect(pastBottomRight.y).toBeCloseTo(0.7, 6);
+  expect(pastBottomRight.width).toBe(0.4);
+  expect(slotOf(album).x).toBe(0.3);
+  expect(() => moveSlot(album, "page-1", "missing", 0, 0)).toThrow(/slot/i);
+  expect(() => moveSlot(album, "page-1", "slot-1", NaN, 0)).toThrow(/position/i);
+});
+
+it("adds an empty Photo Slot to a Page, stored as fractions of the Page, without changing other Pages", () => {
+  const album = createAlbum({ name: "Test", pageCount: 2 });
+  const added = addPhotoSlot(addPhotoSlot(album, "page-2"), "page-2");
+  expect(added.pages[1].slots).toEqual([
+    { id: "slot-1", type: "photo", x: 0.3, y: 0.3, width: 0.4, height: 0.4, placement: null },
+    { id: "slot-2", type: "photo", x: 0.3, y: 0.3, width: 0.4, height: 0.4, placement: null },
+  ]);
+  expect(added.pages[0].slots).toEqual([]);
+  expect(album.pages[1].slots).toEqual([]);
+  expect(deserializeAlbum(serializeAlbum(added))).toEqual(added);
+  expect(() => addPhotoSlot(album, "missing")).toThrow(/page/i);
+});

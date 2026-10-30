@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { createAlbum, deserializeAlbum, serializeAlbum, type Album, type AlbumPorts } from "../core";
+import { createAlbum, deserializeAlbum, serializeAlbum, type Album, type AlbumPorts, type PhotoPreviewPorts } from "../core";
 import AlbumView from "./AlbumView";
 import { tauriAlbumPorts } from "./tauriAlbumPorts";
+import { tauriPhotoPorts } from "./tauriPhotoPorts";
 
 interface Props {
   root: string;
   ports?: AlbumPorts;
+  photoPorts?: PhotoPreviewPorts;
   onBusyChange?: (busy: boolean) => void;
 }
 
-export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, onBusyChange }: Props) {
+export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, onBusyChange }: Props) {
   const [names, setNames] = useState<string[]>([]);
   const [current, setCurrent] = useState<{ filename: string; album: Album } | null>(null);
   const [creating, setCreating] = useState(false);
@@ -215,6 +217,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, onBusyCh
             <span role="status">{saveStatus === "saved" ? "Saved" : saveStatus === "error" ? "Not saved" : "Saving..."}</span>
           </div>
           <AlbumView key={current.filename} album={current.album} onChange={changeAlbum}
+            root={root} photoPorts={photoPorts}
             disabled={busy || saveStatus === "saving" || saveStatus === "error"} />
         </>
       ) : <p className="photo-empty">Open an Album or create a new one.</p>}
