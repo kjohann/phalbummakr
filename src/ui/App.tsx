@@ -1,7 +1,8 @@
-import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useState } from "react";
+import { invoke, isTauri } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useEffect, useRef, useState } from "react";
 import { libraryName, openLibrary, restoreLastLibrary, type Library } from "../core";
-import AlbumView from "./AlbumView";
+import AlbumWorkspace from "./AlbumWorkspace";
 import PhotoBrowser from "./PhotoBrowser";
 import { tauriLibraryPorts } from "./tauriLibraryPorts";
 
@@ -16,7 +17,34 @@ export default function App() {
   const [bridgeState, setBridgeState] = useState<BridgeState>("connecting");
   const [libraryState, setLibraryState] = useState<LibraryState>({ status: "restoring" });
   const [opening, setOpening] = useState(false);
+  const [albumBusy, setAlbumBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const albumBusyRef = useRef(false);
+
+  useEffect(() => {
+    albumBusyRef.current = albumBusy;
+  }, [albumBusy]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    getCurrentWindow().onCloseRequested((event) => {
+      if (albumBusyRef.current) {
+        event.preventDefault();
+        setError("Please wait for the Album operation to finish, or retry its failed save, before closing.");
+      }
+    }).then((stop) => {
+      if (active) unlisten = stop;
+      else stop();
+    }).catch((cause: unknown) => {
+      if (active) setError(`Could not protect unsaved Albums on close: ${String(cause)}`);
+    });
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -73,7 +101,7 @@ export default function App() {
         </div>
         <div className="topbar-actions">
           {libraryState.status === "open" && (
-            <button type="button" className="button-quiet" onClick={handleOpenLibrary} disabled={opening}>
+            <button type="button" className="button-quiet" onClick={handleOpenLibrary} disabled={opening || albumBusy}>
               Open another Library…
             </button>
           )}
@@ -93,7 +121,7 @@ export default function App() {
       {libraryState.status === "open" && (
         <div className="library-workspace" key={libraryState.library.root}>
           <PhotoBrowser root={libraryState.library.root} />
-          <AlbumView />
+          <AlbumWorkspace root={libraryState.library.root} onBusyChange={setAlbumBusy} />
         </div>
       )}
       {libraryState.status === "closed" && (

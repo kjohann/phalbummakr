@@ -297,6 +297,82 @@ body {
   flex: 1;
 }
 
+.album-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.album-toolbar h1,
+.album-toolbar h2 {
+  margin: 0;
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+
+.album-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 120px;
+  overflow: auto;
+  margin: 12px 0;
+  flex-shrink: 0;
+}
+
+.album-list button {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.album-list [aria-current="page"] {
+  background: #d9e0d6;
+}
+
+.album-form {
+  display: grid;
+  gap: 14px;
+  width: min(100%, 440px);
+  overflow: auto;
+  padding: 4px 4px 20px;
+}
+
+.album-form h2 {
+  margin: 0;
+}
+
+.album-form label {
+  display: grid;
+  gap: 5px;
+  font-size: 13px;
+}
+
+.album-form input,
+.album-form select,
+.album-editor select {
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid #b9c3b9;
+  border-radius: 4px;
+  background: #f7f8f4;
+  color: #242a27;
+  font: inherit;
+}
+
+.album-details {
+  color: #6f7771;
+  font-size: 12px;
+}
+
+.album-editor {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
 .canvas-viewport canvas {
   display: block;
 }

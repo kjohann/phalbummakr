@@ -1,3 +1,4 @@
+mod albums;
 mod library;
 mod photos;
 mod settings;
@@ -81,8 +82,37 @@ pub fn run() {
             recall_library,
             remember_library,
             scan_photos,
-            photo_thumbnail
+            photo_thumbnail,
+            list_albums,
+            read_album,
+            write_album
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[tauri::command]
+async fn list_albums(root: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || albums::list(Path::new(&root)))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn read_album(root: String, name: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || albums::read(Path::new(&root), &name))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn write_album(root: String, name: String, json: String, create: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        albums::write(Path::new(&root), &name, &json, create)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())
 }

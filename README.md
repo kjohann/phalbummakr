@@ -36,6 +36,28 @@ exists; otherwise, it returns to the nearest available ancestor and shows a noti
 Opening a folder resets the grid to the top. Folders and Photos are referenced
 where they live on disk; browsing never moves or copies originals.
 
+## Albums
+
+Use **New Album** to choose a name, Page Format and print settings. Initially the
+only Page Format is **A4 landscape (297 x 210 mm)**; width and height are not
+entered manually. Defaults are 24 empty white Pages, Page 1 on the right, 3 mm
+Bleed, 5 mm Safe Zone and 300 DPI. Page counts from 1 to 10,000 are supported.
+Names must be valid Windows filenames (up to 100 characters).
+
+Albums live in `Albums/<name>.album.json` under the Library, with a versioned JSON
+model owned by the TypeScript domain core. Use the Album list to open an existing
+Album, **Refresh Albums** to pick up disk changes, and the Page selector to browse
+its Pages. Unsupported schema versions or content are rejected rather than
+silently discarded. Creating an Album never overwrites an existing file.
+
+Changing **Page 1 side** autosaves after 500 ms without another change. Album and
+Library switching are blocked until saving finishes; save failures keep the
+changes in memory and offer **Retry save**. Closing the desktop window is also
+blocked during an Album operation or while changes remain unsaved. Each write
+uses a unique temporary file in `Albums/`, flushes it, then atomically replaces
+the destination. This keeps the previous file intact if replacement fails.
+Pages cannot yet be rearranged or filled; those are subsequent issues.
+
 ## Test and build
 
 - `npm test` runs Vitest for the pure TypeScript domain core and React UI (with a mocked desktop bridge).
