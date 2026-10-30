@@ -1,6 +1,6 @@
 # 004 – Create and open an Album
 
-Status: done · Depends on: 002
+Status: done · Depends on: 002 · Addendum: [004-addendum](004-addendum.md)
 
 ## What
 

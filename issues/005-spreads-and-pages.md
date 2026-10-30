@@ -13,13 +13,11 @@ Show the Album as a strip of Spreads and let the user manage Pages. The selected
 - [x] The editor canvas renders the selected Page at the Page Format's aspect ratio, with guides for the trim edge, the Bleed and the Safe Zone.
 - [x] Page operations are domain-core functions with unit tests.
 
-## Additional requirements
+## Related addendum
 
-- The Spread strip is below the spread editor.
-- Page 1 uses the same two-facing-Page layout, with a non-editable **Inside cover**
-  opposite it, regardless of starting side. Remaining Pages pair in order;
-  an unmatched final side is marked **No Page**.
-- Starting side is behind **Album settings**, alongside Bleed, Safe Zone and DPI.
+Feedback on 004 was implemented alongside this issue; see
+[004 addendum](004-addendum.md) for its acceptance criteria. It covers the strip
+below the editor, Page 1's Spread with an Inside cover, and the Album settings menu.
 
 ## Implementation and verification
 

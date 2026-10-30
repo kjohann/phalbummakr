@@ -31,6 +31,7 @@ Each issue is a thin vertical slice that leaves the app runnable.
 
 | Addendum | Issue | Status |
 | -------- | ----- | ------ |
+| [004 addendum – Spread layout and Album settings](004-addendum.md) | 004 | done |
 
 ## After the MVP
 
