@@ -1,6 +1,6 @@
 # 006 – Photo Slots and placing Photos
 
-Status: done · Depends on: 003, 005
+Status: done · Depends on: 003, 005 · Addendum: [006-addendum](006-addendum.md)
 
 ## What
 
