@@ -1,6 +1,6 @@
 # 008 – Usage badges and duplicate warning
 
-Status: done · Depends on: 006
+Status: done · Depends on: 006 · Addendum: [008-addendum](008-addendum.md)
 
 ## What
 
@@ -59,4 +59,5 @@ are coordinated so they do not discard later Placement changes.
   Placement resolving to the same file while its Usage badge, unused filter and
   duplicate warning use the old path casing. Resolve identity using filesystem
   semantics without conflating distinct files on case-sensitive volumes. This
-  broader change was deferred during the 007/008 merge.
+  broader change was deferred during the 007/008 merge and is tracked in the
+  [008 addendum](008-addendum.md).
