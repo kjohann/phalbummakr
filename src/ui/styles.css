@@ -639,6 +639,10 @@ body {
   border: 2px solid #415d50;
 }
 
+.slot-overlay--crop-mode {
+  cursor: grab;
+}
+
 .slot-overlay--dragging:not(.slot-overlay--drop-target) {
   border-color: #82978c;
   background: rgb(86 130 157 / 6%);

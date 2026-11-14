@@ -1,6 +1,9 @@
 import { expect, it } from "vitest";
 import { createAlbum, deserializeAlbum, serializeAlbum } from "./album";
-import { addPhotoSlot, deleteSlot, moveSlot, placePhoto, placePhotoOnPage, resizeSlot } from "./slots";
+import {
+  addPhotoSlot, deleteSlot, fitPhotoRect, moveSlot, panCrop, placePhoto, placePhotoOnPage,
+  placementDisplayCrop, resizeSlot, zoomCrop,
+} from "./slots";
 
 function slotOf(album: ReturnType<typeof createAlbum>, page = 0) {
   return album.pages[page].slots[0];
@@ -50,6 +53,34 @@ it("places a Photo with a centred Crop that fills the Slot, for landscape, portr
   expect(tallCrop.x).toBeCloseTo(0.342857, 5);
   expect(tallCrop.width).toBeCloseTo(0.314286, 5);
   expect(tallCrop.height).toBe(1);
+});
+
+it("keeps Crop panning and zooming within the Photo, and fits all four Photo and Slot aspect combinations", () => {
+  const crop = { x: 0.2, y: 0, width: 0.6, height: 1 };
+  expect(panCrop(crop, 0.5, -0.5)).toEqual({ ...crop, x: 0.4, y: 0 });
+  expect(zoomCrop(crop, 0.5)).toEqual(crop);
+  const zoomed = zoomCrop(crop, 2);
+  expect(zoomed.width).toBeCloseTo(0.3, 9);
+  expect(zoomed.height).toBeCloseTo(0.5, 9);
+  expect(zoomed.x + zoomed.width / 2).toBeCloseTo(0.5, 9);
+  expect(zoomed.y + zoomed.height / 2).toBeCloseTo(0.5, 9);
+  expect(() => zoomCrop(crop, 0)).toThrow(/zoom/i);
+
+  const slotAspects = [297 * 0.4 / (210 * 0.4), 297 * 0.2 / (210 * 0.6)];
+  const photoAspects = [1.5, 2 / 3];
+  for (const photoAspect of photoAspects) {
+    for (const targetAspect of slotAspects) {
+      const rect = fitPhotoRect(photoAspect, targetAspect);
+      expect(rect.x).toBeCloseTo((1 - rect.width) / 2, 9);
+      expect(rect.y).toBeCloseTo((1 - rect.height) / 2, 9);
+      expect(rect.width / rect.height).toBeCloseTo(photoAspect / targetAspect, 9);
+      expect(rect.width).toBeLessThanOrEqual(1);
+      expect(rect.height).toBeLessThanOrEqual(1);
+      expect(placementDisplayCrop({ photoPath: "a.jpg", crop, fit: true })).toEqual({
+        x: 0, y: 0, width: 1, height: 1,
+      });
+    }
+  }
 });
 
 it("replaces the Photo in an occupied Slot and round trips Placements through JSON", () => {

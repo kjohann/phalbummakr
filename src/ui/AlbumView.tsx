@@ -2,7 +2,8 @@ import { Fragment, useCallback, useEffect, useRef, useState, type MouseEvent as 
 import { Image as KonvaImage, Layer, Rect, Stage } from "react-konva";
 import {
   addPage, addPhotoSlot, albumSpreads, deletePage, deleteSlot, duplicatePage, movePage, moveSlot, pageDimensions,
-  placePhoto, placePhotoOnPage, resizeSlot, type Album, type Crop, type PhotoPreviewPorts, type Slot,
+  fitPhotoRect, panCrop, placePhoto, placePhotoOnPage, placementDisplayCrop, resizeSlot, setPlacementCrop,
+  setPlacementFit, zoomCrop, type Album, type Crop, type PhotoPreviewPorts, type Slot,
 } from "../core";
 import { hasPhotoDrag, readPhotoDrag } from "./photoDrag";
 
@@ -36,10 +37,14 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, root,
   const stripRef = useRef<HTMLElement>(null);
   const draggedId = useRef<string | null>(null);
   const stopSlotDrag = useRef<(() => void) | null>(null);
+  const cropZoomTimer = useRef<number | null>(null);
+  const cropPreviewRef = useRef<{ pageId: string; slotId: string; crop: Crop } | null>(null);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const [selectedId, setSelectedId] = useState(savedAlbum.pages[0].id);
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
   const [slotDrag, setSlotDrag] = useState<SlotDrag | null>(null);
+  const [cropPreview, setCropPreview] = useState<{ pageId: string; slotId: string; crop: Crop } | null>(null);
+  const [cropMode, setCropMode] = useState(false);
   const [photoDragActive, setPhotoDragActive] = useState(false);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [thumbnailBySlot, setThumbnailBySlot] = useState<Record<string, string>>({});
@@ -59,7 +64,9 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, root,
 
   const trimWidth = dimensions.widthMm * scale;
   const trimHeight = dimensions.heightMm * scale;
-  const album = slotDrag && scale > 0 ? applySlotDrag(savedAlbum, slotDrag, trimWidth, trimHeight) : savedAlbum;
+  const album = cropPreview
+    ? setPlacementCrop(savedAlbum, cropPreview.pageId, cropPreview.slotId, cropPreview.crop)
+    : slotDrag && scale > 0 ? applySlotDrag(savedAlbum, slotDrag, trimWidth, trimHeight) : savedAlbum;
   const visiblePageIndex = Math.max(0, album.pages.findIndex((page) => page.id === selectedId));
   const selectedPage = album.pages[visiblePageIndex];
   const spreads = albumSpreads(album);
@@ -94,6 +101,22 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, root,
   }
 
   useEffect(() => () => stopSlotDrag.current?.(), []);
+
+  function updateCropPreview(next: { pageId: string; slotId: string; crop: Crop } | null) {
+    cropPreviewRef.current = next;
+    setCropPreview(next);
+  }
+
+  function commitCropPreview() {
+    if (cropZoomTimer.current !== null) {
+      window.clearTimeout(cropZoomTimer.current);
+      cropZoomTimer.current = null;
+    }
+    const pending = cropPreviewRef.current;
+    if (!pending) return;
+    updateCropPreview(null);
+    onChange((current) => setPlacementCrop(current, pending.pageId, pending.slotId, pending.crop));
+  }
 
   useEffect(() => {
     const startPhotoDrag = (event: DragEvent) => {
@@ -169,6 +192,37 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, root,
     if (disabled) return;
     event.preventDefault();
     stopSlotDrag.current?.();
+    const slot = album.pages.find((page) => page.id === pageId)?.slots.find((item) => item.id === slotId);
+    if (cropMode && kind === "move" && slot?.placement && !slot.placement.fit) {
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const baseCrop = slot.placement.crop;
+      const rect = event.currentTarget.getBoundingClientRect();
+      let nextCrop = baseCrop;
+      const move = (moved: MouseEvent) => {
+        nextCrop = panCrop(baseCrop,
+          -(moved.clientX - startX) / rect.width * baseCrop.width,
+          -(moved.clientY - startY) / rect.height * baseCrop.height);
+        updateCropPreview({ pageId, slotId, crop: nextCrop });
+      };
+      const up = (released: MouseEvent) => {
+        move(released);
+        stop();
+        if (nextCrop.x !== baseCrop.x || nextCrop.y !== baseCrop.y) {
+          updateCropPreview(null);
+          onChange((current) => setPlacementCrop(current, pageId, slotId, nextCrop));
+        }
+      };
+      const stop = () => {
+        window.removeEventListener("mousemove", move);
+        window.removeEventListener("mouseup", up);
+        stopSlotDrag.current = null;
+      };
+      window.addEventListener("mousemove", move);
+      window.addEventListener("mouseup", up);
+      stopSlotDrag.current = stop;
+      return;
+    }
     const startX = event.clientX;
     const startY = event.clientY;
     const offset = (moved: MouseEvent): SlotDrag => ({
@@ -189,6 +243,29 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, root,
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", up);
     stopSlotDrag.current = stop;
+  }
+
+  function zoomPlacement(event: React.WheelEvent, pageId: string, slotId: string) {
+    const slot = album.pages.find((page) => page.id === pageId)?.slots.find((item) => item.id === slotId);
+    const deltaY = event.nativeEvent.deltaY;
+    if (disabled || !slot?.placement || slot.placement.fit || deltaY === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const previous = cropPreviewRef.current?.pageId === pageId && cropPreviewRef.current.slotId === slotId
+      ? cropPreviewRef.current.crop : slot.placement.crop;
+    const crop = zoomCrop(previous, Math.exp(-deltaY * 0.002));
+    updateCropPreview({ pageId, slotId, crop });
+    if (cropZoomTimer.current !== null) window.clearTimeout(cropZoomTimer.current);
+    cropZoomTimer.current = window.setTimeout(commitCropPreview, 220);
+  }
+
+  function zoomPlacementBy(pageId: string, slotId: string, factor: number) {
+    onChange((current) => {
+      const placement = current.pages.find((page) => page.id === pageId)?.slots.find((slot) => slot.id === slotId)?.placement;
+      return placement && !placement.fit
+        ? setPlacementCrop(current, pageId, slotId, zoomCrop(placement.crop, factor))
+        : current;
+    });
   }
 
   function removeSlot(pageId: string, slotId: string) {
@@ -232,6 +309,28 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, root,
         }}>Add Photo Slot</button>
         <button type="button" className="button-quiet" disabled={disabled || !selectedSlot}
           onClick={() => selectedSlot && removeSlot(selectedPage.id, selectedSlot.id)}>Delete Slot</button>
+        {selectedSlot?.placement && (
+          <>
+            <span className="toolbar-divider" aria-hidden="true" />
+            <label className="workspace-label">
+              <input type="checkbox" aria-label="Fit Photo" disabled={disabled}
+                checked={selectedSlot.placement.fit} onChange={(event) => {
+                  setCropMode(false);
+                  onChange((current) => setPlacementFit(current, selectedPage.id, selectedSlot.id, event.target.checked));
+                }} /> Fit
+            </label>
+            <label className="workspace-label" title="Drag the Photo to pan; use the mouse wheel to zoom.">
+              <input type="checkbox" aria-label="Crop photo" disabled={disabled || selectedSlot.placement.fit}
+                checked={cropMode} onChange={(event) => setCropMode(event.target.checked)} /> Crop photo
+            </label>
+            <button type="button" className="button-quiet" aria-label="Zoom out" title="Zoom out"
+              disabled={disabled || selectedSlot.placement.fit}
+              onClick={() => zoomPlacementBy(selectedPage.id, selectedSlot.id, 1 / 1.2)}>Zoom out</button>
+            <button type="button" className="button-quiet" aria-label="Zoom in" title="Zoom in"
+              disabled={disabled || selectedSlot.placement.fit}
+              onClick={() => zoomPlacementBy(selectedPage.id, selectedSlot.id, 1.2)}>Zoom in</button>
+          </>
+        )}
       </div>
       <div className="canvas-viewport" ref={viewportRef} role="group" aria-label="Spread editor">
         {viewport.width > 0 && viewport.height > 0 && (
@@ -245,7 +344,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, root,
                     const rect = slotRect(slot, originX + side * (pageWidth + gap) + bleedMm * scale);
                     const slotId = `${page.id}:${slot.id}`;
                     return slot.placement ? (
-                      <PlacementImage key={slotId} {...rect} crop={slot.placement.crop}
+                      <PlacementImage key={slotId} {...rect} crop={placementDisplayCrop(slot.placement)} fit={slot.placement.fit}
                         root={root} path={slot.placement.photoPath} photoPorts={photoPorts}
                         thumbnail={thumbnailBySlot[slotId]} attempt={previewStates[slotId]?.path === slot.placement.photoPath
                           ? previewStates[slotId].attempt : 0}
@@ -308,11 +407,12 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, root,
           const previewStatus = previewState?.status ?? "loading";
           return (
             <Fragment key={targetId}>
-            <div className={`slot-overlay${photoDragActive ? " slot-overlay--dragging" : ""}${dropTargetId === targetId ? " slot-overlay--drop-target" : ""}`} role="button" tabIndex={0}
+            <div className={`slot-overlay${photoDragActive ? " slot-overlay--dragging" : ""}${dropTargetId === targetId ? " slot-overlay--drop-target" : ""}${cropMode && slot.placement && !slot.placement.fit ? " slot-overlay--crop-mode" : ""}`} role="button" tabIndex={0}
               aria-label={name} aria-pressed={page.id === selectedPage.id && slot.id === selectedSlot?.id}
               title={slot.placement?.photoPath ?? "Drag a Photo here"}
               style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
               onMouseDown={(event) => startSlotDrag(event, page.id, slot.id, "move")}
+              onWheelCapture={(event) => zoomPlacement(event, page.id, slot.id)}
               onClick={(event) => {
                 event.stopPropagation();
                 selectSlot(page.id, slot.id);
@@ -451,8 +551,8 @@ function LayerPage({ x, y, width, height, bleed, safeZone, children }: {
 }
 
 /** Draws a Placement from its cached preview; originals are only used by Page Export. */
-function PlacementImage({ x, y, width, height, crop, root, path, photoPorts, thumbnail, attempt, slotId, onStatus }: {
-  x: number; y: number; width: number; height: number; crop: Crop;
+function PlacementImage({ x, y, width, height, crop, fit, root, path, photoPorts, thumbnail, attempt, slotId, onStatus }: {
+  x: number; y: number; width: number; height: number; crop: Crop; fit: boolean;
   root: string; path: string; photoPorts: PhotoPreviewPorts;
   thumbnail?: string; attempt: number; slotId: string;
   onStatus: (slotId: string, path: string, status: "loading" | "ready" | "error") => void;
@@ -503,12 +603,21 @@ function PlacementImage({ x, y, width, height, crop, root, path, photoPorts, thu
   if (!visibleImage) {
     return <Rect x={x} y={y} width={width} height={height} fill={image === null ? "#efe1da" : "#eef0ec"} />;
   }
+  const fitBounds = fit ? fitPhotoRect(visibleImage.naturalWidth / visibleImage.naturalHeight, width / height) : null;
+  const imageX = fitBounds ? x + fitBounds.x * width : x;
+  const imageY = fitBounds ? y + fitBounds.y * height : y;
+  const imageWidth = fitBounds ? fitBounds.width * width : width;
+  const imageHeight = fitBounds ? fitBounds.height * height : height;
   return (
-    <KonvaImage image={visibleImage} x={x} y={y} width={width} height={height} opacity={image ? 1 : 0.45} crop={{
-      x: crop.x * visibleImage.naturalWidth,
-      y: crop.y * visibleImage.naturalHeight,
-      width: crop.width * visibleImage.naturalWidth,
-      height: crop.height * visibleImage.naturalHeight,
-    }} />
+    <>
+      {fit && <Rect x={x} y={y} width={width} height={height} fill="#ffffff" />}
+      <KonvaImage image={visibleImage} x={imageX} y={imageY} width={imageWidth} height={imageHeight}
+        opacity={image ? 1 : 0.45} crop={{
+          x: crop.x * visibleImage.naturalWidth,
+          y: crop.y * visibleImage.naturalHeight,
+          width: crop.width * visibleImage.naturalWidth,
+          height: crop.height * visibleImage.naturalHeight,
+        }} />
+    </>
   );
 }

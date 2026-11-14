@@ -79,7 +79,7 @@ it("keeps starting side and print settings in Album settings, validates them, an
   fireEvent.change(screen.getByLabelText("Safe Zone (mm)"), { target: { value: "7" } });
   fireEvent.change(screen.getByLabelText("Export resolution (DPI)"), { target: { value: "600" } });
   fireEvent.submit(screen.getByRole("form", { name: "Album settings" }));
-  await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Saved"));
+  await waitFor(() => expect(screen.getByText("Saved").textContent).toBe("Saved"));
   fireEvent.click(screen.getByRole("button", { name: "Open Album Existing" }));
   await waitFor(() => expect(screen.queryByLabelText("Bleed (mm)")).toBeNull());
   fireEvent.click(screen.getByRole("button", { name: "Album settings" }));
@@ -480,4 +480,44 @@ it("places a dropped Photo in a Photo Slot, replaces it on a second drop, and dr
   const [replaced] = deserializeAlbum(files.get("Existing")!).pages[0].slots;
   expect(replaced.placement!.photoPath).toBe("snow.png");
   expect(screen.getAllByRole("img", { name: "Placement" })).toHaveLength(1);
+});
+
+it("keeps Crop local during a pan gesture, commits at release, and persists Fit", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  await screen.findByRole("heading", { name: "Existing" });
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  fireEvent.drop(slot, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
+  await waitFor(() => expect(screen.getByText("Saved").textContent).toBe("Saved"));
+  const original = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop;
+
+  vi.useFakeTimers();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Crop photo" }));
+  vi.spyOn(slot, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 100, 200, 100));
+  const writesBeforePan = ports.write.mock.calls.length;
+  fireEvent.mouseDown(slot, { button: 0, clientX: 100, clientY: 100 });
+  fireEvent.mouseMove(window, { clientX: 80, clientY: 100 });
+  expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop).toEqual(original);
+  fireEvent.mouseUp(window, { clientX: 80, clientY: 100 });
+  expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop).toEqual(original);
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  const panned = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop;
+  expect(panned.x).toBeGreaterThan(original.x);
+  expect(ports.write).toHaveBeenCalledTimes(writesBeforePan + 1);
+
+  expect((screen.getByRole("checkbox", { name: "Crop photo" }) as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByRole("checkbox", { name: "Crop photo" }) as HTMLInputElement).disabled).toBe(false);
+  const writesBeforeZoom = ports.write.mock.calls.length;
+  fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  const zoomed = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop;
+  expect(zoomed.width).toBeLessThan(panned.width);
+  expect(ports.write).toHaveBeenCalledTimes(writesBeforeZoom + 1);
+
+  fireEvent.click(screen.getByRole("checkbox", { name: "Fit Photo" }));
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.fit).toBe(true);
+  expect((screen.getByRole("checkbox", { name: "Crop photo" }) as HTMLInputElement).disabled).toBe(true);
 });
