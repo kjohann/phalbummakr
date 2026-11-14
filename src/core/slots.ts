@@ -1,17 +1,20 @@
 import { pageDimensions, type Album, type Page } from "./album";
 
-export interface Crop {
-  /** Fractions of the upright Photo. */
+export interface Rectangle {
   x: number;
   y: number;
   width: number;
   height: number;
 }
 
+/** Fractions of the upright Photo. */
+export type Crop = Rectangle;
+
 export interface Placement {
   /** Relative to the Library root, with forward slashes. */
   photoPath: string;
   crop: Crop;
+  fit: boolean;
 }
 
 export interface PhotoSlot {
@@ -104,12 +107,24 @@ export function resizeSlot(album: Album, pageId: string, slotId: string, width: 
     if (!slot.placement) return resized;
     const { crop } = slot.placement;
     // The Crop has the old Slot's printed aspect, so it also records the Photo's upright aspect.
-    const photoAspect = slotAspect(album, slot) * crop.height / crop.width;
+    const previousAspect = slotAspect(album, slot);
+    const photoAspect = previousAspect * crop.height / crop.width;
+    const previousCover = centredCrop(photoAspect, previousAspect);
+    const nextCover = centredCrop(photoAspect, slotAspect(album, resized));
+    // Keep the zoom relative to cover and the Crop centre where the Photo edges allow it.
+    const zoomScale = Math.min(1, crop.width / previousCover.width);
+    const cropWidth = nextCover.width * zoomScale;
+    const cropHeight = nextCover.height * zoomScale;
     return {
       ...resized,
       placement: {
         ...slot.placement,
-        crop: centredCrop(photoAspect, slotAspect(album, resized), crop.x + crop.width / 2, crop.y + crop.height / 2),
+        crop: {
+          x: clamp(crop.x + crop.width / 2 - cropWidth / 2, 0, 1 - cropWidth),
+          y: clamp(crop.y + crop.height / 2 - cropHeight / 2, 0, 1 - cropHeight),
+          width: cropWidth,
+          height: cropHeight,
+        },
       },
     };
   });
@@ -157,8 +172,61 @@ export function placePhoto(album: Album, pageId: string, slotId: string, photo: 
   const upright = uprightPhotoAspect(photo);
   return editSlot(album, pageId, slotId, (slot) => ({
     ...slot,
-    placement: { photoPath: photo.path, crop: centredCrop(upright, slotAspect(album, slot)) },
+    placement: { photoPath: photo.path, crop: centredCrop(upright, slotAspect(album, slot)), fit: false },
   }));
+}
+
+export function setPlacementFit(album: Album, pageId: string, slotId: string, fit: boolean): Album {
+  return editSlot(album, pageId, slotId, (slot) => slot.placement
+    ? { ...slot, placement: { ...slot.placement, fit } }
+    : slot);
+}
+
+export function setPlacementCrop(album: Album, pageId: string, slotId: string, crop: Crop): Album {
+  return editSlot(album, pageId, slotId, (slot) => slot.placement
+    ? { ...slot, placement: { ...slot.placement, crop } }
+    : slot);
+}
+
+/** Moves a Crop window by fractions of the upright Photo, keeping it inside the Photo. */
+export function panCrop(crop: Crop, deltaX: number, deltaY: number): Crop {
+  if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY)) throw new Error("Crop movement must be finite.");
+  return {
+    ...crop,
+    x: clamp(crop.x + deltaX, 0, 1 - crop.width),
+    y: clamp(crop.y + deltaY, 0, 1 - crop.height),
+  };
+}
+
+/** Zooms around the Crop centre. A factor above 1 zooms in; 1 is the furthest fit-cover may zoom out. */
+export function zoomCrop(crop: Crop, factor: number): Crop {
+  if (!(factor > 0) || !Number.isFinite(factor)) throw new Error("Crop zoom factor must be positive and finite.");
+  const aspect = crop.width / crop.height;
+  const maxWidth = Math.min(1, aspect);
+  const width = clamp(crop.width / factor, Math.min(1e-6, maxWidth), maxWidth);
+  const height = width / aspect;
+  const centreX = crop.x + crop.width / 2;
+  const centreY = crop.y + crop.height / 2;
+  return {
+    x: clamp(centreX - width / 2, 0, 1 - width),
+    y: clamp(centreY - height / 2, 0, 1 - height),
+    width,
+    height,
+  };
+}
+
+/** Returns the image's centred bounds inside a Slot, as fractions of the Slot. */
+export function fitPhotoRect(photoAspect: number, targetAspect: number): Rectangle {
+  if (!(photoAspect > 0) || !(targetAspect > 0) || !Number.isFinite(photoAspect) || !Number.isFinite(targetAspect)) {
+    throw new Error("Photo and Slot aspect ratios must be positive and finite.");
+  }
+  const width = photoAspect > targetAspect ? 1 : photoAspect / targetAspect;
+  const height = photoAspect > targetAspect ? targetAspect / photoAspect : 1;
+  return { x: (1 - width) / 2, y: (1 - height) / 2, width, height };
+}
+
+export function placementDisplayCrop(placement: Placement): Crop {
+  return placement.fit ? { x: 0, y: 0, width: 1, height: 1 } : placement.crop;
 }
 
 export function placePhotoOnPage(
@@ -193,7 +261,7 @@ export function placePhotoOnPage(
     height: bottom - top,
     placement: null,
   };
-  slot.placement = { photoPath: photo.path, crop: centredCrop(photoAspect, slotAspect(album, slot)) };
+  slot.placement = { photoPath: photo.path, crop: centredCrop(photoAspect, slotAspect(album, slot)), fit: false };
   return editPage(album, pageId, (current) => ({ ...current, slots: [...current.slots, slot] }));
 }
 
@@ -223,7 +291,10 @@ export function validateSlots(slots: unknown): asserts slots is Slot[] {
 
 function validatePlacement(placement: unknown): asserts placement is Placement {
   const tolerance = 1e-9;
-  if (!exactRecord(placement, ["photoPath", "crop"]) || !isRelativePhotoPath(placement.photoPath)
+  const legacyPlacement = exactRecord(placement, ["photoPath", "crop"]);
+  if ((!legacyPlacement && !exactRecord(placement, ["photoPath", "crop", "fit"]))
+    || !isRelativePhotoPath((placement as Record<string, unknown>).photoPath)
+    || (!legacyPlacement && typeof (placement as Record<string, unknown>).fit !== "boolean")
     || !exactRecord(placement.crop, ["x", "y", "width", "height"])
     || ![placement.crop.x, placement.crop.y, placement.crop.width, placement.crop.height].every(finite)) {
     throw new Error("Invalid Placement.");

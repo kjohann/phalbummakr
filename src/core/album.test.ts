@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import { addPage, albumSpreads, createAlbum, deletePage, deserializeAlbum, duplicatePage, movePage, pageDimensions, serializeAlbum } from "./album";
+import { addPhotoSlot, placePhoto } from "./slots";
 
 it("moves a Page to its final position in either direction and re-pairs without changing identities", () => {
   const album = createAlbum({ name: "Test", pageCount: 4 });
@@ -82,6 +83,25 @@ it("creates 24 empty white A4 landscape Pages, starting on the right, and round 
   expect(album.pages.every((page) => page.background === "#ffffff" && page.slots.length === 0)).toBe(true);
   expect(new Set(album.pages.map((page) => page.id)).size).toBe(24);
   expect(deserializeAlbum(serializeAlbum(album))).toEqual(album);
+});
+
+it("loads a schema-v1 Album saved before Placements had the Fit field", () => {
+  const album = placePhoto(
+    addPhotoSlot(createAlbum({ name: "Old Album", pageCount: 1 }), "page-1"),
+    "page-1",
+    "slot-1",
+    { path: "tree.jpg", width: 3000, height: 2000, orientation: 1 },
+  );
+  const oldSave = JSON.parse(serializeAlbum(album)) as {
+    schemaVersion: number;
+    pages: { slots: { placement: { fit?: boolean } | null }[] }[];
+  };
+  delete oldSave.pages[0].slots[0].placement!.fit;
+
+  const loaded = deserializeAlbum(JSON.stringify(oldSave));
+  expect(loaded.schemaVersion).toBe(1);
+  expect(loaded.pages[0].slots[0].placement!.fit).toBe(false);
+  expect(JSON.parse(serializeAlbum(loaded)).pages[0].slots[0].placement.fit).toBe(false);
 });
 
 it("accepts a custom Page count, starting side and print settings", () => {

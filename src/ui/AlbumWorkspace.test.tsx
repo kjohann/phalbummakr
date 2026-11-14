@@ -81,7 +81,7 @@ it("keeps starting side and print settings in Album settings, validates them, an
   fireEvent.change(screen.getByLabelText("Safe Zone (mm)"), { target: { value: "7" } });
   fireEvent.change(screen.getByLabelText("Export resolution (DPI)"), { target: { value: "600" } });
   fireEvent.submit(screen.getByRole("form", { name: "Album settings" }));
-  await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Saved"));
+  await waitFor(() => expect(screen.getByText("Saved").textContent).toBe("Saved"));
   fireEvent.click(screen.getByRole("button", { name: "Open Album Existing" }));
   await waitFor(() => expect(screen.queryByLabelText("Bleed (mm)")).toBeNull());
   fireEvent.click(screen.getByRole("button", { name: "Album settings" }));
@@ -329,6 +329,301 @@ it("keeps the sibling Photo browser in sync with edits and Album switches", asyn
   expect(screen.queryByLabelText("Used 1 time in this Album")).toBeNull();
 });
 
+it("keeps a duplicate drop and its Usage while a wheel Crop gesture is pending", async () => {
+  const { ports, files } = disk();
+  const photo = { path: "tree.jpg", width: 6000, height: 4000, orientation: 1, captureDate: 0, revision: "1" };
+  const photoPorts = previews();
+  vi.spyOn(tauriPhotoPorts, "scan").mockResolvedValue({ photos: [photo], folders: [], warnings: [] });
+  vi.spyOn(tauriPhotoPorts, "thumbnail").mockResolvedValue("data:image/png;base64,dGVzdA==");
+  function Workspace() {
+    const [album, setAlbum] = useState<Album | null>(null);
+    return <><PhotoBrowser root="D:\\Photos" album={album} />
+      <AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={photoPorts} onAlbumChange={setAlbum} /></>;
+  }
+  render(<Workspace />);
+  await screen.findByText("tree.jpg");
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  await screen.findByRole("heading", { name: "Existing" });
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  const firstSlot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  fireEvent.drop(firstSlot, photoDrop(photo));
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  const secondSlot = screen.getByRole("button", { name: "Page 1 Photo Slot 2" });
+  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  const originalCrop = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop;
+
+  vi.useFakeTimers();
+  fireEvent.click(firstSlot);
+  fireEvent.click(screen.getByRole("checkbox", { name: "Crop photo" }));
+  fireEvent.wheel(firstSlot, { deltaY: -100 });
+  fireEvent.drop(secondSlot, photoDrop(photo));
+  expect(screen.getByText("tree.jpg is already used in this Album.")).toBeTruthy();
+  expect(screen.getByLabelText("Used 2 times in this Album")).toBeTruthy();
+
+  await act(() => vi.advanceTimersByTimeAsync(220));
+  expect(screen.getByLabelText("Used 2 times in this Album")).toBeTruthy();
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  const saved = deserializeAlbum(files.get("Existing")!);
+  expect(photoUsage(saved).get(photo.path)).toBe(2);
+  expect(saved.pages[0].slots[0].placement!.crop.width).toBeLessThan(originalCrop.width);
+});
+
+it("keeps the replacement Photo's centred Crop when a wheel gesture was pending", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  await screen.findByRole("heading", { name: "Existing" });
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  fireEvent.drop(slot, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
+  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+
+  vi.useFakeTimers();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Crop photo" }));
+  fireEvent.wheel(slot, { deltaY: -100 });
+  fireEvent.drop(slot, photoDrop({ path: "portrait.jpg", width: 4000, height: 6000, orientation: 1 }));
+  await act(() => vi.advanceTimersByTimeAsync(220));
+  await act(() => vi.advanceTimersByTimeAsync(500));
+
+  const placement = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!;
+  expect(placement.photoPath).toBe("portrait.jpg");
+  expect(placement.crop.x).toBe(0);
+  expect(placement.crop.y).toBeCloseTo(0.264310, 5);
+  expect(placement.crop.width).toBe(1);
+  expect(placement.crop.height).toBeCloseTo(0.471380, 5);
+});
+
+it("keeps Album switching locked until a wheel Crop gesture is saved", async () => {
+  const { ports, files } = disk();
+  files.set("Other", serializeAlbum(createAlbum({ name: "Other", pageCount: 1 })));
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  await screen.findByRole("heading", { name: "Existing" });
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  fireEvent.drop(slot, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
+  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  const originalWidth = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop.width;
+
+  vi.useFakeTimers();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Crop photo" }));
+  fireEvent.wheel(slot, { deltaY: -100 });
+  const otherAlbum = screen.getByRole("button", { name: "Open Album Other" }) as HTMLButtonElement;
+  expect(otherAlbum.disabled).toBe(true);
+  expect(screen.getByText("Saving...")).toBeTruthy();
+
+  await act(() => vi.advanceTimersByTimeAsync(220));
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop.width).toBeLessThan(originalWidth);
+  expect(otherAlbum.disabled).toBe(false);
+  fireEvent.click(otherAlbum);
+  await act(async () => {});
+  expect(screen.getByRole("heading", { name: "Other" })).toBeTruthy();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+it("combines a wheel Crop gesture with an immediate Zoom in command", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  await screen.findByRole("heading", { name: "Existing" });
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  fireEvent.drop(slot, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
+  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+
+  vi.useFakeTimers();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Crop photo" }));
+  fireEvent.wheel(slot, { deltaY: -100 });
+  fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+  await act(() => vi.advanceTimersByTimeAsync(220));
+  await act(() => vi.advanceTimersByTimeAsync(500));
+
+  const crop = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop;
+  expect(crop.width).toBeCloseTo(0.64328845, 6);
+});
+
+it("preserves wheel Crop gestures when moving between Photo Slots", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  await screen.findByRole("heading", { name: "Existing" });
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  const firstSlot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  fireEvent.drop(firstSlot, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  const secondSlot = screen.getByRole("button", { name: "Page 1 Photo Slot 2" });
+  fireEvent.drop(secondSlot, photoDrop({ path: "portrait.jpg", width: 4000, height: 6000, orientation: 1 }));
+  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  const original = deserializeAlbum(files.get("Existing")!).pages[0].slots.map((slot) => slot.placement!.crop.width);
+
+  vi.useFakeTimers();
+  fireEvent.click(firstSlot);
+  fireEvent.click(screen.getByRole("checkbox", { name: "Crop photo" }));
+  fireEvent.wheel(firstSlot, { deltaY: -100 });
+  fireEvent.click(secondSlot);
+  fireEvent.wheel(secondSlot, { deltaY: -100 });
+  await act(() => vi.advanceTimersByTimeAsync(220));
+  await act(() => vi.advanceTimersByTimeAsync(500));
+
+  const saved = deserializeAlbum(files.get("Existing")!).pages[0].slots;
+  expect(saved[0].placement!.crop.width).toBeLessThan(original[0]);
+  expect(saved[1].placement!.crop.width).toBeLessThan(original[1]);
+});
+
+it("deletes a Photo Slot safely while its wheel Crop gesture is pending", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  await screen.findByRole("heading", { name: "Existing" });
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  fireEvent.drop(slot, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
+  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+
+  vi.useFakeTimers();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Crop photo" }));
+  fireEvent.wheel(slot, { deltaY: -100 });
+  fireEvent.click(screen.getByRole("button", { name: "Delete Slot" }));
+  await act(() => vi.advanceTimersByTimeAsync(500));
+
+  expect(screen.queryByRole("button", { name: "Page 1 Photo Slot 1" })).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(deserializeAlbum(files.get("Existing")!).pages[0].slots).toEqual([]);
+});
+
+it("does not start an earlier save during a Crop pan", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  await screen.findByRole("heading", { name: "Existing" });
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  fireEvent.drop(slot, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
+  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+
+  vi.useFakeTimers();
+  const writesBefore = vi.mocked(ports.write).mock.calls.length;
+  fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Crop photo" }));
+  vi.spyOn(slot, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 100, 200, 100));
+  fireEvent.mouseDown(slot, { button: 0, clientX: 100, clientY: 100 });
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  expect(ports.write).toHaveBeenCalledTimes(writesBefore);
+  fireEvent.mouseMove(window, { clientX: 80, clientY: 100 });
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  expect(ports.write).toHaveBeenCalledTimes(writesBefore);
+
+  fireEvent.mouseUp(window, { clientX: 80, clientY: 100 });
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  expect(ports.write).toHaveBeenCalledTimes(writesBefore + 1);
+  const crop = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop;
+  expect(crop.width).toBeCloseTo(0.785714, 5);
+  expect(crop.x).toBeGreaterThan(0.107);
+});
+
+it("finishes a Crop pan when the window loses focus", async () => {
+  const { ports, files } = disk();
+  files.set("Other", serializeAlbum(createAlbum({ name: "Other", pageCount: 1 })));
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  await screen.findByRole("heading", { name: "Existing" });
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  fireEvent.drop(slot, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
+  fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  const original = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop;
+
+  vi.useFakeTimers();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Crop photo" }));
+  vi.spyOn(slot, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 100, 200, 100));
+  fireEvent.mouseDown(slot, { button: 0, clientX: 100, clientY: 100 });
+  fireEvent.mouseMove(window, { clientX: 80, clientY: 100 });
+  fireEvent.blur(window);
+  await act(() => vi.advanceTimersByTimeAsync(500));
+
+  const saved = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop;
+  expect(saved.x).toBeGreaterThan(original.x);
+  expect((screen.getByRole("button", { name: "Open Album Other" }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it("serializes saves when a Slot drag ends during an earlier Crop save", async () => {
+  const { ports, files } = disk();
+  files.set("Other", serializeAlbum(createAlbum({ name: "Other", pageCount: 1 })));
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  await screen.findByRole("heading", { name: "Existing" });
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  fireEvent.drop(slot, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
+  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+
+  vi.useFakeTimers();
+  const writesBefore = vi.mocked(ports.write).mock.calls.length;
+  const write = vi.mocked(ports.write).getMockImplementation()!;
+  let finishWrite: () => void = () => {};
+  const firstWrite = new Promise<void>((resolve) => { finishWrite = resolve; });
+  vi.mocked(ports.write).mockImplementationOnce(async (...args) => {
+    await firstWrite;
+    await write(...args);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+  fireEvent.mouseDown(slot, { button: 0, clientX: 100, clientY: 100 });
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  expect(ports.write).toHaveBeenCalledTimes(writesBefore + 1);
+  fireEvent.mouseMove(window, { clientX: 159.4, clientY: 100 });
+  fireEvent.mouseUp(window, { clientX: 159.4, clientY: 100 });
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  expect(ports.write).toHaveBeenCalledTimes(writesBefore + 1);
+  expect((screen.getByRole("button", { name: "Open Album Other" }) as HTMLButtonElement).disabled).toBe(true);
+
+  await act(async () => { finishWrite(); await firstWrite; });
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  expect(ports.write).toHaveBeenCalledTimes(writesBefore + 2);
+  const saved = deserializeAlbum(files.get("Existing")!).pages[0].slots[0];
+  expect(saved.x).toBeCloseTo(0.4, 9);
+  expect(saved.placement!.crop.width).toBeCloseTo(0.785714, 5);
+  expect((screen.getByRole("button", { name: "Open Album Other" }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it("wheel-zooms only the selected Photo Slot in Crop mode and prevents scrolling", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  await screen.findByRole("heading", { name: "Existing" });
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  const firstSlot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  fireEvent.drop(firstSlot, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  const secondSlot = screen.getByRole("button", { name: "Page 1 Photo Slot 2" });
+  fireEvent.drop(secondSlot, photoDrop({ path: "portrait.jpg", width: 4000, height: 6000, orientation: 1 }));
+  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  const original = deserializeAlbum(files.get("Existing")!).pages[0].slots.map((slot) => slot.placement!.crop);
+
+  vi.useFakeTimers();
+  fireEvent.click(firstSlot);
+  const withoutCrop = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -100 });
+  fireEvent(firstSlot, withoutCrop);
+  expect(withoutCrop.defaultPrevented).toBe(false);
+  expect(screen.queryByText("Saving...")).toBeNull();
+
+  fireEvent.click(screen.getByRole("checkbox", { name: "Crop photo" }));
+  const unselected = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -100 });
+  fireEvent(secondSlot, unselected);
+  expect(unselected.defaultPrevented).toBe(false);
+  expect(screen.queryByText("Saving...")).toBeNull();
+
+  const selected = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -100 });
+  fireEvent(firstSlot, selected);
+  expect(selected.defaultPrevented).toBe(true);
+  await act(() => vi.advanceTimersByTimeAsync(220));
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  const saved = deserializeAlbum(files.get("Existing")!).pages[0].slots;
+  expect(saved[0].placement!.crop.width).toBeLessThan(original[0].width);
+  expect(saved[1].placement!.crop).toEqual(original[1]);
+});
+
 it("reports Album changes and warns without blocking duplicate drops on Slots and Pages", async () => {
   const { ports, files } = disk();
   const onAlbumChange = vi.fn<(album: Album | null) => void>();
@@ -336,7 +631,7 @@ it("reports Album changes and warns without blocking duplicate drops on Slots an
   expect(onAlbumChange).toHaveBeenLastCalledWith(null);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
   await screen.findByRole("heading", { name: "Existing" });
-  expect(onAlbumChange.mock.lastCall?.[0]?.name).toBe("Existing");
+  await waitFor(() => expect(onAlbumChange.mock.lastCall?.[0]?.name).toBe("Existing"));
   const photo = photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 });
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }), photo);
@@ -541,4 +836,44 @@ it("places a dropped Photo in a Photo Slot, replaces it on a second drop, and dr
   const [replaced] = deserializeAlbum(files.get("Existing")!).pages[0].slots;
   expect(replaced.placement!.photoPath).toBe("snow.png");
   expect(screen.getAllByRole("img", { name: "Placement" })).toHaveLength(1);
+});
+
+it("keeps Crop local during a pan gesture, commits at release, and persists Fit", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  await screen.findByRole("heading", { name: "Existing" });
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  fireEvent.drop(slot, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
+  await waitFor(() => expect(screen.getByText("Saved").textContent).toBe("Saved"));
+  const original = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop;
+
+  vi.useFakeTimers();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Crop photo" }));
+  vi.spyOn(slot, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 100, 200, 100));
+  const writesBeforePan = vi.mocked(ports.write).mock.calls.length;
+  fireEvent.mouseDown(slot, { button: 0, clientX: 100, clientY: 100 });
+  fireEvent.mouseMove(window, { clientX: 80, clientY: 100 });
+  expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop).toEqual(original);
+  fireEvent.mouseUp(window, { clientX: 80, clientY: 100 });
+  expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop).toEqual(original);
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  const panned = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop;
+  expect(panned.x).toBeGreaterThan(original.x);
+  expect(ports.write).toHaveBeenCalledTimes(writesBeforePan + 1);
+
+  expect((screen.getByRole("checkbox", { name: "Crop photo" }) as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByRole("checkbox", { name: "Crop photo" }) as HTMLInputElement).disabled).toBe(false);
+  const writesBeforeZoom = vi.mocked(ports.write).mock.calls.length;
+  fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  const zoomed = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop;
+  expect(zoomed.width).toBeLessThan(panned.width);
+  expect(ports.write).toHaveBeenCalledTimes(writesBeforeZoom + 1);
+
+  fireEvent.click(screen.getByRole("checkbox", { name: "Fit Photo" }));
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.fit).toBe(true);
+  expect((screen.getByRole("checkbox", { name: "Crop photo" }) as HTMLInputElement).disabled).toBe(true);
 });

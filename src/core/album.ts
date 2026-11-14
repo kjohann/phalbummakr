@@ -130,6 +130,11 @@ export function serializeAlbum(album: Album): string {
 export function deserializeAlbum(json: string): Album {
   const album: unknown = JSON.parse(json);
   validateAlbum(album);
+  for (const page of album.pages) {
+    for (const slot of page.slots) {
+      if (slot.placement) slot.placement.fit ??= false;
+    }
+  }
   return album;
 }
 

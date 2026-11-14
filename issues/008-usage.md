@@ -46,6 +46,17 @@ To be performed in the native app by the user:
 
 Reviewed the implementation against the acceptance criteria and repository conventions. No blocking findings; native interaction and visual checks remain for the user.
 
+## Integration review with 007
+
+The merged workspace tests verify that Usage badges and duplicate warnings stay
+in sync when a Crop gesture overlaps a Photo drop. Crop commits and autosaves
+are coordinated so they do not discard later Placement changes.
+
 ## Future considerations (low priority)
 
 - The production build warns that a JavaScript chunk exceeds 500 kB. Investigate code splitting when bundle size becomes a priority; this does not block Usage.
+- On a case-insensitive filesystem, a case-only Photo rename can leave a
+  Placement resolving to the same file while its Usage badge, unused filter and
+  duplicate warning use the old path casing. Resolve identity using filesystem
+  semantics without conflating distinct files on case-sensitive volumes. This
+  broader change was deferred during the 007/008 merge.

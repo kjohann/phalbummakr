@@ -73,7 +73,27 @@ blocked during an Album operation or while changes remain unsaved. Each write
 uses a unique temporary file in `Albums/`, flushes it, then atomically replaces
 the destination. This keeps the previous file intact if replacement fails.
 Page edits pause during a write or after a save failure, but Page selection remains
-available. Pages cannot yet be filled; that is a subsequent issue.
+available. Album and Library switching also wait for an in-progress Crop gesture
+to finish and save.
+
+## Photo Slots, Crop and Usage
+
+Use **Add Photo Slot** to add a Slot to the selected Page. Drag a Slot to move it,
+use its bottom-right handle to resize it, and select **Delete Slot** to remove it.
+Drag a Photo from the grid onto a Slot to place or replace it, or onto an empty
+part of a Page to create a Slot. The editor uses cached thumbnails and previews,
+not original files.
+
+Select a filled Slot and enable **Crop photo** to pan by dragging the Photo. Use
+the mouse wheel over the selected Placement or the zoom buttons to adjust its
+Crop; the Photo always covers the Slot. **Fit** instead shows the whole Photo
+with white space as needed, and turning Fit off restores the Crop. Resizing a
+Slot preserves its zoom relative to the minimum cover and retains the Crop
+centre where possible.
+
+The Photo grid shows how many times each Photo is used in the open Album. Enable
+**Unused in this Album** to filter out used Photos. Placing an already-used Photo
+shows a dismissible warning but does not prevent the Placement.
 
 Tauri's native file-drop interception is disabled so HTML Page drag reordering
 can work on Windows. The app does not currently accept file drops from Explorer.

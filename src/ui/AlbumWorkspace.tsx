@@ -21,11 +21,20 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
   const [error, setError] = useState<string | null>(null);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"saved" | "pending" | "saving" | "error">("saved");
+  const [cropPending, setCropPending] = useState(false);
   const [retry, setRetry] = useState(0);
   const [refresh, setRefresh] = useState(0);
   const [listing, setListing] = useState(true);
   const savedJson = useRef<string | null>(null);
-  const locked = busy || listing || saveStatus !== "saved";
+  // Gesture callbacks can outlive a render, so apply them to the latest Album.
+  const currentRef = useRef(current);
+  const saveInFlight = useRef(false);
+  const locked = busy || listing || saveStatus !== "saved" || cropPending;
+
+  function setCurrentAlbum(next: typeof current) {
+    currentRef.current = next;
+    setCurrent(next);
+  }
 
   useEffect(() => {
     let active = true;
@@ -49,24 +58,28 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
   }, [current?.album, onAlbumChange]);
 
   useEffect(() => {
-    if (!current) return;
+    if (!current || cropPending || saveInFlight.current || saveStatus === "error") return;
     const json = serializeAlbum(current.album);
     if (json === savedJson.current) {
       setSaveStatus("saved");
       return;
     }
     const timer = window.setTimeout(() => {
+      saveInFlight.current = true;
       setSaveStatus("saving");
       ports.write(root, current.filename, json, false).then(() => {
+        saveInFlight.current = false;
         savedJson.current = json;
-        setSaveStatus("saved");
+        const latest = currentRef.current;
+        setSaveStatus(latest?.filename === current.filename && serializeAlbum(latest.album) === json ? "saved" : "pending");
       }).catch((cause: unknown) => {
+        saveInFlight.current = false;
         setError(`Could not save Album: ${String(cause)}`);
         setSaveStatus("error");
       });
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [current, root, ports, retry]);
+  }, [current, root, ports, retry, cropPending, saveStatus]);
 
   useEffect(() => {
     if (!locked) return;
@@ -85,7 +98,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
       const album = deserializeAlbum(await ports.read(root, name));
       savedJson.current = serializeAlbum(album);
       setSaveStatus("saved");
-      setCurrent({ filename: name, album });
+      setCurrentAlbum({ filename: name, album });
       setDuplicateWarning(null);
       setCreating(false);
       setSettingsOpen(false);
@@ -114,7 +127,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
       savedJson.current = serializeAlbum(album);
       setSaveStatus("saved");
       setNames((previous) => [...new Set([...previous, album.name])].sort());
-      setCurrent({ filename: album.name, album });
+      setCurrentAlbum({ filename: album.name, album });
       setDuplicateWarning(null);
       setCreating(false);
       setSettingsOpen(false);
@@ -126,13 +139,14 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
   }
 
   function changeAlbum(update: (album: Album) => Album) {
-    if (!current) return;
+    const previous = currentRef.current;
+    if (!previous) return;
     try {
-      const album = update(current.album);
+      const album = update(previous.album);
       serializeAlbum(album);
       setError(null);
-      setSaveStatus("pending");
-      setCurrent({ ...current, album });
+      setSaveStatus(saveInFlight.current ? "saving" : "pending");
+      setCurrentAlbum({ ...previous, album });
     } catch (cause) {
       setError(`Could not update Album: ${String(cause)}`);
     }
@@ -228,11 +242,12 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
                 </form>
               )}
             </div>
-            <span role="status">{saveStatus === "saved" ? "Saved" : saveStatus === "error" ? "Not saved" : "Saving..."}</span>
+            <span role="status">{saveStatus === "saved" && !cropPending ? "Saved" : saveStatus === "error" ? "Not saved" : "Saving..."}</span>
           </div>
           <AlbumView key={current.filename} album={current.album} onChange={changeAlbum}
             root={root} photoPorts={photoPorts}
             onDuplicatePhoto={setDuplicateWarning}
+            onCropPendingChange={setCropPending}
             disabled={busy || saveStatus === "saving" || saveStatus === "error"} />
         </>
       ) : <p className="photo-empty">Open an Album or create a new one.</p>}

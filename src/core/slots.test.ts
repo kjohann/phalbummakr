@@ -1,6 +1,9 @@
 import { expect, it } from "vitest";
 import { createAlbum, deserializeAlbum, serializeAlbum } from "./album";
-import { addPhotoSlot, deleteSlot, moveSlot, placePhoto, placePhotoOnPage, resizeSlot } from "./slots";
+import {
+  addPhotoSlot, deleteSlot, fitPhotoRect, moveSlot, panCrop, placePhoto, placePhotoOnPage,
+  placementDisplayCrop, resizeSlot, setPlacementCrop, setPlacementFit, zoomCrop,
+} from "./slots";
 
 function slotOf(album: ReturnType<typeof createAlbum>, page = 0) {
   return album.pages[page].slots[0];
@@ -52,6 +55,34 @@ it("places a Photo with a centred Crop that fills the Slot, for landscape, portr
   expect(tallCrop.height).toBe(1);
 });
 
+it("keeps Crop panning and zooming within the Photo, and fits all four Photo and Slot aspect combinations", () => {
+  const crop = { x: 0.2, y: 0, width: 0.6, height: 1 };
+  expect(panCrop(crop, 0.5, -0.5)).toEqual({ ...crop, x: 0.4, y: 0 });
+  expect(zoomCrop(crop, 0.5)).toEqual(crop);
+  const zoomed = zoomCrop(crop, 2);
+  expect(zoomed.width).toBeCloseTo(0.3, 9);
+  expect(zoomed.height).toBeCloseTo(0.5, 9);
+  expect(zoomed.x + zoomed.width / 2).toBeCloseTo(0.5, 9);
+  expect(zoomed.y + zoomed.height / 2).toBeCloseTo(0.5, 9);
+  expect(() => zoomCrop(crop, 0)).toThrow(/zoom/i);
+
+  const slotAspects = [297 * 0.4 / (210 * 0.4), 297 * 0.2 / (210 * 0.6)];
+  const photoAspects = [1.5, 2 / 3];
+  for (const photoAspect of photoAspects) {
+    for (const targetAspect of slotAspects) {
+      const rect = fitPhotoRect(photoAspect, targetAspect);
+      expect(rect.x).toBeCloseTo((1 - rect.width) / 2, 9);
+      expect(rect.y).toBeCloseTo((1 - rect.height) / 2, 9);
+      expect(rect.width / rect.height).toBeCloseTo(photoAspect / targetAspect, 9);
+      expect(rect.width).toBeLessThanOrEqual(1);
+      expect(rect.height).toBeLessThanOrEqual(1);
+      expect(placementDisplayCrop({ photoPath: "a.jpg", crop, fit: true })).toEqual({
+        x: 0, y: 0, width: 1, height: 1,
+      });
+    }
+  }
+});
+
 it("replaces the Photo in an occupied Slot and round trips Placements through JSON", () => {
   const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1");
   const photo = { path: "a.jpg", width: 3000, height: 2000, orientation: 1 };
@@ -83,6 +114,25 @@ it("keeps a placed Photo filling its Slot, around the same centre, when the Slot
   expect(crop.width).toBeCloseTo(0.314286, 5);
   expect(crop.y).toBeCloseTo(0, 9);
   expect(crop.height).toBeCloseTo(1, 9);
+});
+
+it("preserves Crop zoom and centre when a Photo Slot is resized in Fit", () => {
+  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1");
+  const placed = placePhoto(album, "page-1", "slot-1", { path: "a.jpg", width: 6000, height: 4000, orientation: 1 });
+  const zoomed = panCrop(zoomCrop(slotOf(placed).placement!.crop, 2), 0.15, 0.2);
+  const fit = setPlacementFit(setPlacementCrop(placed, "page-1", "slot-1", zoomed), "page-1", "slot-1", true);
+  const proportional = resizeSlot(fit, "page-1", "slot-1", 0.2, 0.2);
+  const restored = slotOf(setPlacementFit(proportional, "page-1", "slot-1", false)).placement!.crop;
+  expect(restored.x).toBeCloseTo(zoomed.x, 9);
+  expect(restored.y).toBeCloseTo(zoomed.y, 9);
+  expect(restored.width).toBeCloseTo(zoomed.width, 9);
+  expect(restored.height).toBeCloseTo(zoomed.height, 9);
+
+  const tall = slotOf(resizeSlot(fit, "page-1", "slot-1", 0.2, 0.6)).placement!.crop;
+  expect(tall.width).toBeCloseTo(0.157143, 5);
+  expect(tall.height).toBeCloseTo(0.5, 9);
+  expect(tall.x + tall.width / 2).toBeCloseTo(0.65, 9);
+  expect(tall.y + tall.height / 2).toBeCloseTo(0.7, 9);
 });
 
 it("moves a Slot freely within the Page and into the Bleed, but never past the Bleed edge", () => {
