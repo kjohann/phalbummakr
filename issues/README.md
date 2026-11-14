@@ -21,7 +21,7 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 005 | [Spread view and page operations](005-spreads-and-pages.md)  | 004        | done   |
 | 006 | [Photo Slots and placing Photos](006-photo-slots.md)         | 003, 005   | done   |
 | 007 | [Crop and Fit](007-crop-and-fit.md)                          | 006        | todo   |
-| 008 | [Usage badges and duplicate warning](008-usage.md)           | 006        | todo   |
+| 008 | [Usage badges and duplicate warning](008-usage.md)           | 006        | done   |
 | 009 | [Text Slots](009-text-slots.md)                              | 005        | todo   |
 | 010 | [Layouts and the Layout Library](010-layouts.md)             | 006, 009   | todo   |
 | 011 | [Undo and redo](011-undo-redo.md)                            | 006        | todo   |

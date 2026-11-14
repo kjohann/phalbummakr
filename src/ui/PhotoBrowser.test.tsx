@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
+import { addPhotoSlot, createAlbum, duplicatePage, placePhoto } from "../core";
 import PhotoBrowser from "./PhotoBrowser";
 import { hasPhotoDrag, readPhotoDrag } from "./photoDrag";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
@@ -44,6 +45,36 @@ function photo(index: number) {
     revision: `revision-${index}`,
   };
 }
+
+it("updates Usage badges and the unused filter as the current Album changes", async () => {
+  const first = photo(0);
+  const second = photo(1);
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "scan_photos") return { photos: [first, second], folders: ["folder"], warnings: [] };
+    return "data:image/png;base64,dGVzdA==";
+  });
+  const { rerender } = render(<PhotoBrowser root="D:\\Photos" />);
+  await screen.findByText(first.path);
+  const filter = screen.getByRole("checkbox", { name: "Unused in this Album" }) as HTMLInputElement;
+  expect(filter.disabled).toBe(true);
+  let album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1");
+  album = placePhoto(album, "page-1", "slot-1", first);
+  rerender(<PhotoBrowser root="D:\\Photos" album={album} />);
+  expect(screen.getByLabelText("Used 1 time in this Album").textContent).toBe("1");
+  album = duplicatePage(album, "page-1");
+  rerender(<PhotoBrowser root="D:\\Photos" album={album} />);
+  expect(screen.getByLabelText("Used 2 times in this Album").textContent).toBe("2");
+  fireEvent.click(filter);
+  expect(screen.queryByText(first.path)).toBeNull();
+  expect(screen.getByText(second.path)).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Open folder folder" })).toBeTruthy();
+  album = placePhoto(album, "page-1", "slot-1", second);
+  rerender(<PhotoBrowser root="D:\\Photos" album={album} />);
+  expect(screen.queryByText(second.path)).toBeNull();
+  expect(screen.getByText("No unused Photos in this folder.")).toBeTruthy();
+  fireEvent.click(filter);
+  expect(screen.getAllByLabelText("Used 1 time in this Album")).toHaveLength(2);
+});
 
 it("browses immediate folders and Photos, including empty folders, with breadcrumbs back to the Library", async () => {
   const photos = [

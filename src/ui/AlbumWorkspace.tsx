@@ -9,15 +9,17 @@ interface Props {
   ports?: AlbumPorts;
   photoPorts?: PhotoPreviewPorts;
   onBusyChange?: (busy: boolean) => void;
+  onAlbumChange?: (album: Album | null) => void;
 }
 
-export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, onBusyChange }: Props) {
+export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, onBusyChange, onAlbumChange }: Props) {
   const [names, setNames] = useState<string[]>([]);
   const [current, setCurrent] = useState<{ filename: string; album: Album } | null>(null);
   const [creating, setCreating] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"saved" | "pending" | "saving" | "error">("saved");
   const [retry, setRetry] = useState(0);
   const [refresh, setRefresh] = useState(0);
@@ -41,6 +43,10 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
   useEffect(() => {
     onBusyChange?.(locked);
   }, [locked, onBusyChange]);
+
+  useEffect(() => {
+    onAlbumChange?.(current?.album ?? null);
+  }, [current?.album, onAlbumChange]);
 
   useEffect(() => {
     if (!current) return;
@@ -80,6 +86,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
       savedJson.current = serializeAlbum(album);
       setSaveStatus("saved");
       setCurrent({ filename: name, album });
+      setDuplicateWarning(null);
       setCreating(false);
       setSettingsOpen(false);
     } catch (cause) {
@@ -108,6 +115,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
       setSaveStatus("saved");
       setNames((previous) => [...new Set([...previous, album.name])].sort());
       setCurrent({ filename: album.name, album });
+      setDuplicateWarning(null);
       setCreating(false);
       setSettingsOpen(false);
     } catch (cause) {
@@ -150,6 +158,12 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
         ))}
       </nav>
       {error && <p className="error-banner" role="alert">{error}</p>}
+      {duplicateWarning && (
+        <div className="usage-warning" role="status">
+          <span>{duplicateWarning} is already used in this Album.</span>
+          <button type="button" className="button-quiet" onClick={() => setDuplicateWarning(null)}>Dismiss</button>
+        </div>
+      )}
       {saveStatus === "error" && (
         <button type="button" className="button-quiet" onClick={() => {
           setError(null);
@@ -218,6 +232,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
           </div>
           <AlbumView key={current.filename} album={current.album} onChange={changeAlbum}
             root={root} photoPorts={photoPorts}
+            onDuplicatePhoto={setDuplicateWarning}
             disabled={busy || saveStatus === "saving" || saveStatus === "error"} />
         </>
       ) : <p className="photo-empty">Open an Album or create a new one.</p>}

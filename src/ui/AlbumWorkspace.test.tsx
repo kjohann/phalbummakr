@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createAlbum, deserializeAlbum, serializeAlbum, type AlbumPorts } from "../core";
+import { createAlbum, deserializeAlbum, photoUsage, serializeAlbum, type Album, type AlbumPorts } from "../core";
 import AlbumWorkspace from "./AlbumWorkspace";
+import PhotoBrowser from "./PhotoBrowser";
+import { tauriPhotoPorts } from "./tauriPhotoPorts";
 
 vi.mock("react-konva", () => ({
   Stage: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -299,6 +301,65 @@ function photoDrop(photo: { path: string; width: number; height: number; orienta
   })]]);
   return { dataTransfer: { types: [...data.keys()], getData: (type: string) => data.get(type) ?? "", dropEffect: "none" } };
 }
+
+it("keeps the sibling Photo browser in sync with edits and Album switches", async () => {
+  const { ports, files } = disk();
+  files.set("Other", serializeAlbum(createAlbum({ name: "Other", pageCount: 1 })));
+  const photo = { path: "tree.jpg", width: 6000, height: 4000, orientation: 1, captureDate: 0, revision: "1" };
+  vi.spyOn(tauriPhotoPorts, "scan").mockResolvedValue({ photos: [photo], folders: [], warnings: [] });
+  vi.spyOn(tauriPhotoPorts, "thumbnail").mockResolvedValue("data:image/png;base64,dGVzdA==");
+  function Workspace() {
+    const [album, setAlbum] = useState<Album | null>(null);
+    return <><PhotoBrowser root="D:\\Photos" album={album} />
+      <AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} onAlbumChange={setAlbum} /></>;
+  }
+  render(<Workspace />);
+  await screen.findByText("tree.jpg");
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  await screen.findByRole("heading", { name: "Existing" });
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }), photoDrop(photo));
+  expect(screen.getByLabelText("Used 1 time in this Album")).toBeTruthy();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Unused in this Album" }));
+  expect(screen.queryByText("tree.jpg")).toBeNull();
+  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  fireEvent.click(screen.getByRole("button", { name: "Open Album Other" }));
+  await screen.findByRole("heading", { name: "Other" });
+  expect(await screen.findByText("tree.jpg")).toBeTruthy();
+  expect(screen.queryByLabelText("Used 1 time in this Album")).toBeNull();
+});
+
+it("reports Album changes and warns without blocking duplicate drops on Slots and Pages", async () => {
+  const { ports, files } = disk();
+  const onAlbumChange = vi.fn<(album: Album | null) => void>();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} onAlbumChange={onAlbumChange} />);
+  expect(onAlbumChange).toHaveBeenLastCalledWith(null);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  await screen.findByRole("heading", { name: "Existing" });
+  expect(onAlbumChange.mock.lastCall?.[0]?.name).toBe("Existing");
+  const photo = photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 });
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }), photo);
+  expect(screen.queryByText(/already used in this Album/)).toBeNull();
+  expect(photoUsage(onAlbumChange.mock.lastCall![0]!).get("tree.jpg")).toBe(1);
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 2" }), photo);
+  expect(screen.getByText("tree.jpg is already used in this Album.")).toBeTruthy();
+  expect(photoUsage(onAlbumChange.mock.lastCall![0]!).get("tree.jpg")).toBe(2);
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+
+  const page = within(screen.getByRole("group", { name: "Spread editor" })).getByRole("button", { name: "Select Page 1" });
+  vi.spyOn(page, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 50, 606, 432));
+  const dropEvent = new Event("drop", { bubbles: true, cancelable: true });
+  Object.defineProperties(dropEvent, {
+    dataTransfer: { value: photo.dataTransfer }, clientX: { value: 403 }, clientY: { value: 266 },
+  });
+  fireEvent(page, dropEvent);
+  expect(screen.getByText("tree.jpg is already used in this Album.")).toBeTruthy();
+  expect(photoUsage(onAlbumChange.mock.lastCall![0]!).get("tree.jpg")).toBe(3);
+  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  expect(photoUsage(deserializeAlbum(files.get("Existing")!)).get("tree.jpg")).toBe(3);
+});
 
 it("highlights every visible Photo Slot and labels the current drop target", async () => {
   const { ports } = disk();

@@ -1,7 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useRef, useState } from "react";
-import { libraryName, openLibrary, restoreLastLibrary, type Library } from "../core";
+import { libraryName, openLibrary, restoreLastLibrary, type Album, type Library } from "../core";
 import AlbumWorkspace from "./AlbumWorkspace";
 import PhotoBrowser from "./PhotoBrowser";
 import { tauriLibraryPorts } from "./tauriLibraryPorts";
@@ -12,6 +12,16 @@ type LibraryState =
   | { status: "restoring" }
   | { status: "closed" }
   | { status: "open"; library: Library };
+
+function LibraryWorkspace({ root, onBusyChange }: { root: string; onBusyChange: (busy: boolean) => void }) {
+  const [album, setAlbum] = useState<Album | null>(null);
+  return (
+    <div className="library-workspace">
+      <PhotoBrowser root={root} album={album} />
+      <AlbumWorkspace root={root} onBusyChange={onBusyChange} onAlbumChange={setAlbum} />
+    </div>
+  );
+}
 
 export default function App() {
   const [bridgeState, setBridgeState] = useState<BridgeState>("connecting");
@@ -119,10 +129,7 @@ export default function App() {
         </p>
       )}
       {libraryState.status === "open" && (
-        <div className="library-workspace" key={libraryState.library.root}>
-          <PhotoBrowser root={libraryState.library.root} />
-          <AlbumWorkspace root={libraryState.library.root} onBusyChange={setAlbumBusy} />
-        </div>
+        <LibraryWorkspace key={libraryState.library.root} root={libraryState.library.root} onBusyChange={setAlbumBusy} />
       )}
       {libraryState.status === "closed" && (
         <section className="welcome" aria-label="Open a Library">

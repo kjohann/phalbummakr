@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Photo, PhotoScan } from "../core";
+import { photoUsage, type Album, type Photo, type PhotoScan } from "../core";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
 import { writePhotoDrag } from "./photoDrag";
 
@@ -13,7 +13,7 @@ function parentFolder(path: string) {
   return separator < 0 ? "" : path.slice(0, separator);
 }
 
-function PhotoThumbnail({ root, photo }: { root: string; photo: Photo }) {
+function PhotoThumbnail({ root, photo, usage }: { root: string; photo: Photo; usage: number }) {
   const [source, setSource] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -41,6 +41,7 @@ function PhotoThumbnail({ root, photo }: { root: string; photo: Photo }) {
         {source && <img src={source} alt={name} loading="lazy" decoding="async" draggable={false} />}
         {!source && !error && <span className="photo-placeholder">Loading...</span>}
         {error && <span className="photo-failure" role="alert" title={error}>Thumbnail unavailable. Rescan to retry.</span>}
+        {usage > 0 && <span className="photo-usage" aria-label={`Used ${usage} ${usage === 1 ? "time" : "times"} in this Album`}>{usage}</span>}
       </div>
       <figcaption>
         <span className="photo-name">{name}</span>
@@ -50,10 +51,11 @@ function PhotoThumbnail({ root, photo }: { root: string; photo: Photo }) {
   );
 }
 
-function PhotoGrid({ root, photos, folders, onOpenFolder }: {
+function PhotoGrid({ root, photos, folders, usage, onOpenFolder }: {
   root: string;
   photos: Photo[];
   folders: string[];
+  usage: Map<string, number>;
   onOpenFolder: (folder: string) => void;
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -96,7 +98,7 @@ function PhotoGrid({ root, photos, folders, onOpenFolder }: {
                 width: `${100 / columns}%`,
                 height: ROW_HEIGHT,
               }}>
-              {entry.kind === "photo" ? <PhotoThumbnail root={root} photo={entry.photo} /> : (
+              {entry.kind === "photo" ? <PhotoThumbnail root={root} photo={entry.photo} usage={usage.get(entry.photo.path) ?? 0} /> : (
                 <button type="button" className="folder-tile" title={entry.path}
                   aria-label={`Open folder ${entry.path.split("/").pop()}`}
                   onClick={() => onOpenFolder(entry.path)}>
@@ -117,8 +119,9 @@ function PhotoGrid({ root, photos, folders, onOpenFolder }: {
   );
 }
 
-export default function PhotoBrowser({ root }: { root: string }) {
+export default function PhotoBrowser({ root, album = null }: { root: string; album?: Album | null }) {
   const [scan, setScan] = useState(0);
+  const [unusedOnly, setUnusedOnly] = useState(false);
   const [result, setResult] = useState<(PhotoScan & {
     generation: number;
     folder: string;
@@ -154,7 +157,9 @@ export default function PhotoBrowser({ root }: { root: string }) {
   }, [root, scan]);
 
   const folder = result?.folder ?? "";
-  const photos = result?.photos.filter((photo) => parentFolder(photo.path) === folder) ?? [];
+  const usage = album ? photoUsage(album) : new Map<string, number>();
+  const photos = result?.photos.filter((photo) => parentFolder(photo.path) === folder
+    && (!unusedOnly || !usage.has(photo.path))) ?? [];
   const folders = result?.folders.filter((path) => parentFolder(path) === folder) ?? [];
   const ancestors = folder ? folder.split("/").map((name, index, parts) => ({
     name, path: parts.slice(0, index + 1).join("/"),
@@ -189,6 +194,10 @@ export default function PhotoBrowser({ root }: { root: string }) {
           ))}
         </nav>
       )}
+      <label className="photo-filter">
+        <input type="checkbox" checked={unusedOnly} disabled={!album} onChange={(event) => setUnusedOnly(event.target.checked)} />
+        Unused in this Album
+      </label>
       <p className="photo-order">Capture date · oldest first</p>
       {result?.notice && <p className="photo-empty" role="status">{result.notice}</p>}
       {error && <p className="error-banner" role="alert">{error}</p>}
@@ -201,10 +210,10 @@ export default function PhotoBrowser({ root }: { root: string }) {
       {!loading && result && photos.length === 0 && (
         <p className="photo-empty">{result.photos.length === 0 && result.folders.length === 0
           ? "No Photos yet. Add JPEG or PNG files to this Library, then rescan."
-          : "No Photos in this folder."}</p>
+          : unusedOnly && album ? "No unused Photos in this folder." : "No Photos in this folder."}</p>
       )}
-      {result && <PhotoGrid key={`${root}:${result.generation}:${folder}`} root={root}
-        photos={photos} folders={folders} onOpenFolder={openFolder} />}
+      {result && <PhotoGrid key={`${root}:${result.generation}:${folder}:${unusedOnly}`} root={root}
+        photos={photos} folders={folders} usage={usage} onOpenFolder={openFolder} />}
     </aside>
   );
 }

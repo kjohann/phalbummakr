@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useRef, useState, type MouseEvent as 
 import { Image as KonvaImage, Layer, Rect, Stage } from "react-konva";
 import {
   addPage, addPhotoSlot, albumSpreads, deletePage, deleteSlot, duplicatePage, movePage, moveSlot, pageDimensions,
-  placePhoto, placePhotoOnPage, resizeSlot, type Album, type Crop, type PhotoPreviewPorts, type Slot,
+  placePhoto, placePhotoOnPage, photoUsage, resizeSlot, type Album, type Crop, type PhotoPreviewPorts, type Slot,
 } from "../core";
 import { hasPhotoDrag, readPhotoDrag } from "./photoDrag";
 
@@ -12,6 +12,7 @@ interface Props {
   disabled: boolean;
   root: string;
   photoPorts: PhotoPreviewPorts;
+  onDuplicatePhoto: (path: string) => void;
 }
 
 /** An in-progress mouse drag of a Slot, in screen pixels. */
@@ -31,7 +32,7 @@ function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, trimHeig
     : resizeSlot(album, drag.pageId, drag.slotId, slot.width + drag.dx / trimWidth, slot.height + drag.dy / trimHeight);
 }
 
-export default function AlbumView({ album: savedAlbum, onChange, disabled, root, photoPorts }: Props) {
+export default function AlbumView({ album: savedAlbum, onChange, disabled, root, photoPorts, onDuplicatePhoto }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLElement>(null);
   const draggedId = useRef<string | null>(null);
@@ -283,6 +284,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, root,
                 try {
                   const updated = placePhotoOnPage(album, page.id, photo, x, y);
                   const slotId = updated.pages.find((item) => item.id === page.id)!.slots.at(-1)!.id;
+                  if (photoUsage(savedAlbum).has(photo.path)) onDuplicatePhoto(photo.path);
                   rememberThumbnail(`${page.id}:${slotId}`, photo.thumbnail);
                   onChange((current) => placePhotoOnPage(current, page.id, photo, x, y));
                   selectSlot(page.id, slotId);
@@ -344,6 +346,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, root,
                 } catch {
                   return; // Not a valid Photo, e.g. a forged drag payload.
                 }
+                if (photoUsage(savedAlbum).has(photo.path)) onDuplicatePhoto(photo.path);
                 rememberThumbnail(targetId, photo.thumbnail);
                 selectSlot(page.id, slot.id);
                 onChange((current) => placePhoto(current, page.id, slot.id, photo));
