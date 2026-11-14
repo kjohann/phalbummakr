@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { addTextSlot, createAlbum, deserializeAlbum, photoUsage, serializeAlbum, type Album, type AlbumPorts } from "../core";
 import AlbumWorkspace from "./AlbumWorkspace";
 import PhotoBrowser from "./PhotoBrowser";
+import TextSlotControls from "./TextSlotControls";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
 
 vi.mock("react-konva", () => ({
@@ -33,6 +34,11 @@ vi.mock("konva/lib/shapes/Text", () => ({
 
 beforeEach(() => {
   HTMLElement.prototype.scrollIntoView = vi.fn();
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    return this.classList.contains("text-slot-controls")
+      ? new DOMRect(0, 0, 440, 40)
+      : new DOMRect();
+  });
   // A 1278 x 800 editor gives a scale of 2 px per mm, so an A4 trim Page is 594 x 420 px.
   vi.stubGlobal("ResizeObserver", class {
     constructor(private callback: ResizeObserverCallback) {}
@@ -75,6 +81,28 @@ function setExactFontSize(points: string) {
   fireEvent.change(input, { target: { value: points } });
   fireEvent.keyDown(input, { key: "Enter" });
 }
+
+it("positions right-page text controls before the first ResizeObserver notification", () => {
+  vi.stubGlobal("ResizeObserver", class {
+    observe() {}
+    disconnect() {}
+  });
+  const bounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
+    .mockReturnValue(new DOMRect(0, 0, 440, 40));
+  render(<TextSlotControls anchor={{ x: 1100, y: 50, width: 100, height: 20 }}
+    viewport={{ width: 1278, height: 800 }}
+    style={{ fontFamily: "Arial", fontSize: 18, color: "#000000", bold: false, italic: false, underline: false, align: "left" }}
+    fonts={["Arial"]} fontError={null} disabled={false}
+    onStyle={vi.fn()} onRetryFonts={vi.fn()} onShortcut={vi.fn()} />);
+  const controls = screen.getByRole("toolbar", { name: "Text Slot controls" });
+  expect(controls.style.left).toBe("830px");
+  expect(controls.style.top).toBe("8px");
+
+  bounds.mockReturnValue(new DOMRect(0, 0, 500, 80));
+  fireEvent.change(screen.getByLabelText("Font size"), { target: { value: "custom" } });
+  expect(controls.style.left).toBe("770px");
+  expect(controls.style.top).toBe("78px");
+});
 
 it("fits Text Slot height to its content and persists growth and shrinkage", async () => {
   const { ports, files } = disk();

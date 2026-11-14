@@ -76,3 +76,34 @@ Status: done · Addendum to: [009 - Text Slots](009-text-slots.md)
 - Confirm floating controls, typography and shortcuts in the integrated
   WebView2 app. Browser verification does not substitute for that native check.
 - Missing-font warnings remain open as recorded in the original issue.
+
+## Section 2 - Stable toolbar appearance
+
+Status: done
+
+- [x] Text controls appear at their final position without sliding or popping
+  between temporary positions, including on right-hand Pages.
+- [x] Changes to toolbar dimensions keep the controls within the viewport
+  without showing an intermediate position.
+
+### Implementation, review and verification
+
+- There was no CSS entrance animation: initial placement used zero toolbar
+  dimensions until ResizeObserver delivered its first measurement. Measure
+  dimensions in a layout effect before painting, including after controls change.
+  ResizeObserver still handles external layout changes.
+- A regression test withholds ResizeObserver notifications and checks the final
+  right-Page position both on mounting and when custom-size controls wrap.
+  It failed before the fix and passes afterwards.
+- All 44 workspace tests, typecheck and lint passed. Direct review found no
+  remaining blocking points; Photo behavior and viewport clamping are unchanged.
+- Earlier low-priority considerations were reassessed. Native WebView2
+  verification remains relevant but manual; missing-font warnings and the other
+  previously recorded deferrals are outside this positioning fix.
+- No temporary servers or instrumentation were started. Cleanup checks found
+  no running task shells and no listeners on ports 1420 or 1421.
+
+### Future considerations (low priority)
+
+- Confirm the initial toolbar appearance in the integrated WebView2 app; the
+  regression test verifies pre-paint positioning without a native smoke check.

@@ -29,6 +29,12 @@ export default function TextSlotControls({ anchor, viewport, style, fonts, fontE
   useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
+    const { width, height } = element.getBoundingClientRect();
+    setSize((current) => current.width === width && current.height === height ? current : { width, height });
+  });
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
     const observer = new ResizeObserver(([entry]) => {
       const box = entry.borderBoxSize?.[0];
       setSize({ width: box?.inlineSize ?? entry.contentRect.width, height: box?.blockSize ?? entry.contentRect.height });
