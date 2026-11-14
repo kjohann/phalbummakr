@@ -104,14 +104,23 @@ can work on Windows. The app does not currently accept file drops from Explorer.
 Use **Add Text Slot** to place a caption or title on the selected Page. Type in
 place; double-click a Text Slot or select it and press Enter to edit it again.
 Escape finishes editing. Drag its outline (or the **Move** handle while editing)
-and use the bottom-right handle to resize it. **Delete Slot** removes it.
+and use the right-edge handle to change its width. Height automatically fits
+the content, growing and shrinking as text, font or width changes.
+**Delete Slot** removes it.
 
-The toolbar offers installed Windows font families, point size, colour, bold,
-italic and alignment. Text is clipped at the Slot boundary rather than resized;
-an overflow warning appears when it does not fit. Text and style autosave with
-the Page, and duplicating a Page creates an independent copy. A Layout can later
-reuse the Slot's style without copying its Page text. If font discovery fails,
-the existing font remains selected and **Retry fonts** is available.
+A compact toolbar follows the selected Text Slot. It offers installed Windows
+fonts, size presets (12, 18, 24, 36, 48 and 72 pt), **Custom...** for an exact point
+size, colour and alignment. **Format** groups bold, italic and underline.
+Ctrl+B, Ctrl+I and Ctrl+U (Command on macOS) toggle formatting for the whole box,
+including while editing. Text is never automatically reduced in size.
+
+Text can grow beyond the Page; a warning appears when it does. A character wider
+than the box also shows a warning. Text, style and fitted height autosave with
+the Page, and duplicating a Page creates an independent copy. Existing Text Slots
+are fitted to their content when an Album opens; old Albums default underline
+to off. A Layout can later reuse the Slot's style without copying its Page text.
+If font discovery fails, the existing font remains selected and **Retry fonts**
+is available.
 
 ## Test and build
 

@@ -758,8 +758,11 @@ body {
   visibility: visible;
 }
 
-.page-toolbar input[type="number"] {
-  width: 65px;
+.slot-resize-handle--text {
+  top: 50%;
+  bottom: auto;
+  transform: translateY(-50%);
+  cursor: ew-resize;
 }
 
 .slot-text-editor {
@@ -796,10 +799,85 @@ body {
 
 .slot-overflow-warning {
   right: 0;
-  bottom: 0;
+  top: 0;
   background: #fff1d2;
   color: #704b16;
   pointer-events: none;
+}
+
+.text-slot-controls {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: calc(100% - 16px);
+  padding: 6px;
+  border: 1px solid #b9c3b9;
+  border-radius: 6px;
+  background: #f7f8f4;
+  box-shadow: 0 3px 12px #1e292626;
+  color: #242a27;
+  font-size: 12px;
+}
+
+.text-slot-controls select,
+.text-slot-controls input {
+  padding: 4px;
+  font: inherit;
+}
+
+.text-slot-controls select[aria-label="Font family"] {
+  max-width: 135px;
+}
+
+.text-slot-controls input[type="number"] {
+  width: 62px;
+}
+
+.text-slot-controls input[type="color"] {
+  width: 28px;
+  height: 28px;
+  padding: 2px;
+}
+
+.text-format-menu {
+  position: relative;
+}
+
+.text-format-menu summary {
+  padding: 5px;
+  cursor: pointer;
+}
+
+.text-format-options {
+  position: absolute;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #b9c3b9;
+  border-radius: 6px;
+  background: #f7f8f4;
+  box-shadow: 0 3px 12px #1e292626;
+}
+
+.text-format-options label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.text-format-options label span {
+  margin-left: auto;
+  color: #6f7771;
+  font-size: 10px;
+}
+
+.text-controls-error {
+  flex-basis: 100%;
+  color: #7a4632;
 }
 
 .photo-tile[draggable="true"] {

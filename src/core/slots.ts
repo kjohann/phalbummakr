@@ -35,8 +35,12 @@ export interface TextStyle {
   color: string;
   bold: boolean;
   italic: boolean;
+  underline: boolean;
   align: "left" | "center" | "right";
 }
+
+export const POINTS_PER_MM = 72 / 25.4;
+export const TEXT_LINE_HEIGHT = 1.2;
 
 export interface TextSlot {
   id: string;
@@ -77,11 +81,12 @@ export function addPhotoSlot(album: Album, pageId: string): Album {
 }
 
 export function addTextSlot(album: Album, pageId: string): Album {
+  const height = 18 * TEXT_LINE_HEIGHT / POINTS_PER_MM / pageDimensions(album.pageFormat).heightMm;
   return editPage(album, pageId, (page) => ({
     ...page,
     slots: [...page.slots, {
-      id: unusedSlotId(page), type: "text", x: 0.3, y: 0.3, width: 0.4, height: 0.4,
-      text: "", style: { fontFamily: "Arial", fontSize: 18, color: "#000000", bold: false, italic: false, align: "left" },
+      id: unusedSlotId(page), type: "text", x: 0.3, y: 0.3, width: 0.4, height,
+      text: "", style: { fontFamily: "Arial", fontSize: 18, color: "#000000", bold: false, italic: false, underline: false, align: "left" },
     }],
   }));
 }
@@ -128,7 +133,7 @@ export function moveSlot(album: Album, pageId: string, slotId: string, x: number
   return editSlot(album, pageId, slotId, (slot) => ({
     ...slot,
     x: clamp(x, box.left, Math.max(box.left, box.right - slot.width)),
-    y: clamp(y, box.top, Math.max(box.top, box.bottom - slot.height)),
+    y: clamp(y, box.top, slot.type === "text" ? box.bottom : Math.max(box.top, box.bottom - slot.height)),
   }));
 }
 
@@ -148,7 +153,7 @@ export function resizeSlot(album: Album, pageId: string, slotId: string, width: 
     const resized = {
       ...slot,
       width: clamp(width, MIN_SLOT_SIZE, Math.max(MIN_SLOT_SIZE, box.right - slot.x)),
-      height: clamp(height, MIN_SLOT_SIZE, Math.max(MIN_SLOT_SIZE, box.bottom - slot.y)),
+      height: slot.type === "text" ? slot.height : clamp(height, MIN_SLOT_SIZE, Math.max(MIN_SLOT_SIZE, box.bottom - slot.y)),
     };
     if (slot.type !== "photo" || !slot.placement) return resized;
     const { crop } = slot.placement;
@@ -343,11 +348,13 @@ export function validateSlots(slots: unknown): asserts slots is Slot[] {
 }
 
 function validateTextStyle(style: unknown): asserts style is TextStyle {
-  if (!exactRecord(style, ["fontFamily", "fontSize", "color", "bold", "italic", "align"])
+  if ((!exactRecord(style, ["fontFamily", "fontSize", "color", "bold", "italic", "align"])
+    && !exactRecord(style, ["fontFamily", "fontSize", "color", "bold", "italic", "underline", "align"]))
     || typeof style.fontFamily !== "string" || !style.fontFamily.trim()
     || !finite(style.fontSize) || style.fontSize <= 0
     || typeof style.color !== "string" || !/^#[0-9a-f]{6}$/i.test(style.color)
     || typeof style.bold !== "boolean" || typeof style.italic !== "boolean"
+    || ("underline" in style && typeof style.underline !== "boolean")
     || (style.align !== "left" && style.align !== "center" && style.align !== "right")) {
     throw new Error("Invalid Text Slot style.");
   }

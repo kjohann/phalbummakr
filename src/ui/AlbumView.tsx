@@ -1,13 +1,15 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
-import type Konva from "konva";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Group, Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva";
 import {
   addPage, addPhotoSlot, addTextSlot, albumSpreads, deletePage, deleteSlot, duplicatePage, movePage, moveSlot, pageDimensions,
   fitPhotoRect, panCrop, placePhoto, placePhotoOnPage, placementDisplayCrop, photoUsage, resizeSlot, setPlacementCrop,
-  setPlacementFit, setSlotText, setTextStyle, zoomCrop, type Album, type Crop, type PhotoPreviewPorts, type Slot, type TextSlot, type TextStyle,
+  setPlacementFit, setSlotText, setTextStyle, zoomCrop, POINTS_PER_MM, TEXT_LINE_HEIGHT,
+  type Album, type Crop, type PageFormat, type PhotoPreviewPorts, type Rectangle, type Slot, type TextSlot, type TextStyle,
 } from "../core";
 import { hasPhotoDrag, readPhotoDrag } from "./photoDrag";
 import type { FontPorts } from "./tauriFontPorts";
+import { fitTextSlots, measureTextSlot, textFontStyle } from "./textLayout";
+import TextSlotControls from "./TextSlotControls";
 
 interface Props {
   album: Album;
@@ -33,9 +35,10 @@ interface SlotDrag {
 function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, trimHeight: number): Album {
   const slot = album.pages.find((page) => page.id === drag.pageId)?.slots.find((item) => item.id === drag.slotId);
   if (!slot) return album;
-  return drag.kind === "move"
+  const updated = drag.kind === "move"
     ? moveSlot(album, drag.pageId, drag.slotId, slot.x + drag.dx / trimWidth, slot.y + drag.dy / trimHeight)
     : resizeSlot(album, drag.pageId, drag.slotId, slot.width + drag.dx / trimWidth, slot.height + drag.dy / trimHeight);
+  return fitTextSlots(updated, album);
 }
 
 export default function AlbumView({ album: savedAlbum, onChange, disabled, textDisabled, root, photoPorts, fontPorts, onDuplicatePhoto, onCropPendingChange }: Props) {
@@ -137,7 +140,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
 
   function changeAlbum(update: (album: Album) => Album) {
     commitCropPreview();
-    onChange(update);
+    onChange((current) => fitTextSlots(update(current), current));
   }
 
   useEffect(() => {
@@ -339,6 +342,22 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
     changeAlbum((current) => setTextStyle(current, selectedPage.id, selectedSlot.id, { ...selectedSlot.style, ...style }));
   }
 
+  function toggleTextShortcut(event: ReactKeyboardEvent, pageId: string, slot: Slot): boolean {
+    if (slot.type !== "text" || textDisabled || event.altKey || (!event.ctrlKey && !event.metaKey)) return false;
+    const key = event.key.toLowerCase();
+    if (key !== "b" && key !== "i" && key !== "u") return false;
+    event.preventDefault();
+    event.stopPropagation();
+    selectSlot(pageId, slot.id);
+    const property = key === "b" ? "bold" : key === "i" ? "italic" : "underline";
+    changeAlbum((current) => {
+      const currentSlot = current.pages.find((page) => page.id === pageId)?.slots.find((item) => item.id === slot.id);
+      if (currentSlot?.type !== "text") throw new Error("Text Slot not found on Page.");
+      return setTextStyle(current, pageId, slot.id, { ...currentSlot.style, [property]: !currentSlot.style[property] });
+    });
+    return true;
+  }
+
   return (
     <section className="album-editor" aria-label="Album Pages" onDragOver={(event) => {
       if (disabled || !hasPhotoDrag(event.dataTransfer)) return;
@@ -405,52 +424,9 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
               onClick={() => zoomPlacementBy(selectedPage.id, selectedSlot.id, 1.2)}>Zoom in</button>
           </>
         )}
-        {selectedSlot?.type === "text" && (
-          <>
-            <label className="workspace-label">Font family
-              <select aria-label="Font family" value={selectedSlot.style.fontFamily} disabled={disabled}
-                onChange={(event) => changeTextStyle({ fontFamily: event.target.value })}>
-                {[...new Set([selectedSlot.style.fontFamily, ...(fonts ?? [])])].map((font) => <option key={font} value={font}>{font}</option>)}
-              </select>
-            </label>
-            <label className="workspace-label">Size (pt)
-              <input aria-label="Font size (pt)" type="number" min="1" max="1000" step="1" value={selectedSlot.style.fontSize}
-                disabled={disabled} onChange={(event) => {
-                  const fontSize = event.target.valueAsNumber;
-                  if (Number.isFinite(fontSize) && fontSize >= 1 && fontSize <= 1000) changeTextStyle({ fontSize });
-                }} />
-            </label>
-            <label className="workspace-label">Colour
-              <input aria-label="Text colour" type="color" value={selectedSlot.style.color} disabled={disabled}
-                onChange={(event) => changeTextStyle({ color: event.target.value })} />
-            </label>
-            <label className="workspace-label"><input aria-label="Bold" type="checkbox" checked={selectedSlot.style.bold}
-              disabled={disabled} onChange={(event) => changeTextStyle({ bold: event.target.checked })} /> Bold</label>
-            <label className="workspace-label"><input aria-label="Italic" type="checkbox" checked={selectedSlot.style.italic}
-              disabled={disabled} onChange={(event) => changeTextStyle({ italic: event.target.checked })} /> Italic</label>
-            <label className="workspace-label">Alignment
-              <select aria-label="Text alignment" value={selectedSlot.style.align} disabled={disabled}
-                onChange={(event) => {
-                  const align = event.target.value;
-                  if (align === "left" || align === "center" || align === "right") changeTextStyle({ align });
-                }}>
-                <option value="left">Left</option><option value="center">Centre</option><option value="right">Right</option>
-              </select>
-            </label>
-          </>
-        )}
       </div>
-      {selectedSlot?.type === "text" && fontError && (
-        <div className="error-banner" role="alert">
-          {fontError}{" "}
-          <button type="button" className="button-quiet" onClick={() => {
-            setFontError(null);
-            setFontRetry((value) => value + 1);
-          }}>Retry fonts</button>
-        </div>
-      )}
       <div className="canvas-viewport" ref={viewportRef} role="group" aria-label="Spread editor">
-        {viewport.width > 0 && viewport.height > 0 && (
+        {viewport.width > 0 && viewport.height > 0 && scale > 0 && (
           <Stage width={viewport.width} height={viewport.height}>
             <Layer>
               {[spread.left, spread.right].map((page, side) => page && (
@@ -461,7 +437,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
                     const rect = slotRect(slot, originX + side * (pageWidth + gap) + bleedMm * scale);
                     const slotId = `${page.id}:${slot.id}`;
                     if (slot.type === "text") return (
-                      <TextContent key={slotId} slot={slot} id={slotId} rect={rect} scale={scale}
+                      <TextContent key={slotId} slot={slot} id={slotId} rect={rect} scale={scale} format={album.pageFormat}
                         hidden={editingText === slotId} onOverflow={reportTextOverflow} />
                     );
                     return slot.placement ? (
@@ -524,6 +500,8 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
           const rect = slotRect(slot, originX + side * (pageWidth + gap) + bleedMm * scale);
           const name = `Page ${pageNumbers.get(page.id)} ${slot.type === "photo" ? "Photo" : "Text"} Slot ${index + 1}`;
           const targetId = `${page.id}:${slot.id}`;
+          const outsidePage = slot.type === "text" && slot.text.length > 0
+            && (slot.x < -1e-9 || slot.y < -1e-9 || slot.x + slot.width > 1 + 1e-9 || slot.y + slot.height > 1 + 1e-9);
           const previewState = slot.placement && previewStates[targetId]?.path === slot.placement.photoPath
             ? previewStates[targetId] : undefined;
           const previewStatus = previewState?.status ?? "loading";
@@ -541,6 +519,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
               }}
               onDoubleClick={() => { if (!disabled && slot.type === "text") setEditingText(targetId); }}
               onKeyDown={(event) => {
+                if (toggleTextShortcut(event, page.id, slot)) return;
                 if (event.key === " " || event.key === "Enter") {
                   event.preventDefault();
                   selectSlot(page.id, slot.id);
@@ -579,13 +558,15 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
               {slot.type === "text" && editingText === targetId && (
                 <textarea className="slot-text-editor" aria-label={`Edit ${name}`} autoFocus value={slot.text} disabled={textDisabled}
                   style={{
-                    fontFamily: slot.style.fontFamily, fontSize: slot.style.fontSize * 25.4 / 72 * scale,
+                    fontFamily: slot.style.fontFamily, fontSize: slot.style.fontSize / POINTS_PER_MM * scale,
                     color: slot.style.color, fontWeight: slot.style.bold ? "bold" : "normal",
                     fontStyle: slot.style.italic ? "italic" : "normal", textAlign: slot.style.align,
+                    textDecoration: slot.style.underline ? "underline" : "none", lineHeight: TEXT_LINE_HEIGHT,
                   }}
                   onMouseDown={(event) => event.stopPropagation()}
                   onClick={(event) => event.stopPropagation()}
                   onKeyDown={(event) => {
+                    if (toggleTextShortcut(event, page.id, slot)) return;
                     event.stopPropagation();
                     if (event.key === "Escape") setEditingText(null);
                   }}
@@ -594,15 +575,15 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
                     changeAlbum((current) => setSlotText(current, page.id, slot.id, text));
                   }} />
               )}
-              {slot.type === "text" && overflowSlots[targetId] && (
-                <span className="slot-overflow-warning" role="status">Text overflows Slot</span>
+              {slot.type === "text" && (overflowSlots[targetId] || outsidePage) && (
+                <span className="slot-overflow-warning" role="status">{outsidePage ? "Text extends beyond Page" : "Text overflows Slot"}</span>
               )}
               {slot.type === "text" && editingText === targetId && !disabled && (
                 <span className="slot-move-handle" role="button" aria-label={`Move ${name}`}
                   onMouseDown={(event) => startSlotDrag(event, page.id, slot.id, "move")}>Move</span>
               )}
               {!disabled && (
-                <span className="slot-resize-handle" aria-label={`Resize ${name}`} role="button"
+                <span className={`slot-resize-handle${slot.type === "text" ? " slot-resize-handle--text" : ""}`} aria-label={`Resize ${name}`} role="button"
                   onMouseDown={(event) => startSlotDrag(event, page.id, slot.id, "resize")} />
               )}
             </div>
@@ -632,6 +613,13 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
             </Fragment>
           );
         }))}
+        {scale > 0 && selectedSlot?.type === "text" && (
+          <TextSlotControls key={`${selectedPage.id}:${selectedSlot.id}`} style={selectedSlot.style}
+            anchor={slotRect(selectedSlot, originX + (spread.left?.id === selectedPage.id ? 0 : pageWidth + gap) + bleedMm * scale)}
+            viewport={viewport} fonts={fonts} fontError={fontError} disabled={textDisabled}
+            onShortcut={(event) => toggleTextShortcut(event, selectedPage.id, selectedSlot)}
+            onStyle={changeTextStyle} onRetryFonts={() => { setFontError(null); setFontRetry((value) => value + 1); }} />
+        )}
       </div>
       <div className="workspace-footer">
         <span>PAGE {visiblePageIndex + 1} OF {album.pages.length}</span>
@@ -683,26 +671,20 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
   );
 }
 
-function TextContent({ slot, id, rect, scale, hidden, onOverflow }: {
-  slot: TextSlot; id: string; rect: { x: number; y: number; width: number; height: number };
-  scale: number; hidden: boolean; onOverflow: (id: string, overflow: boolean) => void;
+function TextContent({ slot, id, rect, scale, format, hidden, onOverflow }: {
+  slot: TextSlot; id: string; rect: Rectangle;
+  scale: number; format: PageFormat; hidden: boolean; onOverflow: (id: string, overflow: boolean) => void;
 }) {
-  const textRef = useRef<Konva.Text>(null);
-  const fontSize = slot.style.fontSize * 25.4 / 72 * scale;
-  const fontStyle = `${slot.style.italic ? "italic " : ""}${slot.style.bold ? "bold" : "normal"}`;
-  useLayoutEffect(() => {
-    const text = textRef.current;
-    if (!text) return;
-    const graphemes = new Set([...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(slot.text)]
-      .map(({ segment }) => segment).filter((segment) => segment !== "\n" && segment !== "\r\n"));
-    const tooWide = [...graphemes].some((segment) => text.measureSize(segment).width > rect.width + 0.01);
-    onOverflow(id, slot.text.length > 0 && (text.height() > rect.height + 0.01 || text.getTextWidth() > rect.width + 0.01 || tooWide));
-  }, [id, slot.text, slot.style, rect.width, rect.height, scale, onOverflow]);
+  const layout = useMemo(() => measureTextSlot(slot, format), [slot.text, slot.style, slot.width, format]);
+  useEffect(() => { onOverflow(id, layout.tooWide); }, [id, layout.tooWide, onOverflow]);
+  const textScale = scale / POINTS_PER_MM;
   return (
-    <Group clipX={rect.x} clipY={rect.y} clipWidth={rect.width} clipHeight={rect.height}>
-      <Text ref={textRef} x={rect.x} y={rect.y} width={rect.width} text={slot.text}
-        fontFamily={slot.style.fontFamily} fontSize={fontSize} fontStyle={fontStyle}
-        fill={slot.style.color} align={slot.style.align} lineHeight={1.2} opacity={hidden ? 0 : 1} />
+    <Group x={rect.x} y={rect.y} scaleX={textScale} scaleY={textScale}
+      clipX={0} clipY={0} clipWidth={layout.width} clipHeight={rect.height / textScale}>
+      <Text width={layout.width} text={slot.text}
+        fontFamily={slot.style.fontFamily} fontSize={slot.style.fontSize} fontStyle={textFontStyle(slot.style)}
+        textDecoration={slot.style.underline ? "underline" : ""}
+        fill={slot.style.color} align={slot.style.align} lineHeight={TEXT_LINE_HEIGHT} opacity={hidden ? 0 : 1} />
     </Group>
   );
 }

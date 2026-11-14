@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { forwardRef, useImperativeHandle, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { addTextSlot, createAlbum, deserializeAlbum, photoUsage, serializeAlbum, type Album, type AlbumPorts } from "../core";
@@ -11,20 +11,24 @@ vi.mock("react-konva", () => ({
   Stage: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   Layer: ({ children }: { children: ReactNode }) => <>{children}</>,
   Rect: () => null,
-  Text: forwardRef(function Text({ text, fontSize, width, lineHeight }: {
-    text: string; fontSize: number; width: number; lineHeight: number;
-  }, ref) {
-    const characterWidth = fontSize * 0.6;
-    useImperativeHandle(ref, () => ({
-      height: () => characterWidth > width ? 0 : text.split("\n").length * fontSize * lineHeight,
-      getTextWidth: () => characterWidth > width ? 0 : Math.min(width, text.length * characterWidth),
-      measureSize: () => ({ width: characterWidth }),
-    }));
-    return null;
-  }),
+  Text: () => null,
   Group: ({ children }: { children: ReactNode }) => <>{children}</>,
   Image: ({ image, opacity }: { image: HTMLImageElement; opacity?: number }) =>
     <img alt="Placement" src={image.src} style={{ opacity }} />,
+}));
+
+vi.mock("konva/lib/shapes/Text", () => ({
+  Text: class {
+    constructor(private options: { text: string; width: number; fontSize: number; lineHeight: number }) {}
+    height() {
+      const charactersPerLine = Math.floor(this.options.width / (this.options.fontSize * 0.6));
+      if (!charactersPerLine) return 0;
+      const lines = this.options.text.split("\n").reduce((count, line) => count + Math.max(1, Math.ceil(line.length / charactersPerLine)), 0);
+      return lines * this.options.fontSize * this.options.lineHeight;
+    }
+    measureSize() { return { width: this.options.fontSize * 0.6 }; }
+    destroy() {}
+  },
 }));
 
 beforeEach(() => {
@@ -33,7 +37,8 @@ beforeEach(() => {
   vi.stubGlobal("ResizeObserver", class {
     constructor(private callback: ResizeObserverCallback) {}
     observe(target: Element) {
-      this.callback([{ target, contentRect: new DOMRectReadOnly(0, 0, 1278, 800) } as ResizeObserverEntry], this);
+      const controls = target.classList.contains("text-slot-controls");
+      this.callback([{ target, contentRect: new DOMRectReadOnly(0, 0, controls ? 440 : 1278, controls ? 40 : 800) } as ResizeObserverEntry], this);
     }
     unobserve() {}
     disconnect() {}
@@ -64,6 +69,71 @@ function disk() {
   return { ports, files };
 }
 
+function setExactFontSize(points: string) {
+  fireEvent.change(screen.getByLabelText("Font size"), { target: { value: "custom" } });
+  const input = screen.getByLabelText("Font size (pt)");
+  fireEvent.change(input, { target: { value: points } });
+  fireEvent.keyDown(input, { key: "Enter" });
+}
+
+it("fits Text Slot height to its content and persists growth and shrinkage", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Text Slot" }));
+  const editor = screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" });
+  const slot = screen.getByRole("button", { name: "Page 1 Text Slot 1" });
+  fireEvent.change(editor, { target: { value: "One\nTwo\nThree\nFour" } });
+  expect(parseFloat(slot.style.height)).toBeCloseTo(60.96);
+  await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].height).toBeCloseTo(60.96 / 420));
+  fireEvent.change(editor, { target: { value: "One" } });
+  expect(parseFloat(slot.style.height)).toBeCloseTo(15.24);
+  await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].height).toBeCloseTo(15.24 / 420));
+});
+
+it("attaches compact text controls to the box with presets and an exact point size", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Text Slot" }));
+  const controls = screen.getByRole("toolbar", { name: "Text Slot controls" });
+  expect(screen.getByRole("group", { name: "Spread editor" }).contains(controls)).toBe(true);
+  expect(document.querySelector(".page-toolbar")?.contains(screen.getByLabelText("Font family"))).toBe(false);
+  fireEvent.change(within(controls).getByLabelText("Font size"), { target: { value: "36" } });
+  fireEvent.change(within(controls).getByLabelText("Font size"), { target: { value: "custom" } });
+  fireEvent.change(within(controls).getByLabelText("Font size (pt)"), { target: { value: "22.5" } });
+  fireEvent.keyDown(within(controls).getByLabelText("Font size (pt)"), { key: "Enter" });
+  fireEvent.click(within(controls).getByText("Format"));
+  fireEvent.click(within(controls).getByLabelText("Underline"));
+  await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0]).toMatchObject({
+    style: { fontSize: 22.5, underline: true },
+  }));
+});
+
+it("toggles whole-box formatting with standard shortcuts while editing and selecting text", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Text Slot" }));
+  const editor = screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" });
+  fireEvent.change(editor, { target: { value: "Caption" } });
+  for (const key of ["b", "i", "u"]) {
+    const event = new KeyboardEvent("keydown", { key, ctrlKey: true, bubbles: true, cancelable: true });
+    fireEvent(editor, event);
+    expect(event.defaultPrevented).toBe(true);
+  }
+  expect((screen.getByLabelText("Bold") as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByLabelText("Italic") as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByLabelText("Underline") as HTMLInputElement).checked).toBe(true);
+  expect((editor as HTMLTextAreaElement).style.textDecoration).toBe("underline");
+  fireEvent.keyDown(editor, { key: "Escape" });
+  fireEvent.keyDown(screen.getByRole("button", { name: "Page 1 Text Slot 1" }), { key: "b", metaKey: true });
+  fireEvent.keyDown(screen.getByRole("toolbar", { name: "Text Slot controls" }), { key: "i", ctrlKey: true });
+  await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0]).toMatchObject({
+    text: "Caption", style: { bold: false, italic: false, underline: true },
+  }));
+});
+
 it("edits a Text Slot in place and persists its content and styling", async () => {
   const { ports, files } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial", "Georgia"] }} />);
@@ -72,8 +142,9 @@ it("edits a Text Slot in place and persists its content and styling", async () =
   const text = screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" });
   fireEvent.change(text, { target: { value: "Hello\nworld" } });
   fireEvent.change(await screen.findByLabelText("Font family"), { target: { value: "Georgia" } });
-  fireEvent.change(screen.getByLabelText("Font size (pt)"), { target: { value: "24" } });
+  fireEvent.change(screen.getByLabelText("Font size"), { target: { value: "24" } });
   fireEvent.change(screen.getByLabelText("Text colour"), { target: { value: "#123456" } });
+  fireEvent.click(screen.getByText("Format"));
   fireEvent.click(screen.getByLabelText("Bold"));
   fireEvent.click(screen.getByLabelText("Italic"));
   fireEvent.change(screen.getByLabelText("Text alignment"), { target: { value: "center" } });
@@ -92,21 +163,22 @@ it("warns when even one character is wider than a Text Slot without shrinking it
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
   fireEvent.click(await screen.findByRole("button", { name: "Add Text Slot" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" }), { target: { value: "W" } });
-  fireEvent.change(screen.getByLabelText("Font size (pt)"), { target: { value: "1000" } });
+  drag(screen.getByRole("button", { name: "Resize Page 1 Text Slot 1" }), -225.72, 0);
+  setExactFontSize("100");
   expect(screen.getByText("Text overflows Slot")).toBeTruthy();
-  expect((screen.getByLabelText("Font size (pt)") as HTMLInputElement).value).toBe("1000");
-  fireEvent.change(screen.getByLabelText("Font size (pt)"), { target: { value: "18" } });
+  expect((screen.getByLabelText("Font size (pt)") as HTMLInputElement).value).toBe("100");
+  setExactFontSize("18");
   expect(screen.queryByText("Text overflows Slot")).toBeNull();
 });
 
-it("moves and resizes Text Slots, updates overflow, and supports keyboard editing and deletion", async () => {
+it("moves and width-resizes Text Slots while retaining fitted height and keyboard editing", async () => {
   const { ports, files } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
   fireEvent.click(await screen.findByRole("button", { name: "Add Text Slot" }));
   const edit = screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" });
   fireEvent.change(edit, { target: { value: "One\nTwo\nThree\nFour\nFive\nSix\nSeven\nEight\nNine\nTen\nEleven\nTwelve" } });
-  expect(screen.getByText("Text overflows Slot")).toBeTruthy();
+  expect(screen.queryByText("Text overflows Slot")).toBeNull();
   drag(screen.getByRole("button", { name: "Move Page 1 Text Slot 1" }), 59.4, 42);
   drag(screen.getByRole("button", { name: "Resize Page 1 Text Slot 1" }), 59.4, 100);
   expect(screen.queryByText("Text overflows Slot")).toBeNull();
@@ -119,10 +191,61 @@ it("moves and resizes Text Slots, updates overflow, and supports keyboard editin
     expect(saved.x).toBeCloseTo(0.4);
     expect(saved.y).toBeCloseTo(0.4);
     expect(saved.width).toBeCloseTo(0.5);
-    expect(saved.height).toBeCloseTo(1 + 3 / 210 - 0.4);
+    expect(saved.height).toBeCloseTo(182.88 / 420);
   });
   fireEvent.click(screen.getByRole("button", { name: "Delete Slot" }));
   expect(screen.queryByRole("button", { name: "Page 1 Text Slot 1" })).toBeNull();
+});
+
+it("keeps growing beyond the Page with a warning and clears it after text shrinks", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Text Slot" }));
+  const editor = screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" });
+  fireEvent.change(editor, { target: { value: Array(30).fill("Line").join("\n") } });
+  expect(screen.getByText("Text extends beyond Page")).toBeTruthy();
+  await waitFor(() => {
+    const slot = deserializeAlbum(files.get("Existing")!).pages[0].slots[0];
+    expect(slot.height).toBeCloseTo(457.2 / 420);
+    expect(slot.y).toBe(0.3);
+  });
+  fireEvent.change(editor, { target: { value: "Line" } });
+  expect(screen.queryByText("Text extends beyond Page")).toBeNull();
+});
+
+it("reflows text when its width or point size changes and retains that layout after reopening", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Text Slot" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" }), { target: { value: "ABCDEFGHIJKLMNOPQRSTUVWXYZ" } });
+  const resize = screen.getByRole("button", { name: "Resize Page 1 Text Slot 1" });
+  expect(resize.classList.contains("slot-resize-handle--text")).toBe(true);
+  drag(resize, -118.8, 100);
+  expect(parseFloat(screen.getByRole("button", { name: "Page 1 Text Slot 1" }).style.height)).toBeCloseTo(30.48);
+  fireEvent.change(screen.getByLabelText("Font size"), { target: { value: "36" } });
+  await waitFor(() => {
+    const slot = deserializeAlbum(files.get("Existing")!).pages[0].slots[0];
+    expect(slot.width).toBeCloseTo(0.2);
+    expect(slot).toMatchObject({ style: { fontSize: 36 } });
+  });
+  const height = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].height;
+  expect(height).toBeCloseTo(121.92 / 420);
+  fireEvent.click(screen.getByRole("button", { name: "Open Album Existing" }));
+  await waitFor(() => expect(parseFloat(screen.getByRole("button", { name: "Page 1 Text Slot 1" }).style.height)).toBeCloseTo(121.92));
+});
+
+it("shows invalid exact point sizes without changing the Text Slot", async () => {
+  const { ports } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Text Slot" }));
+  setExactFontSize("0");
+  expect(screen.getByRole("alert").textContent).toContain("between 1 and 1000 pt");
+  expect((screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" }) as HTMLTextAreaElement).style.fontSize).toBe("12.7px");
+  setExactFontSize("22.5");
+  expect(screen.queryByRole("alert")).toBeNull();
 });
 
 it("reports system font discovery failures and retries without losing text", async () => {

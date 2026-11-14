@@ -133,6 +133,7 @@ export function deserializeAlbum(json: string): Album {
   for (const page of album.pages) {
     for (const slot of page.slots) {
       if (slot.placement) slot.placement.fit ??= false;
+      if (slot.type === "text") slot.style.underline ??= false;
     }
   }
   return album;

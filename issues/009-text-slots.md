@@ -2,6 +2,8 @@
 
 Status: done · Depends on: 005
 
+Follow-up: [Auto-height text boxes and attached controls](009-addendum.md).
+
 ## What
 
 Add Text Slots for captions and titles.

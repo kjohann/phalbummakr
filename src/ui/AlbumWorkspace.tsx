@@ -4,6 +4,7 @@ import AlbumView from "./AlbumView";
 import { tauriAlbumPorts } from "./tauriAlbumPorts";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
 import { tauriFontPorts, type FontPorts } from "./tauriFontPorts";
+import { fitTextSlots } from "./textLayout";
 
 interface Props {
   root: string;
@@ -98,9 +99,10 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
     setError(null);
     try {
       const album = deserializeAlbum(await ports.read(root, name));
+      const fitted = fitTextSlots(album);
       savedJson.current = serializeAlbum(album);
-      setSaveStatus("saved");
-      setCurrentAlbum({ filename: name, album });
+      setSaveStatus(fitted === album ? "saved" : "pending");
+      setCurrentAlbum({ filename: name, album: fitted });
       setDuplicateWarning(null);
       setCreating(false);
       setSettingsOpen(false);
