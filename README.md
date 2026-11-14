@@ -72,9 +72,10 @@ changes in memory and offer **Retry save**. Closing the desktop window is also
 blocked during an Album operation or while changes remain unsaved. Each write
 uses a unique temporary file in `Albums/`, flushes it, then atomically replaces
 the destination. This keeps the previous file intact if replacement fails.
-Page edits pause during a write or after a save failure, but Page selection remains
-available. Album and Library switching also wait for an in-progress Crop gesture
-to finish and save.
+Page operations pause during a write or after a save failure, but Page selection
+remains available. Text editing can continue during a write; subsequent changes
+are saved in the next write. Album and Library switching also wait for an
+in-progress Crop gesture to finish and save.
 
 ## Photo Slots, Crop and Usage
 

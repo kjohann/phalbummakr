@@ -172,6 +172,39 @@ it("clears Text Slot selection when switching Pages with identically named Slots
   expect(screen.queryByLabelText("Font family")).toBeNull();
 });
 
+it("keeps in-place text editing available while an earlier autosave is in flight", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Text Slot" }));
+  const edit = screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" }) as HTMLTextAreaElement;
+  const write = vi.mocked(ports.write).getMockImplementation()!;
+  let finishWrite: () => void = () => {};
+  const firstWrite = new Promise<void>((resolve) => { finishWrite = resolve; });
+  vi.mocked(ports.write).mockImplementationOnce(async (...args) => { await firstWrite; await write(...args); });
+  vi.useFakeTimers();
+  edit.focus();
+  fireEvent.change(edit, { target: { value: "First" } });
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  expect(edit.disabled).toBe(false);
+  expect(document.activeElement).toBe(edit);
+  fireEvent.change(edit, { target: { value: "First and second" } });
+  await act(async () => { finishWrite(); await firstWrite; });
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0]).toMatchObject({ text: "First and second" });
+});
+
+it("finishes text editing when a Photo Slot is added", async () => {
+  const { ports } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Text Slot" }));
+  expect(screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  expect(screen.queryByRole("textbox", { name: "Edit Page 1 Text Slot 1" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Page 1 Photo Slot 2" }).getAttribute("aria-pressed")).toBe("true");
+});
+
 it("selects facing Pages from a Spread strip below the editor and blocks out the inside cover", async () => {
   const { ports } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} />);

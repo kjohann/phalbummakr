@@ -13,6 +13,7 @@ interface Props {
   album: Album;
   onChange: (update: (album: Album) => Album) => void;
   disabled: boolean;
+  textDisabled: boolean;
   root: string;
   photoPorts: PhotoPreviewPorts;
   fontPorts: FontPorts;
@@ -37,7 +38,7 @@ function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, trimHeig
     : resizeSlot(album, drag.pageId, drag.slotId, slot.width + drag.dx / trimWidth, slot.height + drag.dy / trimHeight);
 }
 
-export default function AlbumView({ album: savedAlbum, onChange, disabled, root, photoPorts, fontPorts, onDuplicatePhoto, onCropPendingChange }: Props) {
+export default function AlbumView({ album: savedAlbum, onChange, disabled, textDisabled, root, photoPorts, fontPorts, onDuplicatePhoto, onCropPendingChange }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLElement>(null);
   const selectedSlotOverlayRef = useRef<HTMLDivElement>(null);
@@ -371,6 +372,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, root,
           const added = addPhotoSlot(album, pageId).pages.find((page) => page.id === pageId)!.slots.at(-1)!;
           changeAlbum((current) => addPhotoSlot(current, pageId));
           setSelectedSlotId(added.id);
+          setEditingText(null);
         }}>Add Photo Slot</button>
         <button type="button" className="button-quiet" disabled={disabled} onClick={() => {
           const pageId = selectedPage.id;
@@ -575,7 +577,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, root,
                 <span className="slot-drop-label">{slot.placement ? "Replace Photo" : "Place Photo"}</span>
               )}
               {slot.type === "text" && editingText === targetId && (
-                <textarea className="slot-text-editor" aria-label={`Edit ${name}`} autoFocus value={slot.text} disabled={disabled}
+                <textarea className="slot-text-editor" aria-label={`Edit ${name}`} autoFocus value={slot.text} disabled={textDisabled}
                   style={{
                     fontFamily: slot.style.fontFamily, fontSize: slot.style.fontSize * 25.4 / 72 * scale,
                     color: slot.style.color, fontWeight: slot.style.bold ? "bold" : "normal",

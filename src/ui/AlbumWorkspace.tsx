@@ -250,6 +250,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
             root={root} photoPorts={photoPorts} fontPorts={fontPorts}
             onDuplicatePhoto={setDuplicateWarning}
             onCropPendingChange={setCropPending}
+            textDisabled={busy || saveStatus === "error"}
             disabled={busy || saveStatus === "saving" || saveStatus === "error"} />
         </>
       ) : <p className="photo-empty">Open an Album or create a new one.</p>}
