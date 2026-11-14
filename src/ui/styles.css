@@ -812,6 +812,8 @@ body {
   align-items: center;
   flex-wrap: wrap;
   gap: 4px;
+  /* Intrinsic width keeps wrapping independent of the computed left offset. */
+  width: max-content;
   max-width: calc(100% - 16px);
   padding: 6px;
   border: 1px solid #b9c3b9;

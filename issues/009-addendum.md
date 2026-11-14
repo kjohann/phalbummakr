@@ -88,10 +88,19 @@ Status: done
 
 ### Implementation, review and verification
 
-- There was no CSS entrance animation: initial placement used zero toolbar
-  dimensions until ResizeObserver delivered its first measurement. Measure
-  dimensions in a layout effect before painting, including after controls change.
-  ResizeObserver still handles external layout changes.
+- There was no CSS entrance animation. Two causes produced the apparent slide:
+  initial placement used zero toolbar dimensions until ResizeObserver delivered
+  its first measurement, and the absolutely positioned, wrapping toolbar had a
+  shrink-to-fit width that depended on its own `left` offset. Near the right
+  edge it started wrapped and tall below the box, then crept 8 px left per
+  frame for about 16 frames before jumping above the box.
+- Dimensions are now measured in a layout effect before painting, including
+  after controls change. ResizeObserver still handles external layout changes.
+- The toolbar uses `width: max-content` (still capped by `max-width`), so its
+  width no longer depends on its position and a single measurement is final.
+- A temporary browser harness recorded the toolbar's per-frame geometry. The
+  original code showed 17 distinct positions; the fix shows one, stable from the
+  first painted frame. Narrow viewports still wrap within one frame.
 - A regression test withholds ResizeObserver notifications and checks the final
   right-Page position both on mounting and when custom-size controls wrap.
   It failed before the fix and passes afterwards.
@@ -100,8 +109,8 @@ Status: done
 - Earlier low-priority considerations were reassessed. Native WebView2
   verification remains relevant but manual; missing-font warnings and the other
   previously recorded deferrals are outside this positioning fix.
-- No temporary servers or instrumentation were started. Cleanup checks found
-  no running task shells and no listeners on ports 1420 or 1421.
+- The temporary harness files and Vite server on port 1422 were removed and
+  stopped after verification.
 
 ### Future considerations (low priority)
 
