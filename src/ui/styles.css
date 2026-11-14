@@ -328,7 +328,7 @@ body {
 
 .canvas-viewport {
   position: relative;
-  min-height: 0;
+  min-height: 240px;
   flex: 1;
 }
 
@@ -756,6 +756,50 @@ body {
 .slot-overlay[aria-pressed="true"] .slot-resize-handle,
 .slot-overlay:hover .slot-resize-handle {
   visibility: visible;
+}
+
+.page-toolbar input[type="number"] {
+  width: 65px;
+}
+
+.slot-text-editor {
+  position: absolute;
+  inset: -2px;
+  width: calc(100% + 4px);
+  height: calc(100% + 4px);
+  box-sizing: border-box;
+  resize: none;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  line-height: 1.2;
+  overflow-wrap: break-word;
+}
+
+.slot-move-handle,
+.slot-overflow-warning {
+  position: absolute;
+  z-index: 1;
+  padding: 2px 4px;
+  font-size: 11px;
+}
+
+.slot-move-handle {
+  top: -18px;
+  right: -2px;
+  background: #415d50;
+  color: #fff;
+  cursor: move;
+}
+
+.slot-overflow-warning {
+  right: 0;
+  bottom: 0;
+  background: #fff1d2;
+  color: #704b16;
+  pointer-events: none;
 }
 
 .photo-tile[draggable="true"] {

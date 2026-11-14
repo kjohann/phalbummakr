@@ -98,6 +98,20 @@ shows a dismissible warning but does not prevent the Placement.
 Tauri's native file-drop interception is disabled so HTML Page drag reordering
 can work on Windows. The app does not currently accept file drops from Explorer.
 
+## Text Slots
+
+Use **Add Text Slot** to place a caption or title on the selected Page. Type in
+place; double-click a Text Slot or select it and press Enter to edit it again.
+Escape finishes editing. Drag its outline (or the **Move** handle while editing)
+and use the bottom-right handle to resize it. **Delete Slot** removes it.
+
+The toolbar offers installed Windows font families, point size, colour, bold,
+italic and alignment. Text is clipped at the Slot boundary rather than resized;
+an overflow warning appears when it does not fit. Text and style autosave with
+the Page, and duplicating a Page creates an independent copy. A Layout can later
+reuse the Slot's style without copying its Page text. If font discovery fails,
+the existing font remains selected and **Retry fonts** is available.
+
 ## Test and build
 
 - `npm test` runs Vitest for the pure TypeScript domain core and React UI (with a mocked desktop bridge).

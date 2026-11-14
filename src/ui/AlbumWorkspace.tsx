@@ -3,16 +3,18 @@ import { createAlbum, deserializeAlbum, serializeAlbum, type Album, type AlbumPo
 import AlbumView from "./AlbumView";
 import { tauriAlbumPorts } from "./tauriAlbumPorts";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
+import { tauriFontPorts, type FontPorts } from "./tauriFontPorts";
 
 interface Props {
   root: string;
   ports?: AlbumPorts;
   photoPorts?: PhotoPreviewPorts;
+  fontPorts?: FontPorts;
   onBusyChange?: (busy: boolean) => void;
   onAlbumChange?: (album: Album | null) => void;
 }
 
-export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, onBusyChange, onAlbumChange }: Props) {
+export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange }: Props) {
   const [names, setNames] = useState<string[]>([]);
   const [current, setCurrent] = useState<{ filename: string; album: Album } | null>(null);
   const [creating, setCreating] = useState(false);
@@ -245,7 +247,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
             <span role="status">{saveStatus === "saved" && !cropPending ? "Saved" : saveStatus === "error" ? "Not saved" : "Saving..."}</span>
           </div>
           <AlbumView key={current.filename} album={current.album} onChange={changeAlbum}
-            root={root} photoPorts={photoPorts}
+            root={root} photoPorts={photoPorts} fontPorts={fontPorts}
             onDuplicatePhoto={setDuplicateWarning}
             onCropPendingChange={setCropPending}
             disabled={busy || saveStatus === "saving" || saveStatus === "error"} />

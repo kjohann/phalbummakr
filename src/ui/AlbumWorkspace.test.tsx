@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { useState, type ReactNode } from "react";
+import { forwardRef, useImperativeHandle, useState, type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createAlbum, deserializeAlbum, photoUsage, serializeAlbum, type Album, type AlbumPorts } from "../core";
+import { addTextSlot, createAlbum, deserializeAlbum, photoUsage, serializeAlbum, type Album, type AlbumPorts } from "../core";
 import AlbumWorkspace from "./AlbumWorkspace";
 import PhotoBrowser from "./PhotoBrowser";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
@@ -11,6 +11,18 @@ vi.mock("react-konva", () => ({
   Stage: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   Layer: ({ children }: { children: ReactNode }) => <>{children}</>,
   Rect: () => null,
+  Text: forwardRef(function Text({ text, fontSize, width, lineHeight }: {
+    text: string; fontSize: number; width: number; lineHeight: number;
+  }, ref) {
+    const characterWidth = fontSize * 0.6;
+    useImperativeHandle(ref, () => ({
+      height: () => characterWidth > width ? 0 : text.split("\n").length * fontSize * lineHeight,
+      getTextWidth: () => characterWidth > width ? 0 : Math.min(width, text.length * characterWidth),
+      measureSize: () => ({ width: characterWidth }),
+    }));
+    return null;
+  }),
+  Group: ({ children }: { children: ReactNode }) => <>{children}</>,
   Image: ({ image, opacity }: { image: HTMLImageElement; opacity?: number }) =>
     <img alt="Placement" src={image.src} style={{ opacity }} />,
 }));
@@ -51,6 +63,114 @@ function disk() {
   };
   return { ports, files };
 }
+
+it("edits a Text Slot in place and persists its content and styling", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial", "Georgia"] }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Text Slot" }));
+  const text = screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" });
+  fireEvent.change(text, { target: { value: "Hello\nworld" } });
+  fireEvent.change(await screen.findByLabelText("Font family"), { target: { value: "Georgia" } });
+  fireEvent.change(screen.getByLabelText("Font size (pt)"), { target: { value: "24" } });
+  fireEvent.change(screen.getByLabelText("Text colour"), { target: { value: "#123456" } });
+  fireEvent.click(screen.getByLabelText("Bold"));
+  fireEvent.click(screen.getByLabelText("Italic"));
+  fireEvent.change(screen.getByLabelText("Text alignment"), { target: { value: "center" } });
+  await waitFor(() => {
+    const saved = deserializeAlbum(files.get("Existing")!);
+    expect(saved.pages[0].slots[0]).toMatchObject({
+      type: "text", text: "Hello\nworld",
+      style: { fontFamily: "Georgia", fontSize: 24, color: "#123456", bold: true, italic: true, align: "center" },
+    });
+  });
+});
+
+it("warns when even one character is wider than a Text Slot without shrinking its font", async () => {
+  const { ports } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Text Slot" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" }), { target: { value: "W" } });
+  fireEvent.change(screen.getByLabelText("Font size (pt)"), { target: { value: "1000" } });
+  expect(screen.getByText("Text overflows Slot")).toBeTruthy();
+  expect((screen.getByLabelText("Font size (pt)") as HTMLInputElement).value).toBe("1000");
+  fireEvent.change(screen.getByLabelText("Font size (pt)"), { target: { value: "18" } });
+  expect(screen.queryByText("Text overflows Slot")).toBeNull();
+});
+
+it("moves and resizes Text Slots, updates overflow, and supports keyboard editing and deletion", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Text Slot" }));
+  const edit = screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" });
+  fireEvent.change(edit, { target: { value: "One\nTwo\nThree\nFour\nFive\nSix\nSeven\nEight\nNine\nTen\nEleven\nTwelve" } });
+  expect(screen.getByText("Text overflows Slot")).toBeTruthy();
+  drag(screen.getByRole("button", { name: "Move Page 1 Text Slot 1" }), 59.4, 42);
+  drag(screen.getByRole("button", { name: "Resize Page 1 Text Slot 1" }), 59.4, 100);
+  expect(screen.queryByText("Text overflows Slot")).toBeNull();
+  fireEvent.keyDown(edit, { key: "Escape" });
+  const slot = screen.getByRole("button", { name: "Page 1 Text Slot 1" });
+  fireEvent.keyDown(slot, { key: "Enter" });
+  expect(screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" })).toBeTruthy();
+  await waitFor(() => {
+    const saved = deserializeAlbum(files.get("Existing")!).pages[0].slots[0];
+    expect(saved.x).toBeCloseTo(0.4);
+    expect(saved.y).toBeCloseTo(0.4);
+    expect(saved.width).toBeCloseTo(0.5);
+    expect(saved.height).toBeCloseTo(1 + 3 / 210 - 0.4);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Delete Slot" }));
+  expect(screen.queryByRole("button", { name: "Page 1 Text Slot 1" })).toBeNull();
+});
+
+it("reports system font discovery failures and retries without losing text", async () => {
+  const { ports } = disk();
+  const list = vi.fn().mockRejectedValueOnce(new Error("Font service unavailable")).mockResolvedValue(["Arial", "Georgia"]);
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Text Slot" }));
+  const edit = screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" });
+  fireEvent.change(edit, { target: { value: "Caption" } });
+  expect((await screen.findByRole("alert")).textContent).toContain("Font service unavailable");
+  fireEvent.click(screen.getByRole("button", { name: "Retry fonts" }));
+  await waitFor(() => expect(within(screen.getByLabelText("Font family")).getByRole("option", { name: "Georgia" })).toBeTruthy());
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect((edit as HTMLTextAreaElement).value).toBe("Caption");
+});
+
+it("does not highlight or replace a Text Slot when dragging a Photo", async () => {
+  const { ports } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Text Slot" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" }), { target: { value: "Caption" } });
+  const slot = screen.getByRole("button", { name: "Page 1 Text Slot 1" });
+  const drop = photoDrop({ path: "a.jpg", width: 100, height: 100, orientation: 1 });
+  fireEvent.dragStart(window, drop);
+  expect(slot.classList.contains("slot-overlay--dragging")).toBe(false);
+  fireEvent.dragOver(slot, drop);
+  fireEvent.drop(slot, drop);
+  expect((screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" }) as HTMLTextAreaElement).value).toBe("Caption");
+  expect(screen.queryByRole("button", { name: "Page 1 Photo Slot 1" })).toBeNull();
+});
+
+it("clears Text Slot selection when switching Pages with identically named Slots", async () => {
+  const { ports, files } = disk();
+  let album = createAlbum({ name: "Existing", pageCount: 2 });
+  album = addTextSlot(addTextSlot(album, "page-1"), "page-2");
+  files.set("Existing", serializeAlbum(album));
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  const firstSlot = await screen.findByRole("button", { name: "Page 1 Text Slot 1" });
+  fireEvent.click(firstSlot);
+  fireEvent.doubleClick(firstSlot);
+  expect(screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" })).toBeTruthy();
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Spreads" })).getByRole("button", { name: "Select Page 2" }));
+  expect(screen.getByRole("button", { name: "Page 2 Text Slot 1" }).getAttribute("aria-pressed")).toBe("false");
+  expect(screen.queryByLabelText("Font family")).toBeNull();
+});
 
 it("selects facing Pages from a Spread strip below the editor and blocks out the inside cover", async () => {
   const { ports } = disk();

@@ -28,7 +28,29 @@ export interface PhotoSlot {
   placement: Placement | null;
 }
 
-export type Slot = PhotoSlot;
+export interface TextStyle {
+  fontFamily: string;
+  /** Font size in points. */
+  fontSize: number;
+  color: string;
+  bold: boolean;
+  italic: boolean;
+  align: "left" | "center" | "right";
+}
+
+export interface TextSlot {
+  id: string;
+  type: "text";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text: string;
+  style: TextStyle;
+  placement?: never;
+}
+
+export type Slot = PhotoSlot | TextSlot;
 
 function editPage(album: Album, pageId: string, edit: (page: Page) => Page): Album {
   const index = album.pages.findIndex((page) => page.id === pageId);
@@ -54,6 +76,16 @@ export function addPhotoSlot(album: Album, pageId: string): Album {
   }));
 }
 
+export function addTextSlot(album: Album, pageId: string): Album {
+  return editPage(album, pageId, (page) => ({
+    ...page,
+    slots: [...page.slots, {
+      id: unusedSlotId(page), type: "text", x: 0.3, y: 0.3, width: 0.4, height: 0.4,
+      text: "", style: { fontFamily: "Arial", fontSize: 18, color: "#000000", bold: false, italic: false, align: "left" },
+    }],
+  }));
+}
+
 function editSlot(album: Album, pageId: string, slotId: string, edit: (slot: Slot) => Slot): Album {
   return editPage(album, pageId, (page) => {
     const index = page.slots.findIndex((slot) => slot.id === slotId);
@@ -61,6 +93,20 @@ function editSlot(album: Album, pageId: string, slotId: string, edit: (slot: Slo
     const slots = [...page.slots];
     slots[index] = edit(slots[index]);
     return { ...page, slots };
+  });
+}
+
+export function setSlotText(album: Album, pageId: string, slotId: string, text: string): Album {
+  return editSlot(album, pageId, slotId, (slot) => {
+    if (slot.type !== "text") throw new Error("Slot is not a Text Slot.");
+    return { ...slot, text };
+  });
+}
+
+export function setTextStyle(album: Album, pageId: string, slotId: string, style: TextStyle): Album {
+  return editSlot(album, pageId, slotId, (slot) => {
+    if (slot.type !== "text") throw new Error("Slot is not a Text Slot.");
+    return { ...slot, style: { ...style } };
   });
 }
 
@@ -104,7 +150,7 @@ export function resizeSlot(album: Album, pageId: string, slotId: string, width: 
       width: clamp(width, MIN_SLOT_SIZE, Math.max(MIN_SLOT_SIZE, box.right - slot.x)),
       height: clamp(height, MIN_SLOT_SIZE, Math.max(MIN_SLOT_SIZE, box.bottom - slot.y)),
     };
-    if (!slot.placement) return resized;
+    if (slot.type !== "photo" || !slot.placement) return resized;
     const { crop } = slot.placement;
     // The Crop has the old Slot's printed aspect, so it also records the Photo's upright aspect.
     const previousAspect = slotAspect(album, slot);
@@ -116,7 +162,9 @@ export function resizeSlot(album: Album, pageId: string, slotId: string, width: 
     const cropWidth = nextCover.width * zoomScale;
     const cropHeight = nextCover.height * zoomScale;
     return {
-      ...resized,
+      ...slot,
+      width: resized.width,
+      height: resized.height,
       placement: {
         ...slot.placement,
         crop: {
@@ -170,10 +218,10 @@ function isRelativePhotoPath(path: unknown): path is string {
 
 export function placePhoto(album: Album, pageId: string, slotId: string, photo: PlaceablePhoto): Album {
   const upright = uprightPhotoAspect(photo);
-  return editSlot(album, pageId, slotId, (slot) => ({
-    ...slot,
-    placement: { photoPath: photo.path, crop: centredCrop(upright, slotAspect(album, slot)), fit: false },
-  }));
+  return editSlot(album, pageId, slotId, (slot) => {
+    if (slot.type !== "photo") throw new Error("Slot is not a Photo Slot.");
+    return { ...slot, placement: { photoPath: photo.path, crop: centredCrop(upright, slotAspect(album, slot)), fit: false } };
+  });
 }
 
 export function setPlacementFit(album: Album, pageId: string, slotId: string, fit: boolean): Album {
@@ -278,14 +326,30 @@ export function validateSlots(slots: unknown): asserts slots is Slot[] {
   if (!Array.isArray(slots)) throw new Error("Page Slots must be an array.");
   const ids = new Set<string>();
   for (const slot of slots) {
-    if (!exactRecord(slot, ["id", "type", "x", "y", "width", "height", "placement"])
-      || typeof slot.id !== "string" || !slot.id || ids.has(slot.id) || slot.type !== "photo"
+    if ((!exactRecord(slot, ["id", "type", "x", "y", "width", "height", "placement"])
+      && !exactRecord(slot, ["id", "type", "x", "y", "width", "height", "text", "style"]))
+      || typeof slot.id !== "string" || !slot.id || ids.has(slot.id)
       || !finite(slot.x) || !finite(slot.y) || !finite(slot.width) || !finite(slot.height)
       || slot.width <= 0 || slot.height <= 0) {
       throw new Error("Invalid or unsupported Slot.");
     }
     ids.add(slot.id);
-    if (slot.placement !== null) validatePlacement(slot.placement);
+    if (slot.type === "photo" && "placement" in slot) {
+      if (slot.placement !== null) validatePlacement(slot.placement);
+    } else if (slot.type === "text" && "text" in slot && typeof slot.text === "string") {
+      validateTextStyle(slot.style);
+    } else throw new Error("Invalid or unsupported Slot.");
+  }
+}
+
+function validateTextStyle(style: unknown): asserts style is TextStyle {
+  if (!exactRecord(style, ["fontFamily", "fontSize", "color", "bold", "italic", "align"])
+    || typeof style.fontFamily !== "string" || !style.fontFamily.trim()
+    || !finite(style.fontSize) || style.fontSize <= 0
+    || typeof style.color !== "string" || !/^#[0-9a-f]{6}$/i.test(style.color)
+    || typeof style.bold !== "boolean" || typeof style.italic !== "boolean"
+    || (style.align !== "left" && style.align !== "center" && style.align !== "right")) {
+    throw new Error("Invalid Text Slot style.");
   }
 }
 

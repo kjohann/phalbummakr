@@ -1,4 +1,5 @@
 mod albums;
+mod fonts;
 mod library;
 mod photos;
 mod settings;
@@ -106,12 +107,20 @@ pub fn run() {
             scan_photos,
             photo_thumbnail,
             photo_preview,
+            list_system_fonts,
             list_albums,
             read_album,
             write_album
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[tauri::command]
+async fn list_system_fonts() -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(fonts::system_fonts)
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
