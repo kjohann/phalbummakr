@@ -33,7 +33,7 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | -------- | ----- | ------ |
 | [004 addendum – Spread layout and Album settings](004-addendum.md) | 004 | done |
 | [004 addendum – Hide the Albums folder](004-addendum.md#section-2--hide-the-albums-folder) | 004 | done |
-| [006 addendum – Drop feedback, Slots on drop and faster previews](006-addendum.md) | 006 | todo |
+| [006 addendum – Drop feedback, Slots on drop and faster previews](006-addendum.md) | 006 | doing |
 
 ## After the MVP
 

@@ -33,7 +33,10 @@ function PhotoThumbnail({ root, photo }: { root: string; photo: Photo }) {
   const name = photo.path.split("/").pop()!;
   return (
     <figure className="photo-tile" title={`${photo.path}\n${photo.width} x ${photo.height} pixels`}
-      draggable onDragStart={(event) => writePhotoDrag(event.dataTransfer, photo)}>
+      draggable onDragStart={(event) => {
+        writePhotoDrag(event.dataTransfer, photo, source ?? undefined);
+        void tauriPhotoPorts.prewarmPreview(root, photo).catch(() => undefined);
+      }}>
       <div className="photo-preview">
         {source && <img src={source} alt={name} loading="lazy" decoding="async" draggable={false} />}
         {!source && !error && <span className="photo-placeholder">Loading...</span>}

@@ -139,23 +139,62 @@ function centredCrop(photoAspect: number, targetAspect: number, centreX = 0.5, c
   };
 }
 
+function uprightPhotoAspect(photo: PlaceablePhoto): number {
+  if (!isRelativePhotoPath(photo.path)) throw new Error("Photo path must be relative to the Library root.");
+  if (!(photo.width > 0) || !(photo.height > 0) || !Number.isFinite(photo.width) || !Number.isFinite(photo.height)) {
+    throw new Error("Photo size must be a positive number of pixels.");
+  }
+  return photo.orientation >= 5 && photo.orientation <= 8
+    ? photo.height / photo.width : photo.width / photo.height;
+}
+
 function isRelativePhotoPath(path: unknown): path is string {
   return typeof path === "string" && path !== "" && !path.includes("\\") && !/^[a-z]:/i.test(path)
     && path.split("/").every((part) => part !== "" && part !== "." && part !== "..");
 }
 
 export function placePhoto(album: Album, pageId: string, slotId: string, photo: PlaceablePhoto): Album {
-  if (!isRelativePhotoPath(photo.path)) throw new Error("Photo path must be relative to the Library root.");
-  if (!(photo.width > 0) || !(photo.height > 0) || !Number.isFinite(photo.width) || !Number.isFinite(photo.height)) {
-    throw new Error("Photo size must be a positive number of pixels.");
-  }
-  // EXIF orientations 5-8 rotate the stored pixels by 90 degrees.
-  const upright = photo.orientation >= 5 && photo.orientation <= 8
-    ? photo.height / photo.width : photo.width / photo.height;
+  const upright = uprightPhotoAspect(photo);
   return editSlot(album, pageId, slotId, (slot) => ({
     ...slot,
     placement: { photoPath: photo.path, crop: centredCrop(upright, slotAspect(album, slot)) },
   }));
+}
+
+export function placePhotoOnPage(
+  album: Album,
+  pageId: string,
+  photo: PlaceablePhoto,
+  centreX: number,
+  centreY: number,
+): Album {
+  const photoAspect = uprightPhotoAspect(photo);
+  if (!Number.isFinite(centreX) || !Number.isFinite(centreY)) throw new Error("Drop point must be finite.");
+  const page = album.pages.find((item) => item.id === pageId);
+  if (!page) throw new Error("Page not found in Album.");
+
+  const { widthMm, heightMm } = pageDimensions(album.pageFormat);
+  const size = photoAspect >= 1
+    ? { width: 0.4, height: 0.4 * widthMm / (photoAspect * heightMm) }
+    : { width: 0.4 * photoAspect * heightMm / widthMm, height: 0.4 };
+  const box = bleedBox(album);
+  const clampedCentreX = clamp(centreX, box.left, box.right);
+  const clampedCentreY = clamp(centreY, box.top, box.bottom);
+  const left = clamp(clampedCentreX - size.width / 2, box.left, box.right);
+  const right = clamp(clampedCentreX + size.width / 2, box.left, box.right);
+  const top = clamp(clampedCentreY - size.height / 2, box.top, box.bottom);
+  const bottom = clamp(clampedCentreY + size.height / 2, box.top, box.bottom);
+  const slot: PhotoSlot = {
+    id: unusedSlotId(page),
+    type: "photo",
+    x: left,
+    y: top,
+    width: right - left,
+    height: bottom - top,
+    placement: null,
+  };
+  slot.placement = { photoPath: photo.path, crop: centredCrop(photoAspect, slotAspect(album, slot)) };
+  return editPage(album, pageId, (current) => ({ ...current, slots: [...current.slots, slot] }));
 }
 
 function finite(value: unknown): value is number {

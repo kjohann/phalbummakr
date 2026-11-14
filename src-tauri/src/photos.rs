@@ -309,16 +309,16 @@ pub fn thumbnail(
     )
 }
 
-const PREVIEW_LONG_EDGE: u32 = 2048;
+const PREVIEW_LONG_EDGE: u32 = 1024;
 
-/// An upright JPEG of a Photo for the editor, at most 2048 px on the long edge.
+/// An upright JPEG of a Photo for the editor, at most 1024 px on the long edge.
 /// Keyed by the Photo's current file revision, so changed files get a new preview.
 pub fn preview(root: &Path, cache: &Path, relative: &str) -> Result<Vec<u8>, String> {
     let (root, path) = resolve_photo(root, relative)?;
     let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
     let mut hash = Sha256::new();
     // Bump the version when preview size, encoding or orientation handling changes.
-    hash.update(b"preview-v1-2048-jpeg\0");
+    hash.update(b"preview-v4-1024-jpeg\0");
     hash.update(revision(&root, relative, &metadata)?.as_bytes());
     let key = format!("{:x}", hash.finalize());
     cached_rendition(
@@ -340,20 +340,25 @@ pub fn preview(root: &Path, cache: &Path, relative: &str) -> Result<Vec<u8>, Str
                 orientation,
             );
             // Pages are white, so transparent pixels are shown on white.
-            let mut rgb = image::RgbImage::new(image.width(), image.height());
-            for (x, y, pixel) in image.to_rgba8().enumerate_pixels() {
-                let alpha = pixel[3] as u32;
-                rgb.put_pixel(
-                    x,
-                    y,
-                    image::Rgb(std::array::from_fn(|channel| {
-                        ((pixel[channel] as u32 * alpha + 255 * (255 - alpha)) / 255) as u8
-                    })),
+            let rgb = if image.color().has_alpha() {
+                let mut background = image::RgbaImage::from_pixel(
+                    image.width(),
+                    image.height(),
+                    image::Rgba([255, 255, 255, 255]),
                 );
-            }
+                image::imageops::overlay(&mut background, &image.to_rgba8(), 0, 0);
+                image::DynamicImage::ImageRgba8(background).to_rgb8()
+            } else {
+                image.to_rgb8()
+            };
             let mut bytes = Vec::new();
             image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 85)
-                .encode_image(&rgb)
+                .encode(
+                    rgb.as_raw(),
+                    rgb.width(),
+                    rgb.height(),
+                    image::ExtendedColorType::Rgb8,
+                )
                 .map_err(|error| error.to_string())?;
             Ok(bytes)
         },
@@ -567,7 +572,7 @@ mod tests {
     }
 
     #[test]
-    fn previews_are_upright_at_most_2048_pixels_cached_and_rebuilt_when_the_photo_changes() {
+    fn previews_are_upright_at_most_1024_pixels_cached_and_rebuilt_when_the_photo_changes() {
         let dir = tempfile::tempdir().unwrap();
         let cache = tempfile::tempdir().unwrap();
         crate::library::create_library(dir.path()).unwrap();
@@ -587,12 +592,12 @@ mod tests {
 
         let wide = image::load_from_memory(&preview(dir.path(), cache.path(), "wide.jpg").unwrap())
             .unwrap();
-        assert_eq!((wide.width(), wide.height()), (2048, 1024));
+        assert_eq!((wide.width(), wide.height()), (1024, 512));
         let rotated = image::load_from_memory(
             &preview(dir.path(), cache.path(), "rotated-large.jpg").unwrap(),
         )
         .unwrap();
-        assert_eq!((rotated.width(), rotated.height()), (1024, 2048));
+        assert_eq!((rotated.width(), rotated.height()), (512, 1024));
         let small =
             image::load_from_memory(&preview(dir.path(), cache.path(), "rotated.jpg").unwrap())
                 .unwrap();
@@ -718,5 +723,31 @@ mod tests {
             .photos
             .iter()
             .any(|photo| photo.path == "first.JPG"));
+    }
+
+    #[test]
+    fn previews_composite_transparent_pixels_onto_white() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        crate::library::create_library(dir.path()).unwrap();
+        let image = image::RgbaImage::from_fn(40, 20, |x, _| {
+            if x < 20 {
+                image::Rgba([0, 0, 0, 0])
+            } else {
+                image::Rgba([255, 0, 0, 128])
+            }
+        });
+        image.save(dir.path().join("transparent.png")).unwrap();
+
+        let preview =
+            image::load_from_memory(&preview(dir.path(), cache.path(), "transparent.png").unwrap())
+                .unwrap()
+                .to_rgb8();
+        let transparent = preview.get_pixel(5, 5);
+        let translucent = preview.get_pixel(30, 5);
+        assert!(transparent.0.into_iter().all(|channel| channel > 245));
+        assert!(translucent[0] > 245);
+        assert!((110..=145).contains(&translucent[1]));
+        assert!((110..=145).contains(&translucent[2]));
     }
 }

@@ -639,6 +639,69 @@ body {
   border: 2px solid #415d50;
 }
 
+.slot-overlay--dragging:not(.slot-overlay--drop-target) {
+  border-color: #82978c;
+  background: rgb(86 130 157 / 6%);
+}
+
+.slot-overlay--drop-target {
+  z-index: 1;
+  border: 2px solid #287b66;
+  background: rgb(86 130 157 / 18%);
+}
+
+.slot-drop-label {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  padding: 4px 8px;
+  border: 1px solid #287b66;
+  background: #ffffff;
+  color: #245c4e;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.slot-preview-status {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.preview-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgb(255 255 255 / 75%);
+  border-top-color: #287b66;
+  border-radius: 50%;
+  animation: preview-spin 700ms linear infinite;
+}
+
+.slot-preview-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: rgb(255 255 255 / 92%);
+  color: #7d3b2b;
+  font-size: 12px;
+  pointer-events: auto;
+}
+
+.slot-preview-error .button-quiet {
+  padding: 3px 6px;
+  font-size: 11px;
+}
+
+@keyframes preview-spin {
+  to { transform: rotate(360deg); }
+}
+
 .slot-resize-handle {
   position: absolute;
   right: -6px;

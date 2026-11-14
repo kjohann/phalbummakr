@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Image as KonvaImage, Layer, Rect, Stage } from "react-konva";
 import {
   addPage, addPhotoSlot, albumSpreads, deletePage, deleteSlot, duplicatePage, movePage, moveSlot, pageDimensions,
-  placePhoto, resizeSlot, type Album, type Crop, type PhotoPreviewPorts, type Slot,
+  placePhoto, placePhotoOnPage, resizeSlot, type Album, type Crop, type PhotoPreviewPorts, type Slot,
 } from "../core";
 import { hasPhotoDrag, readPhotoDrag } from "./photoDrag";
 
@@ -40,6 +40,12 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, root,
   const [selectedId, setSelectedId] = useState(savedAlbum.pages[0].id);
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
   const [slotDrag, setSlotDrag] = useState<SlotDrag | null>(null);
+  const [photoDragActive, setPhotoDragActive] = useState(false);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [thumbnailBySlot, setThumbnailBySlot] = useState<Record<string, string>>({});
+  const [previewStates, setPreviewStates] = useState<Record<string, {
+    path: string; status: "loading" | "ready" | "error"; attempt: number;
+  }>>({});
   const dimensions = pageDimensions(savedAlbum.pageFormat);
   const { bleedMm, safeZoneMm } = savedAlbum.pageFormat;
   const fullWidth = dimensions.widthMm + 2 * bleedMm;
@@ -89,6 +95,24 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, root,
 
   useEffect(() => () => stopSlotDrag.current?.(), []);
 
+  useEffect(() => {
+    const startPhotoDrag = (event: DragEvent) => {
+      if (!event.dataTransfer || !hasPhotoDrag(event.dataTransfer)) return;
+      setPhotoDragActive(true);
+      setDropTargetId(null);
+    };
+    const clearPhotoDrag = () => {
+      setPhotoDragActive(false);
+      setDropTargetId(null);
+    };
+    window.addEventListener("dragstart", startPhotoDrag);
+    window.addEventListener("dragend", clearPhotoDrag);
+    return () => {
+      window.removeEventListener("dragstart", startPhotoDrag);
+      window.removeEventListener("dragend", clearPhotoDrag);
+    };
+  }, []);
+
   function slotRect(slot: Slot, trimLeft: number) {
     return {
       x: trimLeft + slot.x * trimWidth,
@@ -99,6 +123,34 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, root,
   }
 
   const selectedSlot = selectedPage.slots.find((slot) => slot.id === selectedSlotId) ?? null;
+
+  const reportPreviewStatus = useCallback((slotId: string, path: string, status: "loading" | "ready" | "error") => {
+    setPreviewStates((current) => {
+      const previous = current[slotId];
+      if (previous?.path === path && previous.status === status) return current;
+      return {
+        ...current,
+        [slotId]: { path, status, attempt: previous?.path === path ? previous.attempt : 0 },
+      };
+    });
+    if (status === "ready") {
+      setThumbnailBySlot((current) => {
+        if (!(slotId in current)) return current;
+        const next = { ...current };
+        delete next[slotId];
+        return next;
+      });
+    }
+  }, []);
+
+  function rememberThumbnail(slotId: string, thumbnail?: string) {
+    setThumbnailBySlot((current) => {
+      const next = { ...current };
+      if (thumbnail?.startsWith("data:image/")) next[slotId] = thumbnail;
+      else delete next[slotId];
+      return next;
+    });
+  }
 
   function selectPage(pageId: string) {
     setSelectedId(pageId);
@@ -145,7 +197,12 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, root,
   }
 
   return (
-    <section className="album-editor" aria-label="Album Pages">
+    <section className="album-editor" aria-label="Album Pages" onDragOver={(event) => {
+      if (disabled || !hasPhotoDrag(event.dataTransfer)) return;
+      if (event.target instanceof Element && event.target.closest(".slot-overlay, .canvas-page-hit")) return;
+      setPhotoDragActive(true);
+      setDropTargetId(null);
+    }}>
       <div className="page-toolbar">
         <label className="workspace-label">Page{" "}
           <select value={selectedPage.id} onChange={(event) => selectPage(event.target.value)}>
@@ -186,9 +243,13 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, root,
                   safeZone={safeZoneMm * scale}>
                   {page.slots.map((slot) => {
                     const rect = slotRect(slot, originX + side * (pageWidth + gap) + bleedMm * scale);
+                    const slotId = `${page.id}:${slot.id}`;
                     return slot.placement ? (
-                      <PlacementImage key={slot.id} {...rect} crop={slot.placement.crop}
-                        root={root} path={slot.placement.photoPath} photoPorts={photoPorts} />
+                      <PlacementImage key={slotId} {...rect} crop={slot.placement.crop}
+                        root={root} path={slot.placement.photoPath} photoPorts={photoPorts}
+                        thumbnail={thumbnailBySlot[slotId]} attempt={previewStates[slotId]?.path === slot.placement.photoPath
+                          ? previewStates[slotId].attempt : 0}
+                        slotId={slotId} onStatus={reportPreviewStatus} />
                     ) : <Rect key={slot.id} {...rect} fill="#e8ebe6" stroke="#9aa49c" strokeWidth={1} dash={[4, 3]} />;
                   })}
                 </LayerPage>
@@ -203,6 +264,32 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, root,
           return page ? (
             <button type="button" className="canvas-page-hit" key={page.id} style={style}
               aria-label={`Select Page ${pageNumbers.get(page.id)}`} aria-pressed={page.id === selectedPage.id}
+              onDragOver={(event) => {
+                if (disabled || !hasPhotoDrag(event.dataTransfer)) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "copy";
+                setPhotoDragActive(true);
+                setDropTargetId(null);
+              }}
+              onDrop={(event) => {
+                const photo = readPhotoDrag(event.dataTransfer);
+                if (disabled || !photo || scale <= 0) return;
+                event.preventDefault();
+                setPhotoDragActive(false);
+                setDropTargetId(null);
+                const bounds = event.currentTarget.getBoundingClientRect();
+                const x = (event.clientX - bounds.left - bleedMm * scale) / trimWidth;
+                const y = (event.clientY - bounds.top - bleedMm * scale) / trimHeight;
+                try {
+                  const updated = placePhotoOnPage(album, page.id, photo, x, y);
+                  const slotId = updated.pages.find((item) => item.id === page.id)!.slots.at(-1)!.id;
+                  rememberThumbnail(`${page.id}:${slotId}`, photo.thumbnail);
+                  onChange((current) => placePhotoOnPage(current, page.id, photo, x, y));
+                  selectSlot(page.id, slotId);
+                } catch {
+                  return; // Not a valid Photo or drop point, e.g. a forged drag payload.
+                }
+              }}
               onClick={() => selectPage(page.id)}>
               <span className="canvas-page-number">Page {pageNumbers.get(page.id)}</span>
             </button>
@@ -215,8 +302,13 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, root,
         {scale > 0 && [spread.left, spread.right].map((page, side) => page?.slots.map((slot, index) => {
           const rect = slotRect(slot, originX + side * (pageWidth + gap) + bleedMm * scale);
           const name = `Page ${pageNumbers.get(page.id)} Photo Slot ${index + 1}`;
+          const targetId = `${page.id}:${slot.id}`;
+          const previewState = slot.placement && previewStates[targetId]?.path === slot.placement.photoPath
+            ? previewStates[targetId] : undefined;
+          const previewStatus = previewState?.status ?? "loading";
           return (
-            <div key={`${page.id}:${slot.id}`} className="slot-overlay" role="button" tabIndex={0}
+            <Fragment key={targetId}>
+            <div className={`slot-overlay${photoDragActive ? " slot-overlay--dragging" : ""}${dropTargetId === targetId ? " slot-overlay--drop-target" : ""}`} role="button" tabIndex={0}
               aria-label={name} aria-pressed={page.id === selectedPage.id && slot.id === selectedSlot?.id}
               title={slot.placement?.photoPath ?? "Drag a Photo here"}
               style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
@@ -238,24 +330,56 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, root,
                 if (disabled || !hasPhotoDrag(event.dataTransfer)) return;
                 event.preventDefault();
                 event.dataTransfer.dropEffect = "copy";
+                setPhotoDragActive(true);
+                setDropTargetId(targetId);
               }}
               onDrop={(event) => {
                 const photo = readPhotoDrag(event.dataTransfer);
                 if (disabled || !photo) return;
                 event.preventDefault();
+                setPhotoDragActive(false);
+                setDropTargetId(null);
                 try {
                   placePhoto(album, page.id, slot.id, photo);
                 } catch {
                   return; // Not a valid Photo, e.g. a forged drag payload.
                 }
+                rememberThumbnail(targetId, photo.thumbnail);
                 selectSlot(page.id, slot.id);
                 onChange((current) => placePhoto(current, page.id, slot.id, photo));
               }}>
+              {dropTargetId === targetId && (
+                <span className="slot-drop-label">{slot.placement ? "Replace Photo" : "Place Photo"}</span>
+              )}
               {!disabled && (
                 <span className="slot-resize-handle" aria-label={`Resize ${name}`} role="button"
                   onMouseDown={(event) => startSlotDrag(event, page.id, slot.id, "resize")} />
               )}
             </div>
+            {slot.placement && previewStatus !== "ready" && (
+              <div className="slot-preview-status" style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
+                aria-busy={previewStatus === "loading"}>
+                {previewStatus === "loading" ? (
+                  <span className="preview-spinner" role="status" aria-label="Loading Photo preview" />
+                ) : (
+                  <div className="slot-preview-error" role="alert">
+                    <span>Couldn't load Photo</span>
+                    <button type="button" className="button-quiet" onClick={() => {
+                      setPreviewStates((current) => ({
+                        ...current,
+                        [targetId]: {
+                          path: slot.placement!.photoPath,
+                          status: "loading",
+                          attempt: (current[targetId]?.path === slot.placement!.photoPath
+                            ? current[targetId].attempt : 0) + 1,
+                        },
+                      }));
+                    }}>Retry</button>
+                  </div>
+                )}
+              </div>
+            )}
+            </Fragment>
           );
         }))}
       </div>
@@ -327,35 +451,64 @@ function LayerPage({ x, y, width, height, bleed, safeZone, children }: {
 }
 
 /** Draws a Placement from its cached preview; originals are only used by Page Export. */
-function PlacementImage({ x, y, width, height, crop, root, path, photoPorts }: {
+function PlacementImage({ x, y, width, height, crop, root, path, photoPorts, thumbnail, attempt, slotId, onStatus }: {
   x: number; y: number; width: number; height: number; crop: Crop;
   root: string; path: string; photoPorts: PhotoPreviewPorts;
+  thumbnail?: string; attempt: number; slotId: string;
+  onStatus: (slotId: string, path: string, status: "loading" | "ready" | "error") => void;
 }) {
-  const [preview, setPreview] = useState<{ path: string; image: HTMLImageElement | null } | null>(null);
+  const [preview, setPreview] = useState<{ path: string; attempt: number; image: HTMLImageElement | null } | null>(null);
+  const [thumbnailImage, setThumbnailImage] = useState<{ url: string; image: HTMLImageElement } | null>(null);
   useEffect(() => {
     let active = true;
+    onStatus(slotId, path, "loading");
     photoPorts.preview(root, path).then((url) => {
       const image = new Image();
-      image.onload = () => { if (active) setPreview({ path, image }); };
-      image.onerror = () => { if (active) setPreview({ path, image: null }); };
+      image.onload = () => {
+        if (!active) return;
+        setPreview({ path, attempt, image });
+        onStatus(slotId, path, "ready");
+      };
+      image.onerror = () => {
+        if (!active) return;
+        setPreview({ path, attempt, image: null });
+        onStatus(slotId, path, "error");
+      };
       image.src = url;
     }).catch((cause: unknown) => {
       console.error(`Could not load the preview of ${path}`, cause);
-      if (active) setPreview({ path, image: null });
+      if (active) {
+        setPreview({ path, attempt, image: null });
+        onStatus(slotId, path, "error");
+      }
     });
     return () => { active = false; };
-  }, [root, path, photoPorts]);
+  }, [root, path, photoPorts, attempt, slotId, onStatus]);
 
-  const image = preview?.path === path ? preview.image : undefined;
-  if (!image) {
+  useEffect(() => {
+    if (!thumbnail) {
+      setThumbnailImage(null);
+      return;
+    }
+    let active = true;
+    const image = new Image();
+    image.onload = () => { if (active) setThumbnailImage({ url: thumbnail, image }); };
+    image.onerror = () => { if (active) setThumbnailImage(null); };
+    image.src = thumbnail;
+    return () => { active = false; };
+  }, [thumbnail]);
+
+  const image = preview?.path === path && preview.attempt === attempt ? preview.image : undefined;
+  const visibleImage = image ?? (thumbnailImage && thumbnailImage.url === thumbnail ? thumbnailImage.image : null);
+  if (!visibleImage) {
     return <Rect x={x} y={y} width={width} height={height} fill={image === null ? "#efe1da" : "#eef0ec"} />;
   }
   return (
-    <KonvaImage image={image} x={x} y={y} width={width} height={height} crop={{
-      x: crop.x * image.naturalWidth,
-      y: crop.y * image.naturalHeight,
-      width: crop.width * image.naturalWidth,
-      height: crop.height * image.naturalHeight,
+    <KonvaImage image={visibleImage} x={x} y={y} width={width} height={height} opacity={image ? 1 : 0.45} crop={{
+      x: crop.x * visibleImage.naturalWidth,
+      y: crop.y * visibleImage.naturalHeight,
+      width: crop.width * visibleImage.naturalWidth,
+      height: crop.height * visibleImage.naturalHeight,
     }} />
   );
 }

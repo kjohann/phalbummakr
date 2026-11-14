@@ -9,7 +9,8 @@ vi.mock("react-konva", () => ({
   Stage: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   Layer: ({ children }: { children: ReactNode }) => <>{children}</>,
   Rect: () => null,
-  Image: ({ image }: { image: HTMLImageElement }) => <img alt="Placement" src={image.src} />,
+  Image: ({ image, opacity }: { image: HTMLImageElement; opacity?: number }) =>
+    <img alt="Placement" src={image.src} style={{ opacity }} />,
 }));
 
 beforeEach(() => {
@@ -27,6 +28,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -291,10 +293,156 @@ it("adds, moves, resizes and deletes Photo Slots on the selected Page and persis
   expect(deserializeAlbum(files.get("Existing")!).pages[0].slots).toEqual([]);
 });
 
-function photoDrop(photo: { path: string; width: number; height: number; orientation: number }) {
-  const data = new Map([["application/x-phalbummakr-photo", JSON.stringify(photo)]]);
+function photoDrop(photo: { path: string; width: number; height: number; orientation: number }, thumbnail?: string) {
+  const data = new Map([["application/x-phalbummakr-photo", JSON.stringify({
+    ...photo, ...(thumbnail ? { thumbnail } : {}),
+  })]]);
   return { dataTransfer: { types: [...data.keys()], getData: (type: string) => data.get(type) ?? "", dropEffect: "none" } };
 }
+
+it("highlights every visible Photo Slot and labels the current drop target", async () => {
+  const { ports } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  await screen.findByRole("heading", { name: "Existing" });
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+
+  const target = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  const other = screen.getByRole("button", { name: "Page 1 Photo Slot 2" });
+  const transfer = photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }).dataTransfer;
+  const dragStart = new Event("dragstart", { bubbles: true }) as DragEvent;
+  Object.defineProperty(dragStart, "dataTransfer", { value: transfer });
+  fireEvent(window, dragStart);
+
+  expect(target.classList.contains("slot-overlay--dragging")).toBe(true);
+  expect(other.classList.contains("slot-overlay--dragging")).toBe(true);
+  fireEvent.dragOver(target, { dataTransfer: transfer });
+
+  expect(screen.getByText("Place Photo")).toBeTruthy();
+  expect(target.classList.contains("slot-overlay--drop-target")).toBe(true);
+  expect(other.classList.contains("slot-overlay--dragging")).toBe(true);
+  const insideCover = within(screen.getByRole("group", { name: "Spread editor" })).getByText("Inside cover");
+  fireEvent.dragOver(insideCover, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
+  expect(screen.queryByText("Place Photo")).toBeNull();
+  expect(other.classList.contains("slot-overlay--dragging")).toBe(true);
+  fireEvent(window, new Event("dragend"));
+  expect(screen.queryByText("Place Photo")).toBeNull();
+  expect(target.classList.contains("slot-overlay--dragging")).toBe(false);
+  expect(other.classList.contains("slot-overlay--dragging")).toBe(false);
+});
+
+it("creates and selects a Photo Slot when a Photo is dropped on a blank Page", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  await screen.findByRole("heading", { name: "Existing" });
+  const editor = screen.getByRole("group", { name: "Spread editor" });
+  const page = within(editor).getByRole("button", { name: "Select Page 1" });
+  vi.spyOn(page, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 50, 606, 432));
+  const drop = photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 });
+  fireEvent.dragOver(page, drop);
+  expect(drop.dataTransfer.dropEffect).toBe("copy");
+  const dropEvent = new Event("drop", { bubbles: true, cancelable: true }) as DragEvent;
+  Object.defineProperties(dropEvent, {
+    dataTransfer: { value: drop.dataTransfer },
+    clientX: { value: 403 },
+    clientY: { value: 266 },
+  });
+  fireEvent(page, dropEvent);
+
+  const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  expect(slot.getAttribute("aria-pressed")).toBe("true");
+  expect(screen.queryByText("Place Photo")).toBeNull();
+  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.photoPath).toBe("tree.jpg");
+});
+
+it("ignores Photo drops on blocked Pages, the Spread strip, and the area around Pages", async () => {
+  const { ports } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  await screen.findByRole("heading", { name: "Existing" });
+  const photo = photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 });
+  const editor = screen.getByRole("group", { name: "Spread editor" });
+  fireEvent.drop(within(editor).getByText("Inside cover"), photo);
+  fireEvent.drop(editor, photo);
+  fireEvent.drop(screen.getByRole("navigation", { name: "Spreads" }), photo);
+  expect(screen.queryByRole("button", { name: /^Page \d+ Photo Slot/ })).toBeNull();
+
+  fireEvent.change(screen.getByLabelText("Page"), { target: { value: "page-2" } });
+  fireEvent.drop(within(editor).getByText("No Page"), photo);
+  expect(screen.queryByRole("button", { name: /^Page \d+ Photo Slot/ })).toBeNull();
+});
+
+it("draws the dragged thumbnail with loading feedback until the full preview is ready", async () => {
+  vi.stubGlobal("Image", class {
+    onload: (() => void) | null = null;
+    naturalWidth = 2048;
+    naturalHeight = 1365;
+    private url = "";
+    get src() { return this.url; }
+    set src(url: string) { this.url = url; queueMicrotask(() => this.onload?.()); }
+  });
+  let resolvePreview: (url: string) => void = () => {};
+  const preview = new Promise<string>((resolve) => { resolvePreview = resolve; });
+  const photoPorts = previews();
+  photoPorts.preview = vi.fn(() => preview);
+  const { ports } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={photoPorts} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  await screen.findByRole("heading", { name: "Existing" });
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }), photoDrop(
+    { path: "tree.jpg", width: 6000, height: 4000, orientation: 1 },
+    "data:image/png;base64,dGh1bWJuYWls",
+  ));
+
+  const placeholder = await screen.findByRole("img", { name: "Placement" });
+  expect(placeholder.getAttribute("src")).toBe("data:image/png;base64,dGh1bWJuYWls");
+  expect((placeholder as HTMLImageElement).style.opacity).toBe("0.45");
+  expect(screen.getByRole("status", { name: "Loading Photo preview" })).toBeTruthy();
+
+  await act(async () => {
+    resolvePreview("data:image/jpeg;base64,full-preview");
+    await preview;
+  });
+  await waitFor(() => expect(screen.getByRole("img", { name: "Placement" }).getAttribute("src"))
+    .toBe("data:image/jpeg;base64,full-preview"));
+  expect(screen.queryByRole("status", { name: "Loading Photo preview" })).toBeNull();
+  expect((screen.getByRole("img", { name: "Placement" }) as HTMLImageElement).style.opacity).toBe("1");
+});
+
+it("reports a failed preview and retries it on demand", async () => {
+  vi.stubGlobal("Image", class {
+    onload: (() => void) | null = null;
+    naturalWidth = 2048;
+    naturalHeight = 1365;
+    private url = "";
+    get src() { return this.url; }
+    set src(url: string) { this.url = url; queueMicrotask(() => this.onload?.()); }
+  });
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const photoPorts = previews();
+  photoPorts.preview = vi.fn()
+    .mockRejectedValueOnce(new Error("Preview unavailable"))
+    .mockResolvedValue("data:image/jpeg;base64,retried-preview");
+  const { ports } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={photoPorts} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  await screen.findByRole("heading", { name: "Existing" });
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }), photoDrop(
+    { path: "tree.jpg", width: 6000, height: 4000, orientation: 1 },
+  ));
+
+  expect(await screen.findByText("Couldn't load Photo")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(screen.getByRole("img", { name: "Placement" }).getAttribute("src"))
+    .toBe("data:image/jpeg;base64,retried-preview"));
+  expect(photoPorts.preview).toHaveBeenCalledTimes(2);
+  expect(screen.queryByText("Couldn't load Photo")).toBeNull();
+});
 
 it("places a dropped Photo in a Photo Slot, replaces it on a second drop, and draws it from its preview", async () => {
   vi.stubGlobal("Image", class {
@@ -318,6 +466,8 @@ it("places a dropped Photo in a Photo Slot, replaces it on a second drop, and dr
   fireEvent.drop(slot, tree);
   expect((await screen.findByRole("img", { name: "Placement" })).getAttribute("src")).toBe(`data:image/jpeg;base64,${btoa("2024/tree.jpg")}`);
   expect(photoPorts.preview).toHaveBeenCalledWith("D:\\Photos", "2024/tree.jpg");
+  fireEvent.dragOver(slot, photoDrop({ path: "snow.png", width: 4000, height: 6000, orientation: 1 }));
+  expect(screen.getByText("Replace Photo")).toBeTruthy();
   await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Saved"));
   const placement = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!;
   expect(placement.photoPath).toBe("2024/tree.jpg");

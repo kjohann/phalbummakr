@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { createAlbum, deserializeAlbum, serializeAlbum } from "./album";
-import { addPhotoSlot, deleteSlot, moveSlot, placePhoto, resizeSlot } from "./slots";
+import { addPhotoSlot, deleteSlot, moveSlot, placePhoto, placePhotoOnPage, resizeSlot } from "./slots";
 
 function slotOf(album: ReturnType<typeof createAlbum>, page = 0) {
   return album.pages[page].slots[0];
@@ -112,4 +112,27 @@ it("adds an empty Photo Slot to a Page, stored as fractions of the Page, without
   expect(album.pages[1].slots).toEqual([]);
   expect(deserializeAlbum(serializeAlbum(added))).toEqual(added);
   expect(() => addPhotoSlot(album, "missing")).toThrow(/page/i);
+});
+
+it("creates a Photo Slot under a dropped Photo, clips it to the Bleed, and refits the centred Crop", () => {
+  const album = createAlbum({ name: "Test", pageCount: 1, bleedMm: 21 });
+  const photo = { path: "tree.jpg", width: 6000, height: 4000, orientation: 1 };
+  const centred = placePhotoOnPage(album, "page-1", photo, 0.5, 0.5).pages[0].slots[0];
+  expect(centred.x).toBeCloseTo(0.3, 9);
+  expect(centred.y).toBeCloseTo(0.31142857142857144, 9);
+  expect(centred.width).toBeCloseTo(0.4, 9);
+  expect(centred.height).toBeCloseTo(0.37714285714285717, 9);
+  expect(centred.placement!.crop.x).toBeCloseTo(0, 9);
+  expect(centred.placement!.crop.y).toBeCloseTo(0, 9);
+  expect(centred.placement!.crop.width).toBeCloseTo(1, 9);
+  expect(centred.placement!.crop.height).toBeCloseTo(1, 9);
+
+  const clipped = placePhotoOnPage(album, "page-1", photo, 0, 0).pages[0].slots[0];
+  expect(clipped.x).toBeCloseTo(-21 / 297, 9);
+  expect(clipped.y).toBeCloseTo(-0.1, 9);
+  expect(clipped.width).toBeCloseTo(0.2 + 21 / 297, 9);
+  expect(clipped.height).toBeCloseTo(0.18857142857142858 + 0.1, 9);
+  expect(clipped.placement!.crop.x).toBeGreaterThan(0);
+  expect(clipped.placement!.crop.width).toBeLessThan(1);
+  expect(album.pages[0].slots).toEqual([]);
 });

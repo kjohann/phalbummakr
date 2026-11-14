@@ -23,3 +23,39 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 kamadak-exif = "0.6"
 sha2 = "0.10"
 tempfile = "3"
+
+[profile.dev.package.image]
+opt-level = 3
+codegen-units = 1
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package.moxcms]
+opt-level = 3
+codegen-units = 1
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package.pxfm]
+opt-level = 3
+codegen-units = 1
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package.png]
+opt-level = 3
+codegen-units = 1
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package.zune-core]
+opt-level = 3
+codegen-units = 1
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+codegen-units = 1
+debug-assertions = false
+overflow-checks = false

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import PhotoBrowser from "./PhotoBrowser";
 import { hasPhotoDrag, readPhotoDrag } from "./photoDrag";
+import { tauriPhotoPorts } from "./tauriPhotoPorts";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
@@ -240,6 +241,7 @@ it("lets a Photo tile be dragged with the Photo as its payload", async () => {
   render(<PhotoBrowser root={"D:\\Photos"} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open folder holiday" }));
   const tile = (await screen.findByText("tree.jpg")).closest("figure")!;
+  await screen.findByRole("img", { name: "tree.jpg" });
   expect(tile.getAttribute("draggable")).toBe("true");
   const data = new Map<string, string>();
   const dataTransfer = {
@@ -253,6 +255,30 @@ it("lets a Photo tile be dragged with the Photo as its payload", async () => {
   expect(hasPhotoDrag(dataTransfer as unknown as DataTransfer)).toBe(true);
   expect(readPhotoDrag(dataTransfer as unknown as DataTransfer)).toEqual({
     path: "holiday/tree.jpg", width: 4000, height: 3000, orientation: 6,
+    thumbnail: "data:image/png;base64,dGVzdA==",
   });
+  expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "photo_preview")).toHaveLength(1);
+  const secondDataTransfer = { ...dataTransfer, setData: (type: string, value: string) => data.set(type, value) };
+  fireEvent.dragStart(tile, { dataTransfer: secondDataTransfer });
+  expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "photo_preview")).toHaveLength(1);
   expect(readPhotoDrag({ types: [], getData: () => "" } as unknown as DataTransfer)).toBeNull();
+  const incompleteTransfer = { getData: () => "" } as unknown as DataTransfer;
+  expect(hasPhotoDrag(incompleteTransfer)).toBe(false);
+  expect(readPhotoDrag(incompleteTransfer)).toBeNull();
+});
+
+it("reuses completed previews only when the current Photo revision is known", async () => {
+  vi.mocked(invoke).mockResolvedValue("data:image/jpeg;base64,preview");
+  const root = "D:\\Photos";
+  const original = { ...photo(0), path: "preview-cache-regression.jpg" };
+
+  await tauriPhotoPorts.prewarmPreview(root, original);
+  await tauriPhotoPorts.prewarmPreview(root, original);
+  expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "photo_preview")).toHaveLength(1);
+
+  await tauriPhotoPorts.prewarmPreview(root, { ...original, revision: "changed-revision" });
+  expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "photo_preview")).toHaveLength(2);
+
+  await tauriPhotoPorts.preview(root, original.path);
+  expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "photo_preview")).toHaveLength(3);
 });
