@@ -129,7 +129,6 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
       const album = createAlbum({
         name: String(form.get("name")),
         pageCount: Number(form.get("pageCount")),
-        startingSide: form.get("startingSide") === "left" ? "left" : "right",
         bleedMm: Number(form.get("bleedMm")),
         safeZoneMm: Number(form.get("safeZoneMm")),
         dpi: Number(form.get("dpi")),
@@ -205,8 +204,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
           <label>Bleed (mm)<input name="bleedMm" type="number" min="0" step="any" defaultValue="3" required disabled={busy} /></label>
           <label>Safe Zone (mm)<input name="safeZoneMm" type="number" min="0" max="104.99" step="any" defaultValue="5" required disabled={busy} /></label>
           <label>Export resolution (DPI)<input name="dpi" type="number" min="1" step="any" defaultValue="300" required disabled={busy} /></label>
-          <label>Page 1 side<select name="startingSide" defaultValue="right" disabled={busy}><option value="right">Right</option><option value="left">Left</option></select></label>
-          <label>Page count<input name="pageCount" type="number" min="1" max="10000" step="1" defaultValue="24" required disabled={busy} /></label>
+          <label>Page count<input name="pageCount" type="number" min="2" max="10000" step="2" defaultValue="2" required disabled={busy} /></label>
           <div className="album-toolbar">
             <button type="submit" className="button-primary" disabled={busy}>Create Album</button>
             <button type="button" className="button-quiet" disabled={busy} onClick={() => setCreating(false)}>Cancel</button>
@@ -235,14 +233,6 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
                   <h3>Album settings</h3>
                   <fieldset disabled={suspended || busy || saveStatus === "saving" || saveStatus === "error"}>
                     {document && <label>Title<textarea name="title" defaultValue={current.album.title} rows={2} /></label>}
-                    <label>Page 1 side
-                      <select value={current.album.startingSide} onChange={(event) => {
-                        const startingSide = event.target.value === "left" ? "left" : "right";
-                        changeAlbum((album) => ({ ...album, startingSide }));
-                      }}>
-                        <option value="right">Right</option><option value="left">Left</option>
-                      </select>
-                    </label>
                     <p className="album-details">Page Format: A4 landscape (297 x 210 mm)</p>
                     <label>Bleed (mm)<input name="bleedMm" type="number" min="0" step="any"
                       defaultValue={current.album.pageFormat.bleedMm} required /></label>

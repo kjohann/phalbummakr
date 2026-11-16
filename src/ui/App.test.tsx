@@ -144,6 +144,33 @@ it("restores the last Album using its file's folder and stored title", async () 
   await waitFor(() => expect(ports.remember).toHaveBeenCalledWith("D:\\Photos\\renamed.phalbum"));
 });
 
+it("reports an odd Page count when opening an Album without replacing the current document", async () => {
+  native.enabled = true;
+  const current = "D:\\Photos\\current.phalbum";
+  const broken = "D:\\Photos\\odd.phalbum";
+  const valid = createAlbum({ name: "Original", pageCount: 4 });
+  const ports: DocumentPorts = {
+    settings: async () => ({ lastAlbum: current, recentAlbums: [broken] }),
+    exists: async () => true,
+    read: async (path) => path === current ? serializeAlbum(valid)
+      : JSON.stringify({ ...valid, pages: valid.pages.slice(0, 3) }),
+    write: vi.fn(),
+    remember: vi.fn(),
+    forget: vi.fn(),
+    close: vi.fn(),
+    parent: async () => "D:\\Photos",
+    chooseNew: async () => null,
+    chooseOpen: async () => broken,
+  };
+  render(<App ports={ports} />);
+  await screen.findByText("Original");
+  await waitFor(() => expect(native.items.some((entry) => entry.text === "Open Album…")).toBe(true));
+  await act(async () => native.items.find((entry) => entry.text === "Open Album…")!.action!());
+  expect((await screen.findByRole("alert")).textContent).toMatch(/even number between 2 and 10000/i);
+  expect(screen.getByText("Original")).toBeTruthy();
+  expect(ports.write).not.toHaveBeenCalled();
+});
+
 it("removes a missing recent Album when selected and reports it", async () => {
   const missing = "D:\\Photos\\missing.phalbum";
   const ports: DocumentPorts = {
@@ -206,12 +233,16 @@ it("creates the chosen file with a title independent of its filename", async () 
   render(<App ports={ports} />);
   fireEvent.click(await screen.findByRole("button", { name: "New Album…" }));
   await screen.findByRole("dialog", { name: "Album settings" });
+  expect(screen.queryByLabelText("Page 1 side")).toBeNull();
+  expect((screen.getByLabelText("Page count") as HTMLInputElement).value).toBe("2");
   fireEvent.change(screen.getByLabelText("Title"), { target: { value: "A: B / C" } });
   fireEvent.click(screen.getByRole("button", { name: "Create Album" }));
   await screen.findByText("A: B / C");
   expect(ports.write).toHaveBeenCalledWith(path, expect.any(String), true);
   const json = vi.mocked(ports.write).mock.calls[0][1];
   expect(JSON.parse(json).title).toBe("A: B / C");
+  expect(JSON.parse(json)).not.toHaveProperty("startingSide");
+  expect(JSON.parse(json).pages).toHaveLength(2);
   expect(ports.remember).toHaveBeenCalledWith(path);
 });
 

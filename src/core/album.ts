@@ -18,14 +18,12 @@ export interface Album {
   schemaVersion: 2;
   title: string;
   pageFormat: PageFormat;
-  startingSide: "left" | "right";
   pages: Page[];
 }
 
 export interface AlbumOptions {
   name: string;
   pageCount?: number;
-  startingSide?: Album["startingSide"];
   bleedMm?: number;
   safeZoneMm?: number;
   dpi?: number;
@@ -37,10 +35,7 @@ export interface Spread {
 }
 
 export function albumSpreads(album: Album): Spread[] {
-  const spreads: Spread[] = [{
-    left: album.startingSide === "left" ? album.pages[0] : null,
-    right: album.startingSide === "right" ? album.pages[0] : null,
-  }];
+  const spreads: Spread[] = [{ left: null, right: album.pages[0] }];
   for (let index = 1; index < album.pages.length; index += 2) {
     spreads.push({ left: album.pages[index], right: album.pages[index + 1] ?? null });
   }
@@ -60,26 +55,40 @@ function unusedPageId(album: Album): string {
   return `page-${number}`;
 }
 
+function spreadInsertionIndex(index: number, pageCount: number): number {
+  return Math.min(index + (index % 2 === 1 ? 2 : 1), pageCount - 1);
+}
+
 export function addPage(album: Album, afterId: string): Album {
   const index = pageIndex(album, afterId);
-  validatePageCount(album.pages.length + 1);
+  validatePageCount(album.pages.length + 2);
   const pages = [...album.pages];
-  pages.splice(index + 1, 0, { id: unusedPageId(album), background: "#ffffff", slots: [] });
+  const first: Page = { id: unusedPageId(album), background: "#ffffff", slots: [] };
+  const second: Page = { id: unusedPageId({ ...album, pages: [...pages, first] }), background: "#ffffff", slots: [] };
+  const insertion = spreadInsertionIndex(index, pages.length);
+  pages.splice(insertion, 0, first, second);
   return { ...album, pages };
 }
 
 export function duplicatePage(album: Album, id: string): Album {
   const index = pageIndex(album, id);
-  validatePageCount(album.pages.length + 1);
-  const pages = [...album.pages];
-  pages.splice(index + 1, 0, { ...structuredClone(album.pages[index]), id: unusedPageId(album) });
-  return { ...album, pages };
+  const added = addPage(album, id);
+  const insertion = spreadInsertionIndex(index, album.pages.length);
+  const copyIndex = insertion + (index % 2 === 0 && index !== album.pages.length - 1 ? 1 : 0);
+  const pages = [...added.pages];
+  pages[copyIndex] = { ...structuredClone(album.pages[index]), id: pages[copyIndex].id };
+  return { ...added, pages };
 }
 
 export function deletePage(album: Album, id: string): Album {
   const index = pageIndex(album, id);
-  validatePageCount(album.pages.length - 1);
-  return { ...album, pages: album.pages.filter((_, position) => position !== index) };
+  const pages = [...album.pages];
+  if (index === 0 || index === pages.length - 1) {
+    pages[index] = { ...pages[index], slots: [] };
+  } else {
+    pages.splice(index % 2 === 1 ? index : index - 1, 2);
+  }
+  return { ...album, pages };
 }
 
 export function movePage(album: Album, id: string, toIndex: number): Album {
@@ -99,7 +108,7 @@ export function pageDimensions(format: PageFormat): { widthMm: number; heightMm:
 }
 
 export function createAlbum(options: AlbumOptions): Album {
-  const pageCount = options.pageCount ?? 24;
+  const pageCount = options.pageCount ?? 2;
   validatePageCount(pageCount);
   const album: Album = {
     schemaVersion: 2,
@@ -111,7 +120,6 @@ export function createAlbum(options: AlbumOptions): Album {
       safeZoneMm: options.safeZoneMm ?? 5,
       dpi: options.dpi ?? 300,
     },
-    startingSide: options.startingSide ?? "right",
     pages: Array.from({ length: pageCount }, (_, index) => ({
       id: `page-${index + 1}`,
       background: "#ffffff",
@@ -145,13 +153,17 @@ function record(value: unknown, keys: string[]): value is Record<string, unknown
 }
 
 function validatePageCount(count: number): void {
-  if (!Number.isInteger(count) || count < 1 || count > 10000) {
-    throw new Error("Page count must be a whole number between 1 and 10000.");
+  if (!Number.isInteger(count) || count < 2 || count > 10000 || count % 2 !== 0) {
+    throw new Error("Page count must be an even number between 2 and 10000.");
   }
 }
 
 function validateAlbum(value: unknown): asserts value is Album {
-  if (!record(value, ["schemaVersion", "title", "pageFormat", "startingSide", "pages"]) || value.schemaVersion !== 2) {
+  if (record(value, ["schemaVersion", "title", "pageFormat", "startingSide", "pages"])
+    && value.schemaVersion === 2 && Array.isArray(value.pages)) {
+    validatePageCount(value.pages.length);
+  }
+  if (!record(value, ["schemaVersion", "title", "pageFormat", "pages"]) || value.schemaVersion !== 2) {
     throw new Error("Unsupported or invalid Album schema.");
   }
   if (typeof value.title !== "string") {
@@ -171,9 +183,6 @@ function validateAlbum(value: unknown): asserts value is Album {
       || (label === "Export resolution" && number === 0)) {
       throw new Error(`${label} is invalid${label === "Safe Zone" ? " (must be less than 105 mm)" : ""}.`);
     }
-  }
-  if (value.startingSide !== "left" && value.startingSide !== "right") {
-    throw new Error("Starting side must be left or right.");
   }
   if (!Array.isArray(value.pages)) throw new Error("Album Pages must be an array.");
   validatePageCount(value.pages.length);

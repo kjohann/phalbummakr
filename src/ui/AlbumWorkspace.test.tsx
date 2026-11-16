@@ -88,6 +88,46 @@ function setExactFontSize(points: string) {
   fireEvent.keyDown(input, { key: "Enter" });
 }
 
+it("shows non-interactive Inside Covers on both end Spreads", () => {
+  const { ports } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports}
+    document={{ path: "Existing", album: createAlbum({ name: "Existing" }) }} />);
+  const editor = within(screen.getByRole("group", { name: "Spread editor" }));
+  const strip = within(screen.getByRole("navigation", { name: "Spreads" }));
+  expect(strip.getAllByText("Inside cover")).toHaveLength(2);
+  const front = editor.getByText("Inside cover");
+  fireEvent.click(front);
+  fireEvent.drop(front, photoDrop({ path: "tree.jpg", width: 100, height: 100, orientation: 1 }));
+  expect(screen.getByText("PAGE 1 OF 2")).toBeTruthy();
+  fireEvent.click(strip.getByRole("button", { name: "Select Page 2" }));
+  const back = editor.getByText("Inside cover");
+  fireEvent.click(back);
+  fireEvent.drop(back, photoDrop({ path: "tree.jpg", width: 100, height: 100, orientation: 1 }));
+  expect(screen.getByText("PAGE 2 OF 2")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /Photo Slot 1/ })).toBeNull();
+  expect(ports.write).not.toHaveBeenCalled();
+});
+
+it("confirms deletion of sibling Pages and clears end Pages without removing them", () => {
+  const { ports } = disk();
+  const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValue(true);
+  let album = createAlbum({ name: "Existing", pageCount: 4 });
+  album = addTextSlot(addTextSlot(album, "page-1"), "page-2");
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} document={{ path: "Existing", album }} />);
+  const strip = within(screen.getByRole("navigation", { name: "Spreads" }));
+  fireEvent.click(strip.getByRole("button", { name: "Select Page 2" }));
+  fireEvent.click(screen.getByRole("button", { name: "Delete Spread" }));
+  expect(confirm).toHaveBeenLastCalledWith(expect.stringMatching(/2.*3/));
+  expect(screen.getByText("PAGE 2 OF 4")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Delete Spread" }));
+  expect(screen.getByText("PAGE 2 OF 2")).toBeTruthy();
+  fireEvent.click(strip.getByRole("button", { name: "Select Page 1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Clear Page" }));
+  expect(confirm).toHaveBeenLastCalledWith(expect.stringMatching(/Page 1/));
+  expect(screen.getByText("PAGE 1 OF 2")).toBeTruthy();
+  expect(screen.queryByRole("textbox", { name: "Edit Page 1 Text Slot 1" })).toBeNull();
+});
+
 it("autosaves an Album document without rendering save-status feedback", async () => {
   const { ports, files } = disk();
   const write = ports.write;
@@ -100,7 +140,7 @@ it("autosaves an Album document without rendering save-status feedback", async (
   expect(screen.queryByRole("status")).toBeNull();
 
   vi.useFakeTimers();
-  fireEvent.click(screen.getByRole("button", { name: "Add Page" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add Spread" }));
   expect(onBusyChange).toHaveBeenLastCalledWith(true);
   expect(screen.queryByRole("status")).toBeNull();
   await act(() => vi.advanceTimersByTimeAsync(500));
@@ -108,14 +148,14 @@ it("autosaves an Album document without rendering save-status feedback", async (
   expect(screen.queryByRole("status")).toBeNull();
 
   await act(async () => { finishWrite(); await pendingWrite; });
-  expect(deserializeAlbum(files.get("Existing")!).pages).toHaveLength(3);
+  expect(deserializeAlbum(files.get("Existing")!).pages).toHaveLength(4);
   expect(onBusyChange).toHaveBeenLastCalledWith(false);
   expect(screen.queryByRole("status")).toBeNull();
 });
 
 it("opens a selected Album file and saves edits back to that file", async () => {
   const { ports } = disk();
-  const album = createAlbum({ name: "Family: / 2026", pageCount: 1 });
+  const album = createAlbum({ name: "Family: / 2026", pageCount: 2 });
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports}
     document={{ path: "D:\\Photos\\renamed.phalbum", album }} />);
   await screen.findByRole("heading", { name: "Family: / 2026" });
@@ -123,7 +163,6 @@ it("opens a selected Album file and saves edits back to that file", async () => 
   fireEvent.click(screen.getByRole("button", { name: "Album settings" }));
   fireEvent.change(screen.getByLabelText("Title"), { target: { value: "New: title / 2026" } });
   fireEvent.click(screen.getByRole("button", { name: "Apply print settings" }));
-  fireEvent.change(screen.getByLabelText("Page 1 side"), { target: { value: "left" } });
   await waitFor(() => expect(ports.write).toHaveBeenCalledWith(
     "D:\\Photos", "D:\\Photos\\renamed.phalbum", expect.any(String), false,
   ));
@@ -132,11 +171,11 @@ it("opens a selected Album file and saves edits back to that file", async () => 
 
 it("disables Album edits during a file transition", async () => {
   const { ports } = disk();
-  const document = { path: "D:\\Photos\\album.phalbum", album: createAlbum({ name: "Original", pageCount: 1 }) };
+  const document = { path: "D:\\Photos\\album.phalbum", album: createAlbum({ name: "Original", pageCount: 2 }) };
   const { rerender } = render(<AlbumWorkspace root="D:\\Photos" document={document} ports={ports} />);
   fireEvent.click(await screen.findByRole("button", { name: "Album settings" }));
   rerender(<AlbumWorkspace root="D:\\Photos" document={document} ports={ports} suspended />);
-  expect((screen.getByRole("button", { name: "Add Page" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "Add Spread" }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getByLabelText("Title").matches(":disabled")).toBe(true);
 });
 
@@ -518,21 +557,19 @@ it("selects facing Pages from a Spread strip below the editor and blocks out the
   expect(within(canvas).getByText("Inside cover")).toBeTruthy();
   expect(within(canvas).getByRole("button", { name: "Select Page 1" }).getAttribute("aria-pressed")).toBe("true");
   fireEvent.click(within(strip).getByRole("button", { name: "Select Page 2" }));
-  expect(within(canvas).queryByText("Inside cover")).toBeNull();
+  expect(within(canvas).getByText("Inside cover")).toBeTruthy();
   expect(within(canvas).getByRole("button", { name: "Select Page 2" }).getAttribute("aria-pressed")).toBe("true");
   expect(screen.getByText("PAGE 2 OF 2")).toBeTruthy();
 });
 
-it("keeps starting side and print settings in Album settings, validates them, and persists changes", async () => {
+it("keeps print settings in Album settings, validates them, and persists changes", async () => {
   const { ports } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
   await screen.findByRole("heading", { name: "Existing" });
   expect(screen.queryByLabelText("Page 1 side")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Album settings" }));
-  fireEvent.change(screen.getByLabelText("Page 1 side"), { target: { value: "left" } });
-  const firstSpread = within(screen.getByRole("navigation", { name: "Spreads" })).getByRole("group", { name: "Spread 1" });
-  expect(firstSpread.firstElementChild?.getAttribute("aria-label")).toBe("Select Page 1");
+  expect(screen.queryByLabelText("Page 1 side")).toBeNull();
   fireEvent.change(screen.getByLabelText("Bleed (mm)"), { target: { value: "4" } });
   fireEvent.change(screen.getByLabelText("Safe Zone (mm)"), { target: { value: "7" } });
   fireEvent.change(screen.getByLabelText("Export resolution (DPI)"), { target: { value: "600" } });
@@ -541,7 +578,7 @@ it("keeps starting side and print settings in Album settings, validates them, an
   fireEvent.click(screen.getByRole("button", { name: "Open Album Existing" }));
   await waitFor(() => expect(screen.queryByLabelText("Bleed (mm)")).toBeNull());
   fireEvent.click(screen.getByRole("button", { name: "Album settings" }));
-  expect((screen.getByLabelText("Page 1 side") as HTMLSelectElement).value).toBe("left");
+  expect(screen.queryByLabelText("Page 1 side")).toBeNull();
   expect((screen.getByLabelText("Bleed (mm)") as HTMLInputElement).value).toBe("4");
   expect((screen.getByLabelText("Safe Zone (mm)") as HTMLInputElement).value).toBe("7");
   expect((screen.getByLabelText("Export resolution (DPI)") as HTMLInputElement).value).toBe("600");
@@ -551,28 +588,32 @@ it("keeps starting side and print settings in Album settings, validates them, an
   expect(screen.getByText("Safe Zone: 7 mm")).toBeTruthy();
 });
 
-it("adds and duplicates after the selected Page, selects the result, deletes safely, and reopens saved Pages", async () => {
+it("adds and duplicates Spreads, selects the result, and reopens saved Pages", async () => {
   const { ports } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
   await screen.findByRole("heading", { name: "Existing" });
   vi.useFakeTimers();
-  fireEvent.click(screen.getByRole("button", { name: "Add Page" }));
-  expect(screen.getByText("PAGE 2 OF 3")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Add Spread" }));
+  expect(screen.getByText("PAGE 2 OF 4")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Duplicate Page" }));
-  expect(screen.getByText("PAGE 3 OF 4")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Delete Page" }));
-  expect(screen.getByText("PAGE 3 OF 3")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Delete Page" }));
-  expect(screen.getByText("PAGE 2 OF 2")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Delete Page" }));
-  expect(screen.getByText("PAGE 1 OF 1")).toBeTruthy();
-  expect((screen.getByRole("button", { name: "Delete Page" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText("PAGE 4 OF 6")).toBeTruthy();
   await act(() => vi.advanceTimersByTimeAsync(500));
   vi.useRealTimers();
   fireEvent.click(screen.getByRole("button", { name: "Open Album Existing" }));
-  await waitFor(() => expect(screen.getByText("1 Pages")).toBeTruthy());
-  expect(screen.getByText("PAGE 1 OF 1")).toBeTruthy();
+  await waitFor(() => expect(screen.getByText("6 Pages")).toBeTruthy());
+  expect(screen.getByText("PAGE 4 OF 6")).toBeTruthy();
+});
+
+it("duplicates the first and last Pages onto their respective sides of new Spreads", () => {
+  const { ports } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports}
+    document={{ path: "Existing", album: createAlbum({ name: "Existing" }) }} />);
+  fireEvent.click(screen.getByRole("button", { name: "Duplicate Page" }));
+  expect(screen.getByText("PAGE 3 OF 4")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Page"), { target: { value: "page-2" } });
+  fireEvent.click(screen.getByRole("button", { name: "Duplicate Page" }));
+  expect(screen.getByText("PAGE 4 OF 6")).toBeTruthy();
 });
 
 it("drag-reorders Pages, keeps the moved Page selected, supports keyboard-friendly moves, and persists the order", async () => {
@@ -615,13 +656,13 @@ it("lists and opens existing Albums, then creates an A4 landscape Album without 
   fireEvent.click(screen.getByRole("button", { name: "New Album" }));
   expect(screen.getByLabelText("Page Format").textContent).toBe("A4 - landscape (297 x 210 mm)");
   expect(screen.queryByLabelText(/width|height/i)).toBeNull();
-  expect((screen.getByLabelText("Page count") as HTMLInputElement).value).toBe("24");
+  expect((screen.getByLabelText("Page count") as HTMLInputElement).value).toBe("2");
+  expect(screen.queryByLabelText("Page 1 side")).toBeNull();
   fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Christmas" } });
   fireEvent.click(screen.getByRole("button", { name: "Create Album" }));
   await screen.findByRole("heading", { name: "Christmas" });
   const album = deserializeAlbum(files.get("Christmas")!);
-  expect(album.pages).toHaveLength(24);
-  expect(album.startingSide).toBe("right");
+  expect(album.pages).toHaveLength(2);
   expect(album.pageFormat.size).toBe("A4");
   expect(album.pageFormat.orientation).toBe("landscape");
 });
@@ -634,23 +675,24 @@ it("debounces changes, blocks navigation until saved, and reopens the persisted 
   await screen.findByRole("heading", { name: "Existing" });
   fireEvent.click(screen.getByRole("button", { name: "Album settings" }));
   vi.useFakeTimers();
-  fireEvent.change(screen.getByLabelText("Page 1 side"), { target: { value: "left" } });
+  fireEvent.change(screen.getByLabelText("Bleed (mm)"), { target: { value: "4" } });
+  fireEvent.submit(screen.getByRole("form", { name: "Album settings" }));
   await act(() => vi.advanceTimersByTimeAsync(300));
-  fireEvent.change(screen.getByLabelText("Page 1 side"), { target: { value: "right" } });
-  fireEvent.change(screen.getByLabelText("Page 1 side"), { target: { value: "left" } });
+  fireEvent.change(screen.getByLabelText("Bleed (mm)"), { target: { value: "6" } });
+  fireEvent.submit(screen.getByRole("form", { name: "Album settings" }));
   expect((screen.getByRole("button", { name: "New Album" }) as HTMLButtonElement).disabled).toBe(true);
   expect(onBusyChange).toHaveBeenLastCalledWith(true);
   await act(() => vi.advanceTimersByTimeAsync(499));
-  expect(deserializeAlbum(files.get("Existing")!).startingSide).toBe("right");
+  expect(deserializeAlbum(files.get("Existing")!).pageFormat.bleedMm).toBe(3);
   await act(() => vi.advanceTimersByTimeAsync(1));
-  expect(deserializeAlbum(files.get("Existing")!).startingSide).toBe("left");
+  expect(deserializeAlbum(files.get("Existing")!).pageFormat.bleedMm).toBe(6);
   expect((screen.getByRole("button", { name: "Open Album Existing" }) as HTMLButtonElement).disabled).toBe(false);
   expect(ports.write).toHaveBeenCalledTimes(1);
   vi.useRealTimers();
   fireEvent.click(screen.getByRole("button", { name: "Open Album Existing" }));
-  await waitFor(() => expect(screen.queryByLabelText("Page 1 side")).toBeNull());
+  await waitFor(() => expect(screen.queryByLabelText("Bleed (mm)")).toBeNull());
   fireEvent.click(screen.getByRole("button", { name: "Album settings" }));
-  await waitFor(() => expect((screen.getByLabelText("Page 1 side") as HTMLSelectElement).value).toBe("left"));
+  await waitFor(() => expect((screen.getByLabelText("Bleed (mm)") as HTMLInputElement).value).toBe("6"));
 });
 
 it("keeps unsaved changes after a failed save, prevents leaving, and retries explicitly", async () => {
@@ -662,23 +704,24 @@ it("keeps unsaved changes after a failed save, prevents leaving, and retries exp
   await screen.findByRole("heading", { name: "Existing" });
   fireEvent.click(screen.getByRole("button", { name: "Album settings" }));
   vi.useFakeTimers();
-  fireEvent.change(screen.getByLabelText("Page 1 side"), { target: { value: "left" } });
+  fireEvent.change(screen.getByLabelText("Bleed (mm)"), { target: { value: "4" } });
+  fireEvent.submit(screen.getByRole("form", { name: "Album settings" }));
   await act(() => vi.advanceTimersByTimeAsync(500));
   expect(screen.getByRole("alert").textContent).toContain("Disk full");
   expect(screen.queryByText("Not saved")).toBeNull();
-  for (const name of ["Add Page", "Duplicate Page", "Delete Page", "Move Page later"]) {
+  for (const name of ["Add Spread", "Duplicate Page", "Clear Page", "Move Page later"]) {
     expect((screen.getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(true);
   }
   expect(within(screen.getByRole("navigation", { name: "Spreads" }))
     .getByRole("button", { name: "Select Page 1" }).draggable).toBe(false);
-  expect(deserializeAlbum(files.get("Existing")!).startingSide).toBe("right");
+  expect(deserializeAlbum(files.get("Existing")!).pageFormat.bleedMm).toBe(3);
   expect((screen.getByRole("button", { name: "Open Album Existing" }) as HTMLButtonElement).disabled).toBe(true);
   const unload = new Event("beforeunload", { cancelable: true });
   window.dispatchEvent(unload);
   expect(unload.defaultPrevented).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "Retry save" }));
   await act(() => vi.advanceTimersByTimeAsync(500));
-  expect(deserializeAlbum(files.get("Existing")!).startingSide).toBe("left");
+  expect(deserializeAlbum(files.get("Existing")!).pageFormat.bleedMm).toBe(4);
   expect(screen.queryByRole("alert")).toBeNull();
   expect((screen.getByRole("button", { name: "Open Album Existing" }) as HTMLButtonElement).disabled).toBe(false);
 });
@@ -1139,7 +1182,7 @@ it("pans a rotated Photo in the direction dragged on the Page", async () => {
 
 it("keeps the sibling Photo browser in sync with edits and Album switches", async () => {
   const { ports, files } = disk();
-  files.set("Other", serializeAlbum(createAlbum({ name: "Other", pageCount: 1 })));
+  files.set("Other", serializeAlbum(createAlbum({ name: "Other", pageCount: 2 })));
   const photo = { path: "tree.jpg", width: 6000, height: 4000, orientation: 1, captureDate: 0, revision: "1" };
   vi.spyOn(tauriPhotoPorts, "scan").mockResolvedValue({ photos: [photo], folders: [], warnings: [] });
   vi.spyOn(tauriPhotoPorts, "thumbnail").mockResolvedValue("data:image/png;base64,dGVzdA==");
@@ -1230,7 +1273,7 @@ it("keeps the replacement Photo's centred Crop when a wheel gesture was pending"
 
 it("keeps Album switching locked until a wheel Crop gesture is saved", async () => {
   const { ports, files } = disk();
-  files.set("Other", serializeAlbum(createAlbum({ name: "Other", pageCount: 1 })));
+  files.set("Other", serializeAlbum(createAlbum({ name: "Other", pageCount: 2 })));
   render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
   await screen.findByRole("heading", { name: "Existing" });
@@ -1358,7 +1401,7 @@ it("does not start an earlier save during a Crop pan", async () => {
 
 it("finishes a Crop pan when the window loses focus", async () => {
   const { ports, files } = disk();
-  files.set("Other", serializeAlbum(createAlbum({ name: "Other", pageCount: 1 })));
+  files.set("Other", serializeAlbum(createAlbum({ name: "Other", pageCount: 2 })));
   render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
   await screen.findByRole("heading", { name: "Existing" });
@@ -1384,7 +1427,7 @@ it("finishes a Crop pan when the window loses focus", async () => {
 
 it("serializes saves when a Slot drag ends during an earlier Crop save", async () => {
   const { ports, files } = disk();
-  files.set("Other", serializeAlbum(createAlbum({ name: "Other", pageCount: 1 })));
+  files.set("Other", serializeAlbum(createAlbum({ name: "Other", pageCount: 2 })));
   render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
   await screen.findByRole("heading", { name: "Existing" });
@@ -1561,7 +1604,7 @@ it("ignores Photo drops on blocked Pages, the Spread strip, and the area around 
   expect(screen.queryByRole("button", { name: /^Page \d+ Photo Slot/ })).toBeNull();
 
   fireEvent.change(screen.getByLabelText("Page"), { target: { value: "page-2" } });
-  fireEvent.drop(within(editor).getByText("No Page"), photo);
+  fireEvent.drop(within(editor).getByText("Inside cover"), photo);
   expect(screen.queryByRole("button", { name: /^Page \d+ Photo Slot/ })).toBeNull();
 });
 

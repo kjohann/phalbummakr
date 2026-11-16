@@ -40,8 +40,8 @@ where they live on disk; browsing never moves or copies originals.
 
 Use **File > New Album** to choose a `.phalbum` file, then a title, Page Format and print settings. Initially the
 only Page Format is **A4 landscape (297 x 210 mm)**; width and height are not
-entered manually. Defaults are 24 empty white Pages, Page 1 on the right, 3 mm
-Bleed, 5 mm Safe Zone and 300 DPI. Page counts from 1 to 10,000 are supported.
+entered manually. Defaults are 2 empty white Pages, 3 mm
+Bleed, 5 mm Safe Zone and 300 DPI. Even Page counts from 2 to 10,000 are supported.
 The title is free text and is independent of the filename.
 
 Each Album is a `.phalbum` file containing versioned JSON. Its folder is the
@@ -50,24 +50,27 @@ Library; Photo paths are relative to that folder. Use **File > Open Album** or
 rather than silently discarded. Creating an Album never overwrites an existing file.
 Existing `Albums/*.album.json` files are not migrated automatically: move each
 file to the Library root, rename it to `.phalbum`, rename its JSON `name` field
-to `title`, and change `schemaVersion` from `1` to `2`.
+to `title`, and change `schemaVersion` from `1` to `2`. Remove `startingSide`
+and, if needed, append an empty Page with a unique ID to make the count even.
+Page sides may change for Albums that started on the left.
 
 The editor shows facing Pages, with a horizontally scrollable Spread strip below
 it. Select a Page from the strip, the Page selector, or the editor itself. Page 1
-is alone on its chosen side; the opposite side is blocked out as **Inside cover**.
-Remaining Pages pair in order, with **No Page** marking an unmatched final side.
-These placeholders are not editable Pages and are not saved in the Album.
+is on the right facing the front **Inside cover**; the final Page is on the left
+facing the back Inside Cover. Remaining Pages pair in order. Inside Covers cannot
+be selected, hold Slots, receive Photos or be exported, and are not saved in the Album.
 
-**Add Page** and **Duplicate Page** insert after the selected Page and select the
-result. **Delete Page** selects the next Page, or the previous one at the end;
-the last Page cannot be deleted. Drag a Page thumbnail onto another to move it to
+**Add Spread** inserts two empty Pages after the selected Spread (or before the
+last Spread). **Duplicate Page** inserts a Spread there with the copy on the same
+side and an empty sibling. **Delete Spread** removes both Pages after confirmation;
+**Clear Page** clears the first or last Page after confirmation without removing it.
+Drag a Page thumbnail onto another to move it to
 that position, or use **Earlier** / **Later** with the keyboard. Page numbers and
 Spreads update from the new order, while Page identities remain stable. The
 selected thumbnail scrolls into view. The editor keeps the trim edge at A4
 proportions, with Bleed outside it and a dashed Safe Zone inside it.
 
-**Album settings** contains the title, **Page 1 side** and the print settings. Starting-side
-changes apply immediately; use **Apply print settings** for the title, Bleed,
+**Album settings** contains the title and print settings. Use **Apply print settings** for the title, Bleed,
 Safe Zone and DPI changes. The Page Format remains A4 landscape. All applied edits
 autosave after 500 ms without another change. Album switching is blocked until
 saving finishes; save failures keep the

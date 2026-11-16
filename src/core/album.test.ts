@@ -2,6 +2,73 @@ import { expect, it } from "vitest";
 import { addPage, albumSpreads, createAlbum, deletePage, deserializeAlbum, duplicatePage, movePage, pageDimensions, serializeAlbum } from "./album";
 import { addPhotoSlot, placePhoto } from "./slots";
 
+it("creates a two-Page Album with front and back Inside Covers", () => {
+  const album = createAlbum({ name: "Test" });
+  expect(album.pages).toHaveLength(2);
+  expect(albumSpreads(album)).toEqual([
+    { left: null, right: album.pages[0] },
+    { left: album.pages[1], right: null },
+  ]);
+  expect(JSON.parse(serializeAlbum(album))).not.toHaveProperty("startingSide");
+});
+
+it("rejects odd or insufficient Page counts when creating or opening Albums", () => {
+  for (const pageCount of [0, 1, 3]) {
+    expect(() => createAlbum({ name: "Test", pageCount })).toThrow(/even.*2/i);
+  }
+  const album = createAlbum({ name: "Test", pageCount: 4 });
+  expect(() => deserializeAlbum(JSON.stringify({ ...album, pages: album.pages.slice(0, 3) })))
+    .toThrow(/even.*2/i);
+  expect(() => deserializeAlbum(JSON.stringify({ ...album, startingSide: "right", pages: album.pages.slice(0, 3) })))
+    .toThrow(/even.*2/i);
+});
+
+it("adds an empty Spread after a selected Spread and before the back Inside Cover", () => {
+  const album = createAlbum({ name: "Test", pageCount: 4 });
+  const afterMiddle = addPage(album, "page-2");
+  expect(afterMiddle.pages.map((page) => page.id))
+    .toEqual(["page-1", "page-2", "page-3", "page-5", "page-6", "page-4"]);
+  expect(afterMiddle.pages.slice(3, 5).every((page) => page.slots.length === 0)).toBe(true);
+  expect(addPage(album, "page-4").pages.map((page) => page.id))
+    .toEqual(["page-1", "page-2", "page-3", "page-5", "page-6", "page-4"]);
+  expect(deserializeAlbum(serializeAlbum(afterMiddle))).toEqual(afterMiddle);
+  expect(album.pages).toHaveLength(4);
+  expect(() => addPage(album, "missing")).toThrow(/page/i);
+  expect(() => addPage(createAlbum({ name: "Full", pageCount: 10000 }), "page-1")).toThrow(/page count/i);
+});
+
+it("duplicates a Page onto the same side of a new Spread with an empty sibling", () => {
+  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 4 }), "page-1");
+  const rightCopy = duplicatePage(album, "page-1");
+  expect(rightCopy.pages.map((page) => page.id))
+    .toEqual(["page-1", "page-5", "page-6", "page-2", "page-3", "page-4"]);
+  expect(rightCopy.pages[1].slots).toEqual([]);
+  expect(rightCopy.pages[2].slots).toEqual(album.pages[0].slots);
+  expect(rightCopy.pages[2].slots).not.toBe(album.pages[0].slots);
+  const leftCopy = duplicatePage(album, "page-4");
+  expect(leftCopy.pages[3].id).toBe("page-5");
+  expect(leftCopy.pages[4].slots).toEqual([]);
+  expect(() => duplicatePage(album, "missing")).toThrow(/page/i);
+  expect(() => duplicatePage(createAlbum({ name: "Full", pageCount: 10000 }), "page-1")).toThrow(/page count/i);
+});
+
+it("deletes both sibling Pages in a middle Spread but only clears end Pages", () => {
+  let album = createAlbum({ name: "Test", pageCount: 6 });
+  album = addPhotoSlot(addPhotoSlot(album, "page-1"), "page-6");
+  expect(deletePage(album, "page-3").pages.map((page) => page.id))
+    .toEqual(["page-1", "page-4", "page-5", "page-6"]);
+  const firstCleared = deletePage(album, "page-1");
+  expect(firstCleared.pages).toHaveLength(6);
+  expect(firstCleared.pages[0].slots).toEqual([]);
+  expect(firstCleared.pages[5].slots).toHaveLength(1);
+  const lastCleared = deletePage(album, "page-6");
+  expect(lastCleared.pages[5].slots).toEqual([]);
+  expect(lastCleared.pages[0].slots).toHaveLength(1);
+  expect(() => deletePage(album, "missing")).toThrow(/page/i);
+  const replaced = addPage(deletePage(album, "page-2"), "page-1");
+  expect(new Set(replaced.pages.map((page) => page.id)).size).toBe(6);
+});
+
 it("round trips a free-text Album title independently of its filename", () => {
   const album = createAlbum({ name: "Family: summer / 2026" });
   const saved = JSON.parse(serializeAlbum(album));
@@ -27,75 +94,31 @@ it("moves a Page to its final position in either direction and re-pairs without 
   }
 });
 
-it("deletes a Page, re-pairs Spreads, and never deletes the last Page", () => {
-  const album = createAlbum({ name: "Test", pageCount: 4 });
-  const deleted = deletePage(album, "page-1");
-  expect(deleted.pages.map((page) => page.id)).toEqual(["page-2", "page-3", "page-4"]);
-  expect(albumSpreads(deleted)).toEqual([
-    { left: null, right: album.pages[1] }, { left: album.pages[2], right: album.pages[3] },
-  ]);
-  expect(album.pages).toHaveLength(4);
-  expect(() => deletePage(album, "missing")).toThrow(/page/i);
-  expect(() => deletePage(createAlbum({ name: "Single", pageCount: 1 }), "page-1")).toThrow(/page count/i);
-  const replaced = addPage(deletePage(album, "page-2"), "page-1");
-  expect(new Set(replaced.pages.map((page) => page.id)).size).toBe(4);
-});
-
-it("duplicates a Page immediately after its source with an independent identity and content", () => {
-  const album = createAlbum({ name: "Test", pageCount: 2 });
-  const duplicated = duplicatePage(album, "page-1");
-  expect(duplicated.pages.map((page) => page.id)).toEqual(["page-1", "page-3", "page-2"]);
-  expect(duplicated.pages[1]).toEqual({ ...album.pages[0], id: "page-3" });
-  expect(duplicated.pages[1]).not.toBe(album.pages[0]);
-  expect(duplicated.pages[1].slots).not.toBe(album.pages[0].slots);
-  expect(album.pages).toHaveLength(2);
-  expect(() => duplicatePage(album, "missing")).toThrow(/page/i);
-  expect(() => duplicatePage(createAlbum({ name: "Full", pageCount: 10000 }), "page-1")).toThrow(/page count/i);
-});
-
-it("adds an empty Page after the selected Page without changing the original Album", () => {
-  const album = createAlbum({ name: "Test", pageCount: 2 });
-  const added = addPage(album, "page-1");
-  expect(added.pages.map((page) => page.id)).toEqual(["page-1", "page-3", "page-2"]);
-  expect(added.pages[1]).toEqual({ id: "page-3", background: "#ffffff", slots: [] });
-  expect(album.pages.map((page) => page.id)).toEqual(["page-1", "page-2"]);
-  expect(deserializeAlbum(serializeAlbum(added))).toEqual(added);
-  expect(() => addPage(album, "missing")).toThrow(/page/i);
-  expect(() => addPage(createAlbum({ name: "Full", pageCount: 10000 }), "page-1")).toThrow(/page count/i);
-});
-
-it("keeps Page 1 alone on its chosen side and pairs the remaining Pages in order", () => {
+it("pairs middle Pages in order between the Inside Covers", () => {
   const album = createAlbum({ name: "Test", pageCount: 4 });
   const [one, two, three, four] = album.pages;
   expect(albumSpreads(album)).toEqual([
     { left: null, right: one }, { left: two, right: three }, { left: four, right: null },
   ]);
-  expect(albumSpreads({ ...album, startingSide: "left" })).toEqual([
-    { left: one, right: null }, { left: two, right: three }, { left: four, right: null },
-  ]);
-  expect(albumSpreads(createAlbum({ name: "Single", pageCount: 1 }))).toEqual([
-    { left: null, right: { id: "page-1", background: "#ffffff", slots: [] } },
-  ]);
 });
 
-it("creates 24 empty white A4 landscape Pages, starting on the right, and round trips JSON", () => {
+it("creates empty white A4 landscape Pages and round trips JSON", () => {
   const album = createAlbum({ name: "Christmas" });
   expect(album.schemaVersion).toBe(2);
   expect(album.title).toBe("Christmas");
-  expect(album.startingSide).toBe("right");
   expect(album.pageFormat).toEqual({
     size: "A4", orientation: "landscape", bleedMm: 3, safeZoneMm: 5, dpi: 300,
   });
   expect(pageDimensions(album.pageFormat)).toEqual({ widthMm: 297, heightMm: 210 });
-  expect(album.pages).toHaveLength(24);
+  expect(album.pages).toHaveLength(2);
   expect(album.pages.every((page) => page.background === "#ffffff" && page.slots.length === 0)).toBe(true);
-  expect(new Set(album.pages.map((page) => page.id)).size).toBe(24);
+  expect(new Set(album.pages.map((page) => page.id)).size).toBe(2);
   expect(deserializeAlbum(serializeAlbum(album))).toEqual(album);
 });
 
 it("loads an Album saved before Placements had the Fit field", () => {
   const album = placePhoto(
-    addPhotoSlot(createAlbum({ name: "Old Album", pageCount: 1 }), "page-1"),
+    addPhotoSlot(createAlbum({ name: "Old Album", pageCount: 2 }), "page-1"),
     "page-1",
     "slot-1",
     { path: "tree.jpg", width: 3000, height: 2000, orientation: 1 },
@@ -112,11 +135,10 @@ it("loads an Album saved before Placements had the Fit field", () => {
   expect(JSON.parse(serializeAlbum(loaded)).pages[0].slots[0].placement.fit).toBe(false);
 });
 
-it("accepts a custom Page count, starting side and print settings", () => {
-  const album = createAlbum({ name: " Summer ", pageCount: 3, startingSide: "left", bleedMm: 0, safeZoneMm: 8, dpi: 600 });
+it("accepts a custom Page count and print settings", () => {
+  const album = createAlbum({ name: " Summer ", pageCount: 4, bleedMm: 0, safeZoneMm: 8, dpi: 600 });
   expect(album.title).toBe(" Summer ");
-  expect(album.pages).toHaveLength(3);
-  expect(album.startingSide).toBe("left");
+  expect(album.pages).toHaveLength(4);
   expect(album.pageFormat).toMatchObject({ bleedMm: 0, safeZoneMm: 8, dpi: 600 });
 });
 
@@ -135,7 +157,7 @@ it("rejects invalid print settings and malformed or unsupported Albums instead o
     { ...valid, startingSide: "middle" },
     { ...valid, pages: [] },
     { ...valid, pages: [valid.pages[0], valid.pages[0]] },
-    { ...valid, pages: [{ ...valid.pages[0], slots: [{ type: "future-slot" }] }] },
+    { ...valid, pages: [{ ...valid.pages[0], slots: [{ type: "future-slot" }] }, valid.pages[1]] },
     { ...valid, futureField: true },
     null, [], {}, "text",
   ];

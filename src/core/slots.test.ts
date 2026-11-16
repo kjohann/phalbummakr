@@ -39,7 +39,7 @@ it("swaps Placements across Pages, keeping Slot geometry and refitting Crops wit
 });
 
 it("rotates a placed Slot around its physical centre without clamping or changing its Crop", () => {
-  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1");
+  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 2 }), "page-1");
   const placed = placePhoto(album, "page-1", "slot-1", { path: "a.jpg", width: 6000, height: 4000, orientation: 1 });
   const atEdge = moveSlot(placed, "page-1", "slot-1", 0, 0);
   const rotated = rotateSlot(atEdge, "page-1", "slot-1", 90);
@@ -62,7 +62,7 @@ it("rotates a placed Slot around its physical centre without clamping or changin
 });
 
 it("keeps a newly placed Photo upright in a rotated portrait Slot and when resizing it", () => {
-  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1");
+  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 2 }), "page-1");
   const photo = { path: "a.jpg", width: 4000, height: 6000, orientation: 1 };
   const rotatedEmpty = rotateSlot(album, "page-1", "slot-1", 90);
   const placed = placePhoto(rotatedEmpty, "page-1", "slot-1", photo);
@@ -80,7 +80,7 @@ it("keeps a newly placed Photo upright in a rotated portrait Slot and when resiz
 
 it.each([90, 180, 270] as const)("keeps replacement Photos upright after %i degrees of Slot rotation", (rotation) => {
   const photo = { path: "a.jpg", width: 6000, height: 4000, orientation: 1 };
-  let album = placePhoto(addPhotoSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1"), "page-1", "slot-1", photo);
+  let album = placePhoto(addPhotoSlot(createAlbum({ name: "Test", pageCount: 2 }), "page-1"), "page-1", "slot-1", photo);
   for (let turn = 0; turn < rotation; turn += 90) album = rotateSlot(album, "page-1", "slot-1", 90);
   const before = slotOf(album);
   const restored = deserializeAlbum(serializeAlbum(album));
@@ -100,7 +100,7 @@ it.each([90, 180, 270] as const)("keeps replacement Photos upright after %i degr
 });
 
 it("keeps an overflowing sideways Text Slot outside the Bleed when moved within it", () => {
-  const album = addTextSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1");
+  const album = addTextSlot(createAlbum({ name: "Test", pageCount: 2 }), "page-1");
   const rotated = rotateSlot(album, "page-1", "slot-1", 90);
   const slot = slotOf(rotated);
   const overflowing = { ...rotated, pages: [{ ...rotated.pages[0], slots: [{ ...slot, x: -0.2, width: 0.3 }] }] };
@@ -109,7 +109,7 @@ it("keeps an overflowing sideways Text Slot outside the Bleed when moved within 
 });
 
 it("supports all quarter turns and rejects invalid stored orientations while reading old Albums", () => {
-  const album = addTextSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1");
+  const album = addTextSlot(createAlbum({ name: "Test", pageCount: 2 }), "page-1");
   expect(deserializeAlbum(serializeAlbum(album))).toEqual(album);
   let current = album;
   for (const rotation of [270, 180, 90, 0]) {
@@ -123,7 +123,7 @@ it("supports all quarter turns and rejects invalid stored orientations while rea
 });
 
 it("deletes a Slot and its Placement, leaving the other Slots", () => {
-  const album = addPhotoSlot(addPhotoSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1"), "page-1");
+  const album = addPhotoSlot(addPhotoSlot(createAlbum({ name: "Test", pageCount: 2 }), "page-1"), "page-1");
   const deleted = deleteSlot(album, "page-1", "slot-1");
   expect(deleted.pages[0].slots.map((slot) => slot.id)).toEqual(["slot-2"]);
   expect(album.pages[0].slots).toHaveLength(2);
@@ -132,7 +132,7 @@ it("deletes a Slot and its Placement, leaving the other Slots", () => {
 });
 
 it("resizes a Slot from its bottom-right corner, keeping a minimum size and stopping at the Bleed edge", () => {
-  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 1, bleedMm: 21 }), "page-1");
+  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 2, bleedMm: 21 }), "page-1");
   expect(slotOf(resizeSlot(album, "page-1", "slot-1", 0.5, 0.25))).toMatchObject({ x: 0.3, y: 0.3, width: 0.5, height: 0.25 });
   const huge = slotOf(resizeSlot(album, "page-1", "slot-1", 10, 10));
   expect(huge.width).toBeCloseTo(0.7707, 4);
@@ -143,7 +143,7 @@ it("resizes a Slot from its bottom-right corner, keeping a minimum size and stop
 
 it("places a Photo with a centred Crop that fills the Slot, for landscape, portrait and rotated Photos", () => {
   // A 0.4 x 0.4 Slot on A4 landscape is 118.8 x 84 mm (aspect 1.4143).
-  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1");
+  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 2 }), "page-1");
   const landscape = { path: "2024/Christmas/tree.jpg", width: 6000, height: 4000, orientation: 1 };
   const placed = slotOf(placePhoto(album, "page-1", "slot-1", landscape)).placement!;
   expect(placed.photoPath).toBe("2024/Christmas/tree.jpg");
@@ -197,7 +197,7 @@ it("keeps Crop panning and zooming within the Photo, and fits all four Photo and
 });
 
 it("replaces the Photo in an occupied Slot and round trips Placements through JSON", () => {
-  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1");
+  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 2 }), "page-1");
   const photo = { path: "a.jpg", width: 3000, height: 2000, orientation: 1 };
   const replaced = placePhoto(placePhoto(album, "page-1", "slot-1", photo), "page-1", "slot-1", { ...photo, path: "b/c.png" });
   expect(replaced.pages[0].slots).toHaveLength(1);
@@ -218,7 +218,7 @@ it("replaces the Photo in an occupied Slot and round trips Placements through JS
 });
 
 it("keeps a placed Photo filling its Slot, around the same centre, when the Slot is resized", () => {
-  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1");
+  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 2 }), "page-1");
   const placed = placePhoto(album, "page-1", "slot-1", { path: "a.jpg", width: 6000, height: 4000, orientation: 1 });
   const moved = moveSlot(placed, "page-1", "slot-1", 0.1, 0.1);
   expect(slotOf(moved).placement).toEqual(slotOf(placed).placement);
@@ -230,7 +230,7 @@ it("keeps a placed Photo filling its Slot, around the same centre, when the Slot
 });
 
 it("preserves Crop zoom and centre when a Photo Slot is resized in Fit", () => {
-  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1");
+  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 2 }), "page-1");
   const placed = placePhoto(album, "page-1", "slot-1", { path: "a.jpg", width: 6000, height: 4000, orientation: 1 });
   const zoomed = panCrop(zoomCrop(slotOf(placed).placement!.crop, 2), 0.15, 0.2);
   const fit = setPlacementFit(setPlacementCrop(placed, "page-1", "slot-1", zoomed), "page-1", "slot-1", true);
@@ -250,7 +250,7 @@ it("preserves Crop zoom and centre when a Photo Slot is resized in Fit", () => {
 
 it("moves a Slot freely within the Page and into the Bleed, but never past the Bleed edge", () => {
   // 21 mm Bleed on 297 x 210 mm is 0.0707 of the width and 0.1 of the height.
-  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 1, bleedMm: 21 }), "page-1");
+  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 2, bleedMm: 21 }), "page-1");
   expect(slotOf(moveSlot(album, "page-1", "slot-1", 0.1, 0.55))).toMatchObject({ x: 0.1, y: 0.55, width: 0.4, height: 0.4 });
   const pastTopLeft = slotOf(moveSlot(album, "page-1", "slot-1", -1, -1));
   expect(pastTopLeft.x).toBeCloseTo(-0.0707, 4);
@@ -278,7 +278,7 @@ it("adds an empty Photo Slot to a Page, stored as fractions of the Page, without
 });
 
 it("creates a Photo Slot under a dropped Photo, clips it to the Bleed, and refits the centred Crop", () => {
-  const album = createAlbum({ name: "Test", pageCount: 1, bleedMm: 21 });
+  const album = createAlbum({ name: "Test", pageCount: 2, bleedMm: 21 });
   const photo = { path: "tree.jpg", width: 6000, height: 4000, orientation: 1 };
   const centred = placePhotoOnPage(album, "page-1", photo, 0.5, 0.5).pages[0].slots[0];
   expect(centred.x).toBeCloseTo(0.3, 9);

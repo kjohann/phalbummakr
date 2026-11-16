@@ -12,7 +12,7 @@ Manage Pages and Spreads from the strip at the bottom of the editor, and give th
 
 - [ ] The strip shows one thumbnail per Page. Facing Pages sit close together, with a wider gap between Spreads. Inside Covers are shown as greyed-out placeholders.
 - [ ] Clicking a Page thumbnail shows its Spread in the editor and selects the Page.
-- [ ] The Add Page, Duplicate Page, Delete Page, Earlier and Later buttons are removed.
+- [ ] The Add Spread, Duplicate Page, Delete Spread / Clear Page, Earlier and Later buttons are removed.
 
 ### Adding and deleting Spreads
 

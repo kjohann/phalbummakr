@@ -3,7 +3,7 @@ import { createAlbum, deserializeAlbum, duplicatePage, serializeAlbum } from "./
 import { addPhotoSlot, addTextSlot, deleteSlot, moveSlot, placePhoto, resizeSlot, setSlotText, setTextStyle } from "./slots";
 
 it("adds, edits, moves, resizes, saves and deletes a Text Slot", () => {
-  const original = createAlbum({ name: "Test", pageCount: 1 });
+  const original = createAlbum({ name: "Test", pageCount: 2 });
   let album = addTextSlot(original, "page-1");
   album = setSlotText(album, "page-1", "slot-1", "A caption\non two lines");
   album = setTextStyle(album, "page-1", "slot-1", {
@@ -24,12 +24,12 @@ it("adds, edits, moves, resizes, saves and deletes a Text Slot", () => {
 });
 
 it("duplicates Page text independently and rejects invalid text styles and Photo placement in a Text Slot", () => {
-  let album = addTextSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1");
+  let album = addTextSlot(createAlbum({ name: "Test", pageCount: 2 }), "page-1");
   album = setSlotText(album, "page-1", "slot-1", "Caption");
   album = addPhotoSlot(album, "page-1");
-  const copy = setSlotText(duplicatePage(album, "page-1"), "page-2", "slot-1", "Changed");
+  const copy = setSlotText(duplicatePage(album, "page-1"), "page-4", "slot-1", "Changed");
   expect(copy.pages[0].slots[0]).toMatchObject({ text: "Caption" });
-  expect(copy.pages[1].slots[0]).toMatchObject({ text: "Changed" });
+  expect(copy.pages[2].slots[0]).toMatchObject({ text: "Changed" });
   expect(() => placePhoto(album, "page-1", "slot-1", { path: "a.jpg", width: 100, height: 100, orientation: 1 }))
     .toThrow(/Photo Slot/);
   const json = JSON.parse(serializeAlbum(album));
@@ -45,7 +45,7 @@ it("duplicates Page text independently and rejects invalid text styles and Photo
 });
 
 it("defaults legacy Text Slot underline to off and persists explicit underline", () => {
-  const album = addTextSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1");
+  const album = addTextSlot(createAlbum({ name: "Test", pageCount: 2 }), "page-1");
   const legacy = JSON.parse(serializeAlbum(album));
   delete legacy.pages[0].slots[0].style.underline;
   const loaded = deserializeAlbum(JSON.stringify(legacy));
@@ -57,7 +57,7 @@ it("defaults legacy Text Slot underline to off and persists explicit underline",
 });
 
 it("persists fitted Text Slot height beyond the Page and resizes only its width", () => {
-  const json = JSON.parse(serializeAlbum(addTextSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1")));
+  const json = JSON.parse(serializeAlbum(addTextSlot(createAlbum({ name: "Test", pageCount: 2 }), "page-1")));
   json.pages[0].slots[0].height = 0.8;
   let album = deserializeAlbum(JSON.stringify(json));
   album = moveSlot(album, "page-1", "slot-1", 0.1, 0.6);

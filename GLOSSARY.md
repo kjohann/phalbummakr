@@ -56,12 +56,15 @@ The explicit step of changing an Album's Page Format and adapting every existing
 _Avoid_: Resize
 
 **Spread**:
-Two facing Pages viewed side by side. Pages are added and removed a Spread at a time, so an Album always has an even number of Pages, but each Page is still designed on its own. The first Spread pairs the front Inside Cover with Page 1, and the last pairs the final Page with the back Inside Cover.
+Two facing sides viewed together. A middle Spread has two Pages; the first pairs the front Inside Cover with Page 1, and the last pairs the final Page with the back Inside Cover.
 _Avoid_: Double page
 
 **Inside Cover**:
 The inside of the front or back cover, facing the first or last Page. It is shown in its Spread for context, but it is never designed or exported.
 _Avoid_: Endpaper, blank page
+
+**Spread sibling**:
+The Page facing another Page in the same Spread. The first and last Pages face an Inside Cover instead and have no Spread sibling.
 
 **Layout**:
 A reusable arrangement of Slots on a single Page. Applying a Layout copies it onto the Page, and the two are unlinked from then on.

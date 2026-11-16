@@ -57,7 +57,7 @@ it("updates Usage badges and the unused filter as the current Album changes", as
   await screen.findByText(first.path);
   const filter = screen.getByRole("checkbox", { name: "Unused in this Album" }) as HTMLInputElement;
   expect(filter.disabled).toBe(true);
-  let album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1");
+  let album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 2 }), "page-1");
   album = placePhoto(album, "page-1", "slot-1", first);
   rerender(<PhotoBrowser root="D:\\Photos" album={album} />);
   expect(screen.getByLabelText("Used 1 time in this Album").textContent).toBe("1");

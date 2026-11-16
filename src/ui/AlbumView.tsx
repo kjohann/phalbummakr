@@ -133,10 +133,12 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
   const spreadIndex = spreads.findIndex((spread) => spread.left?.id === selectedPage.id || spread.right?.id === selectedPage.id);
   const spread = spreads[spreadIndex];
   const pageNumbers = new Map(album.pages.map((page, index) => [page.id, index + 1]));
+  const insertionIndex = Math.min(spreadIndex * 2 + 1, album.pages.length - 1);
+  const endPage = spread.left === null || spread.right === null;
 
   useEffect(() => {
     stripRef.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [selectedPage.id, visiblePageIndex, album.startingSide]);
+  }, [selectedPage.id, visiblePageIndex]);
 
   useEffect(() => {
     const element = viewportRef.current;
@@ -441,11 +443,18 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
           </select>
         </label>
         <button type="button" className="button-quiet" disabled={disabled || album.pages.length >= 10000}
-          onClick={() => editPages((current) => addPage(current, selectedPage.id), visiblePageIndex + 1)}>Add Page</button>
+          onClick={() => editPages((current) => addPage(current, selectedPage.id), insertionIndex)}>Add Spread</button>
         <button type="button" className="button-quiet" disabled={disabled || album.pages.length >= 10000}
-          onClick={() => editPages((current) => duplicatePage(current, selectedPage.id), visiblePageIndex + 1)}>Duplicate Page</button>
-        <button type="button" className="button-quiet" disabled={disabled || album.pages.length === 1}
-          onClick={() => editPages((current) => deletePage(current, selectedPage.id), visiblePageIndex)}>Delete Page</button>
+          onClick={() => editPages((current) => duplicatePage(current, selectedPage.id),
+            insertionIndex + (spread.right?.id === selectedPage.id ? 1 : 0))}>Duplicate Page</button>
+        <button type="button" className="button-quiet" disabled={disabled || (endPage && selectedPage.slots.length === 0)}
+          onClick={() => {
+            const first = endPage ? visiblePageIndex : spreadIndex * 2 - 1;
+            const message = endPage
+              ? `Clear Page ${visiblePageIndex + 1} and its content?`
+              : `Delete Pages ${first + 1} and ${first + 2} and their content?`;
+            if (window.confirm(message)) editPages((current) => deletePage(current, selectedPage.id), first);
+          }}>{endPage ? "Clear Page" : "Delete Spread"}</button>
         <button type="button" className="button-quiet" aria-label="Move Page earlier" disabled={disabled || visiblePageIndex === 0}
           onClick={() => editPages((current) => movePage(current, selectedPage.id, visiblePageIndex - 1), visiblePageIndex - 1)}>
           Earlier
@@ -571,7 +580,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
             </button>
           ) : (
             <div className="canvas-blocked-page" key={`blocked-${side}`} style={style}>
-              {spreadIndex === 0 ? "Inside cover" : "No Page"}
+              Inside cover
             </div>
           );
         })}
@@ -840,7 +849,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
                 onClick={() => selectPage(page.id)}>{pageNumbers.get(page.id)}</button>
             ) : (
               <span key={`blocked-${side}`} className="page-thumbnail page-thumbnail-blocked">
-                {index === 0 ? "Inside cover" : "No Page"}
+                Inside cover
               </span>
             ))}
           </div>
