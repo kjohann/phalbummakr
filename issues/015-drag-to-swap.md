@@ -1,6 +1,6 @@
 # 015 – Drag-to-swap Placements
 
-Status: done · Depends on: 006, 007
+Status: done · Depends on: 006, 007 · Addendum: [015-addendum](015-addendum.md)
 
 ## What
 

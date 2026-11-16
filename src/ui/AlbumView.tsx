@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type Keybo
 import { Group, Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva";
 import {
   addPage, addPhotoSlot, addTextSlot, albumSpreads, deletePage, deleteSlot, duplicatePage, movePage, moveSlot, pageDimensions,
-  fitPhotoRect, panCrop, placePhoto, placePhotoOnPage, placementDisplayCrop, photoUsage, removePlacement, resizeSlot, rotateSlot, setPlacementCrop,
+  fitPhotoRect, panCrop, placePhoto, placePhotoOnPage, placementDisplayCrop, photoUsage, resizeSlot, rotateSlot, setPlacementCrop,
   setPlacementFit, setSlotText, setTextStyle, swapPlacements, zoomCrop, POINTS_PER_MM, TEXT_LINE_HEIGHT,
   type Album, type Crop, type PageFormat, type PhotoPreviewPorts, type Rectangle, type Slot, type SlotAddress, type TextSlot, type TextStyle,
 } from "../core";
@@ -106,7 +106,6 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
   const [cropMode, setCropMode] = useState(false);
   const [photoDragActive, setPhotoDragActive] = useState(false);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
-  const [replaceSource, setReplaceSource] = useState<SlotAddress | null>(null);
   const [thumbnailBySlot, setThumbnailBySlot] = useState<Record<string, string>>({});
   const [previewStates, setPreviewStates] = useState<Record<string, {
     path: string; status: "loading" | "ready" | "error"; attempt: number;
@@ -167,7 +166,6 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
   }, []);
 
   function updateCropPreview(next: { pageId: string; slotId: string; crop: Crop } | null) {
-    if (next) setReplaceSource(null);
     const changed = (cropPreviewRef.current !== null) !== (next !== null);
     cropPreviewRef.current = next;
     setCropPreview(next);
@@ -186,7 +184,6 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
   }
 
   function changeAlbum(update: (album: Album) => Album) {
-    setReplaceSource(null);
     commitCropPreview();
     onChange((current) => fitTextSlots(update(current), current));
   }
@@ -268,14 +265,12 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
   }
 
   function selectPage(pageId: string) {
-    setReplaceSource(null);
     setSelectedId(pageId);
     setSelectedSlotId(null);
     setEditingText(null);
   }
 
   function selectSlot(pageId: string, slotId: string) {
-    setReplaceSource(null);
     if (pageId !== selectedId || slotId !== selectedSlotId) setEditingText(null);
     setSelectedId(pageId);
     setSelectedSlotId(slotId);
@@ -502,13 +497,6 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
               onClick={() => zoomPlacementBy(selectedPage.id, selectedSlot.id, 1.2)}>Zoom in</button>
           </>
         )}
-        {replaceSource && (
-          <span>
-            Photos swapped.{" "}
-            <button type="button" className="button-quiet" disabled={disabled}
-              onClick={() => changeAlbum((current) => removePlacement(current, replaceSource))}>Replace instead</button>
-          </span>
-        )}
       </div>
       <div className="canvas-viewport" ref={viewportRef} role="group" aria-label="Spread editor">
         {viewport.width > 0 && viewport.height > 0 && scale > 0 && (
@@ -648,7 +636,6 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
                   });
                   selectSlot(page.id, slot.id);
                   changeAlbum((current) => swapPlacements(current, source, { pageId: page.id, slotId: slot.id }));
-                  if (slot.placement) setReplaceSource(source);
                   return;
                 }
                 const photo = readPhotoDrag(event.dataTransfer);
@@ -674,18 +661,22 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
               {slot.type === "photo" && slot.placement && (!disabled
                 || (draggedPlacement.current?.pageId === page.id && draggedPlacement.current.slotId === slot.id)) && (
                 <span className="slot-photo-drag-handle" draggable aria-label={`Drag Photo from ${name}`}
-                  title="Drag Photo to another Photo Slot"
+                  title="Drag to swap"
                   onMouseDown={(event) => event.stopPropagation()}
                   onDragStart={(event) => {
                     event.stopPropagation();
-                    setReplaceSource(null);
                     commitCropPreview();
                     draggedPlacement.current = { pageId: page.id, slotId: slot.id };
                     event.dataTransfer.effectAllowed = "move";
                     event.dataTransfer.setData(PLACEMENT_DRAG_TYPE, "placement");
                     setPhotoDragActive(true);
                     setDropTargetId(null);
-                  }}>Drag Photo</span>
+                  }}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                      strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                      <path d="M8 13V5a1.5 1.5 0 0 1 3 0v7V3a1.5 1.5 0 0 1 3 0v9V4a1.5 1.5 0 0 1 3 0v8V7a1.5 1.5 0 0 1 3 0v9c0 4-2 6-6 6h-1c-3 0-5-2-6-4l-3-5a1.5 1.5 0 0 1 2.5-1.5L8 13Z" />
+                    </svg>
+                </span>
               )}
               {slot.type === "text" && editingText === targetId && (
                 <textarea className="slot-text-editor" aria-label={`Edit ${name}`} autoFocus value={slot.text} disabled={textDisabled}

@@ -85,13 +85,12 @@ Drag a Photo from the grid onto a Slot to place or replace it, or onto an empty
 part of a Page to create a Slot. The editor uses cached thumbnails and previews,
 not original files.
 
-To move a placed Photo, drag its **Drag Photo** handle onto another Photo Slot.
-An empty target receives the Placement; an occupied target swaps the two
-Placements. Immediately after a swap, choose **Replace instead** to discard the
-displaced Photo and leave the source Slot empty. The Slots keep their geometry
-and rotation. Fit follows the Photo; if Slot shapes differ, the Crop is refit
-around its center, preserving relative zoom where the Photo edges allow it.
-Dropping a Photo from the Library still replaces an occupied Slot.
+To move a placed Photo, drag its hand-icon handle (**Drag to swap**) onto another
+Photo Slot. An empty target receives the Placement; an occupied target swaps the
+two Placements. The Slots keep their geometry and rotation. Fit follows the Photo;
+if Slot shapes differ, the Crop is refit around its center, preserving relative
+zoom where the Photo edges allow it. Dropping a Photo from the Library still
+replaces an occupied Slot.
 
 Select either kind of Slot and use **Rotate left** or **Rotate right** to turn
 it and its content by 90 degrees. Rotation keeps the Slot's centre fixed and

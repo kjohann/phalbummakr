@@ -240,13 +240,6 @@ export interface SlotAddress {
   slotId: string;
 }
 
-export function removePlacement(album: Album, address: SlotAddress): Album {
-  return editSlot(album, address.pageId, address.slotId, (slot) => {
-    if (slot.type !== "photo" || !slot.placement) throw new Error("Photo Slot has no Placement.");
-    return { ...slot, placement: null };
-  });
-}
-
 export function swapPlacements(album: Album, from: SlotAddress, to: SlotAddress): Album {
   const source = album.pages.find((page) => page.id === from.pageId)?.slots.find((slot) => slot.id === from.slotId);
   const target = album.pages.find((page) => page.id === to.pageId)?.slots.find((slot) => slot.id === to.slotId);

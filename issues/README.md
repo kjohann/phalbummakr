@@ -42,6 +42,7 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | [009 addendum - Stable toolbar appearance](009-addendum.md#section-2---stable-toolbar-appearance) | 009 | done |
 | [013 addendum - All aligned snap guides](013-addendum.md) | 013 | done |
 | [014 addendum - Upright Photos on placement](014-addendum.md) | 014 | done |
+| [015 addendum - Swap-only interaction and compact handle](015-addendum.md) | 015 | done |
 
 ## After the MVP
 

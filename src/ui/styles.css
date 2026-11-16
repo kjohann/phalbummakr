@@ -718,10 +718,10 @@ body {
   position: absolute;
   top: 0;
   left: 0;
-  padding: 3px 6px;
+  display: inline-flex;
+  padding: 4px;
   background: #415d50;
   color: #fff;
-  font-size: 11px;
   cursor: grab;
   visibility: hidden;
 }

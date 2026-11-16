@@ -935,7 +935,7 @@ it("swaps placed Photos through the Photo drag handle without moving their Slots
   expect(screen.queryByText(/already used in this Album/)).toBeNull();
 });
 
-it("offers Replace instead after a swap, removing the displaced Photo and retaining the moved Placement", async () => {
+it("swaps without adding post-swap controls and uses an icon-only Photo drag handle with a tooltip", async () => {
   const { ports, files } = disk();
   render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
@@ -947,18 +947,20 @@ it("offers Replace instead after a swap, removing the displaced Photo and retain
     photoDrop({ path: "b.jpg", width: 4000, height: 6000, orientation: 1 }));
   await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
   const dataTransfer = placementTransfer();
-  fireEvent.dragStart(screen.getByLabelText("Drag Photo from Page 1 Photo Slot 1"), { dataTransfer });
+  const handle = screen.getByLabelText("Drag Photo from Page 1 Photo Slot 1");
+  fireEvent.dragStart(handle, { dataTransfer });
   fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 2" }), { dataTransfer });
   fireEvent.dragEnd(window, { dataTransfer });
-  await waitFor(() => expect((screen.getByRole("button", { name: "Replace instead" }) as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.click(screen.getByRole("button", { name: "Replace instead" }));
+  expect(screen.queryByText("Photos swapped.")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Replace instead" })).toBeNull();
+  expect(handle.title).toBe("Drag to swap");
+  expect(handle.textContent).toBe("");
   await waitFor(() => {
     const saved = deserializeAlbum(files.get("Existing")!);
-    expect(saved.pages[0].slots[0].placement).toBeNull();
+    expect(saved.pages[0].slots[0].placement!.photoPath).toBe("b.jpg");
     expect(saved.pages[0].slots[1].placement!.photoPath).toBe("a.jpg");
-    expect([...photoUsage(saved)]).toEqual([["a.jpg", 1]]);
+    expect([...photoUsage(saved)]).toEqual([["b.jpg", 1], ["a.jpg", 1]]);
   });
-  expect(screen.queryByRole("button", { name: "Replace instead" })).toBeNull();
 });
 
 it("moves a Placement to an empty Slot, retaining a pending Crop and ignoring a drop onto itself", async () => {
