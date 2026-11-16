@@ -671,7 +671,8 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
                   ? slot.placement ? "Swap Photos" : "Move Photo"
                   : slot.placement ? "Replace Photo" : "Place Photo"}</span>
               )}
-              {slot.type === "photo" && slot.placement && !disabled && (
+              {slot.type === "photo" && slot.placement && (!disabled
+                || (draggedPlacement.current?.pageId === page.id && draggedPlacement.current.slotId === slot.id)) && (
                 <span className="slot-photo-drag-handle" draggable aria-label={`Drag Photo from ${name}`}
                   title="Drag Photo to another Photo Slot"
                   onMouseDown={(event) => event.stopPropagation()}

@@ -992,6 +992,38 @@ it("moves a Placement to an empty Slot, retaining a pending Crop and ignoring a 
   });
 });
 
+it("keeps a Photo drag source mounted while a pending save finishes", async () => {
+  const { ports } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Photo Slot" }));
+  fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }),
+    photoDrop({ path: "a.jpg", width: 6000, height: 4000, orientation: 1 }));
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  fireEvent.click(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }));
+
+  vi.useFakeTimers();
+  let finishWrite: () => void = () => {};
+  const pendingWrite = new Promise<void>((resolve) => { finishWrite = resolve; });
+  const write = vi.mocked(ports.write).getMockImplementation()!;
+  vi.mocked(ports.write).mockImplementationOnce(async (...args) => {
+    await pendingWrite;
+    await write(...args);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+  const handle = screen.getByLabelText("Drag Photo from Page 1 Photo Slot 1");
+  const dataTransfer = placementTransfer();
+  fireEvent.dragStart(handle, { dataTransfer });
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  expect(handle.isConnected).toBe(true);
+  await act(async () => { finishWrite(); await pendingWrite; });
+  fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 2" }), { dataTransfer });
+  fireEvent.dragEnd(handle, { dataTransfer });
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  expect(screen.getByRole("button", { name: "Page 1 Photo Slot 2" }).title).toBe("a.jpg");
+});
+
 it("keeps a portrait Photo upright when dropped into a rotated empty Slot and saves it", async () => {
   const { ports, files } = disk();
   const { container } = render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
