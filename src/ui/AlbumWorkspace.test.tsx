@@ -90,10 +90,23 @@ it("opens a selected Album file and saves edits back to that file", async () => 
   await screen.findByRole("heading", { name: "Family: / 2026" });
   expect(screen.queryByRole("navigation", { name: "Albums" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Album settings" }));
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "New: title / 2026" } });
+  fireEvent.click(screen.getByRole("button", { name: "Apply print settings" }));
   fireEvent.change(screen.getByLabelText("Page 1 side"), { target: { value: "left" } });
   await waitFor(() => expect(ports.write).toHaveBeenCalledWith(
     "D:\\Photos", "D:\\Photos\\renamed.phalbum", expect.any(String), false,
   ));
+  expect(deserializeAlbum(vi.mocked(ports.write).mock.calls[0][2]).title).toBe("New: title / 2026");
+});
+
+it("disables Album edits during a file transition", async () => {
+  const { ports } = disk();
+  const document = { path: "D:\\Photos\\album.phalbum", album: createAlbum({ name: "Original", pageCount: 1 }) };
+  const { rerender } = render(<AlbumWorkspace root="D:\\Photos" document={document} ports={ports} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Album settings" }));
+  rerender(<AlbumWorkspace root="D:\\Photos" document={document} ports={ports} suspended />);
+  expect((screen.getByRole("button", { name: "Add Page" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByLabelText("Title").matches(":disabled")).toBe(true);
 });
 
 it("rotates a Text Slot and keeps its in-place editor oriented while its content grows", async () => {

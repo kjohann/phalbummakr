@@ -16,7 +16,7 @@ Opening an Album scans its folder (the Library) for JPEG and PNG Photos, excludi
 `.phalbummakr/`, `Exports/` and symbolic links. The photo browser sits beside the
 Album workspace and starts at the Library root. Open folder tiles to browse
 subfolders, including empty folders; use the breadcrumbs to return to any ancestor
-or the Library root. Each view shows only its immediate folders (alphabetically
+or the Library root. `Albums/` is browsed like any other folder. Each view shows only its immediate folders (alphabetically
 first) and Photos, with Photos sorted by capture date (oldest first, then relative
 path for ties). The Photo count is for the current folder, not its descendants.
 Dates come from EXIF's original/digitized date, falling back to the file's modified

@@ -7,11 +7,6 @@ use base64::Engine;
 use std::path::{Path, PathBuf};
 use tauri::Manager;
 
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello from Rust, {name}!")
-}
-
 fn settings_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_local_data_dir()
@@ -125,7 +120,6 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            greet,
             album_settings,
             remember_album,
             forget_album,

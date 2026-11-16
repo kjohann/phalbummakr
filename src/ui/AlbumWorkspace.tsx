@@ -14,9 +14,10 @@ interface Props {
   onBusyChange?: (busy: boolean) => void;
   onAlbumChange?: (album: Album | null) => void;
   document?: { path: string; album: Album };
+  suspended?: boolean;
 }
 
-export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document }: Props) {
+export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document, suspended = false }: Props) {
   const [names, setNames] = useState<string[]>([]);
   const [current, setCurrent] = useState<{ filename: string; album: Album } | null>(
     () => document ? { filename: document.path, album: fitTextSlots(document.album) } : null,
@@ -149,6 +150,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
   }
 
   function changeAlbum(update: (album: Album) => Album) {
+    if (suspended) return;
     const previous = currentRef.current;
     if (!previous) return;
     try {
@@ -216,7 +218,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
           <p className="album-details">A4 landscape - 297 x 210 mm - {current.album.pageFormat.dpi} DPI</p>
           <div className="album-toolbar">
             <div className="album-settings-wrapper">
-              <button type="button" className="button-quiet" aria-expanded={settingsOpen}
+              <button type="button" className="button-quiet" disabled={suspended} aria-expanded={settingsOpen}
                 aria-controls="album-settings" onClick={() => setSettingsOpen(!settingsOpen)}>Album settings</button>
               {settingsOpen && (
                 <form id="album-settings" className="album-form album-settings" aria-label="Album settings"
@@ -231,7 +233,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
                     } }));
                   }}>
                   <h3>Album settings</h3>
-                  <fieldset disabled={busy || saveStatus === "saving" || saveStatus === "error"}>
+                  <fieldset disabled={suspended || busy || saveStatus === "saving" || saveStatus === "error"}>
                     {document && <label>Title<textarea name="title" defaultValue={current.album.title} rows={2} /></label>}
                     <label>Page 1 side
                       <select value={current.album.startingSide} onChange={(event) => {
@@ -259,8 +261,8 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
             root={root} photoPorts={photoPorts} fontPorts={fontPorts}
             onDuplicatePhoto={setDuplicateWarning}
             onCropPendingChange={setCropPending}
-            textDisabled={busy || saveStatus === "error"}
-            disabled={busy || saveStatus === "saving" || saveStatus === "error"} />
+            textDisabled={suspended || busy || saveStatus === "error"}
+            disabled={suspended || busy || saveStatus === "saving" || saveStatus === "error"} />
         </>
       ) : <p className="photo-empty">Open an Album or create a new one.</p>}
     </section>

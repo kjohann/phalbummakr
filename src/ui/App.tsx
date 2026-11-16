@@ -47,10 +47,12 @@ interface OpenDocument {
   album: Album;
 }
 
-function DocumentWorkspace({ document, onBusyChange, onTitleChange }: {
+function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, suspended }: {
   document: OpenDocument;
   onBusyChange: (busy: boolean) => void;
   onTitleChange: (album: Album | null) => void;
+  hidden: boolean;
+  suspended: boolean;
 }) {
   const [album, setAlbum] = useState<Album | null>(document.album);
   const reportAlbum = useCallback((next: Album | null) => {
@@ -58,9 +60,9 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange }: {
     onTitleChange(next);
   }, [onTitleChange]);
   return (
-    <div className="library-workspace">
+    <div className="library-workspace" style={{ display: hidden ? "none" : undefined }}>
       <PhotoBrowser root={document.root} album={album} />
-      <AlbumWorkspace root={document.root} document={document} onBusyChange={onBusyChange} onAlbumChange={reportAlbum} />
+      <AlbumWorkspace root={document.root} document={document} suspended={suspended} onBusyChange={onBusyChange} onAlbumChange={reportAlbum} />
     </div>
   );
 }
@@ -72,10 +74,13 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
   const [draft, setDraft] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [transitioning, setTransitioning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const busyRef = useRef(false);
   const operationRef = useRef(false);
   const documentId = useRef(0);
+  const menuRef = useRef<Menu | null>(null);
+  const menuQueue = useRef<Promise<void>>(Promise.resolve());
 
   const reportBusy = useCallback((value: boolean) => {
     busyRef.current = value;
@@ -96,6 +101,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
     }
     const album = deserializeAlbum(await ports.read(path));
     const root = await ports.parent(path);
+    if (busyRef.current) throw new Error("The current Album has unsaved changes; retry after saving.");
     setDocument({ id: ++documentId.current, path, root, album });
     setTitle(album.title);
     setDraft(null);
@@ -109,6 +115,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
       return;
     }
     operationRef.current = true;
+    setTransitioning(true);
     setBusy(true);
     setError(null);
     try {
@@ -117,6 +124,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
       setError(`${label}: ${String(cause)}`);
     } finally {
       operationRef.current = false;
+      setTransitioning(false);
       setBusy(busyRef.current);
     }
   }
@@ -212,26 +220,43 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
   useEffect(() => {
     if (!isTauri()) return;
     let active = true;
-    Menu.new({ items: [{
-      text: "File",
-      items: [
-        { text: "New Album…", enabled: !busy && !restoring, action: () => actions.current.newAlbum() },
-        { text: "Open Album…", enabled: !busy && !restoring, action: () => actions.current.openAlbum() },
-        { text: "Open Recent", enabled: !busy && !restoring && recent.length > 0, items: recent.map((path) => ({
-          text: path.replaceAll("&", "&&"), action: () => actions.current.openRecent(path),
-        })) },
-        { text: "Close Album", enabled: !busy && (document !== null || draft !== null), action: () => actions.current.closeAlbum() },
-        { text: "Exit", action: () => actions.current.exit() },
-      ],
-    }] }).then(async (menu) => {
+    menuQueue.current = menuQueue.current.then(async () => {
+      if (!active) return;
+      const menu = await Menu.new({ items: [{
+        text: "File",
+        items: [
+          { text: "New Album…", enabled: !busy && !restoring, action: () => actions.current.newAlbum() },
+          { text: "Open Album…", enabled: !busy && !restoring, action: () => actions.current.openAlbum() },
+          { text: "Open Recent", enabled: !busy && !restoring && recent.length > 0, items: recent.map((path) => ({
+            text: path.replaceAll("&", "&&"), action: () => actions.current.openRecent(path),
+          })) },
+          { text: "Close Album", enabled: !busy && !restoring && (document !== null || draft !== null), action: () => actions.current.closeAlbum() },
+          { text: "Exit", action: () => actions.current.exit() },
+        ],
+      }] });
       if (!active) { await menu.close(); return; }
-      const previous = await menu.setAsAppMenu();
-      await previous?.close();
+      try {
+        const previous = await menu.setAsAppMenu();
+        const previousOwned = menuRef.current;
+        menuRef.current = menu;
+        await previous?.close();
+        await previousOwned?.close();
+      } catch (cause) {
+        if (menuRef.current !== menu) await menu.close();
+        throw cause;
+      }
     }).catch((cause: unknown) => {
       if (active) setError(`Could not install File menu: ${String(cause)}`);
     });
     return () => { active = false; };
   }, [recent, busy, restoring, document, draft]);
+
+  useEffect(() => () => {
+    menuQueue.current = menuQueue.current.then(async () => {
+      await menuRef.current?.close();
+      menuRef.current = null;
+    }).catch((cause: unknown) => console.error("Could not release File menu:", cause));
+  }, []);
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -248,6 +273,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
       });
       await ports.write(draft, serializeAlbum(album), true);
       const root = await ports.parent(draft);
+      if (busyRef.current) throw new Error("The previous Album has unsaved changes; retry after saving.");
       setDocument({ id: ++documentId.current, path: draft, root, album });
       setTitle(album.title);
       setDraft(null);
@@ -274,9 +300,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
             <button type="button" className="button-quiet" disabled={busy} onClick={() => setDraft(null)}>Cancel</button>
           </div>
         </form>
-      ) : document ? (
-        <DocumentWorkspace key={document.id} document={document} onBusyChange={reportBusy} onTitleChange={reportTitle} />
-      ) : !restoring && (
+      ) : !document && !restoring && (
         <section className="welcome" aria-label="Open an Album">
           <h1>Open an Album</h1>
           <button type="button" className="button-primary" onClick={actions.current.newAlbum} disabled={busy}>New Album…</button>
@@ -287,6 +311,8 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
           ))}</ul></>}
         </section>
       )}
+      {document && <DocumentWorkspace key={document.id} document={document} onBusyChange={reportBusy}
+        onTitleChange={reportTitle} hidden={draft !== null} suspended={transitioning} />}
     </main>
   );
 }
