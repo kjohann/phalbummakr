@@ -28,7 +28,7 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 012 | [Page Export](012-page-export.md)                            | 007, 009   | todo   |
 | 013 | [Slot snapping](013-slot-snapping.md)                         | 006, 009   | done   |
 | 014 | [Slot rotation](014-slot-rotation.md)                         | 006, 009   | done   |
-| 015 | [Drag-to-swap Placements](015-drag-to-swap.md)                | 006, 007   | todo   |
+| 015 | [Drag-to-swap Placements](015-drag-to-swap.md)                | 006, 007   | done   |
 | 016 | [Open an Album file](016-album-file.md)                       | 004        | todo   |
 | 017 | [Book structure with Inside Covers](017-book-structure.md)    | 016        | todo   |
 | 018 | [Page strip](018-page-strip.md)                               | 017        | todo   |
@@ -49,6 +49,7 @@ Work order for the layout rework: 016, 017, 018, 019, 020, then 011.
 | [009 addendum - Stable toolbar appearance](009-addendum.md#section-2---stable-toolbar-appearance) | 009 | done |
 | [013 addendum - All aligned snap guides](013-addendum.md) | 013 | done |
 | [014 addendum - Upright Photos on placement](014-addendum.md) | 014 | done |
+| [015 addendum - Swap-only interaction and compact handle](015-addendum.md) | 015 | done |
 
 ## After the MVP
 
