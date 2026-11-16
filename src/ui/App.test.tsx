@@ -173,3 +173,28 @@ it("prevents editing the old Album while another file is opening", async () => {
   await act(async () => finishRead(serializeAlbum(createAlbum({ name: "Next" }))));
   await screen.findByText("Next");
 });
+
+it("closes the Album and returns to the start screen without forgetting recents", async () => {
+  native.enabled = true;
+  const path = "D:\\Photos\\album.phalbum";
+  const ports: DocumentPorts = {
+    settings: async () => ({ lastAlbum: path, recentAlbums: [path] }),
+    exists: async () => true,
+    read: async () => serializeAlbum(createAlbum({ name: "Original" })),
+    write: vi.fn(),
+    remember: vi.fn(),
+    forget: vi.fn(),
+    close: vi.fn(),
+    parent: async () => "D:\\Photos",
+    chooseNew: async () => null,
+    chooseOpen: async () => null,
+  };
+  render(<App ports={ports} />);
+  await screen.findByText("Original");
+  await waitFor(() => expect(native.items.some((entry) => entry.text === "Close Album")).toBe(true));
+  await act(async () => native.items.find((entry) => entry.text === "Close Album")!.action!());
+  await screen.findByRole("heading", { name: "Open an Album" });
+  expect(screen.getByRole("button", { name: path })).toBeTruthy();
+  expect(ports.close).toHaveBeenCalledOnce();
+  expect(ports.forget).not.toHaveBeenCalled();
+});
