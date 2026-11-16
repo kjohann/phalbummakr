@@ -2,6 +2,8 @@
 
 Status: done · Depends on: 006, 009
 
+Additional requirements: [All aligned snap guides](013-addendum.md).
+
 ## What
 
 Make it easier to align Photo and Text Slots while preserving free placement.

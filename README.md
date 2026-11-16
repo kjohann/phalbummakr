@@ -110,7 +110,9 @@ the content, growing and shrinking as text, font or width changes.
 
 When moving or resizing either kind of Slot, nearby Page edges, Safe Zone edges,
 other Slot edges and centers, and equal gaps on the same Page attract the Slot
-within six screen pixels. Guides identify the alignment or mark the equal gaps.
+within six screen pixels. Guides show every matching edge and center on both
+axes or mark the equal gaps. For example, equal-height Slots aligned at the top
+also have a guide along their matching bottom edges.
 Hold **Alt** at any point during the gesture to bypass snapping and place or
 resize freely; releasing it restores snapping. Text Slot height still fits its
 content automatically.

@@ -49,6 +49,22 @@ function end(rect: Rectangle, axis: "x" | "y") {
   return rect[axis] + size(rect, axis);
 }
 
+function alignmentTargets(axis: "x" | "y", safeZone: SnapOptions["safeZone"], otherSlots: Rectangle[]): {
+  position: number;
+  target: AlignmentGuide["target"];
+}[] {
+  return [
+    { position: 0, target: "Page edge" },
+    { position: 1, target: "Page edge" },
+    { position: safeZone[axis], target: "Safe Zone" },
+    { position: 1 - safeZone[axis], target: "Safe Zone" },
+    ...otherSlots.flatMap((slot) => [0, 0.5, 1].map((anchor) => ({
+      position: slot[axis] + size(slot, axis) * anchor,
+      target: "Slot" as const,
+    }))),
+  ];
+}
+
 function guideForRect(candidate: Candidate, rect: Rectangle, otherSlots: Rectangle[]): SnapGuide | null {
   if (!candidate.crossRange) return candidate.guide;
   const crossAxis = candidate.guide.axis === "x" ? "y" : "x";
@@ -75,18 +91,7 @@ export function snapSlot({ rect, unclamped = rect, pageSize, safeZone, otherSlot
     const pixels = axis === "x" ? pageSize.width : pageSize.height;
     const anchors = kind === "move" ? [0, 0.5, 1] : [1];
     const candidates: Candidate[] = [];
-    const targets: { position: number; target: AlignmentGuide["target"] }[] = [
-      { position: 0, target: "Page edge" },
-      { position: 1, target: "Page edge" },
-      { position: safeZone[axis], target: "Safe Zone" },
-      { position: 1 - safeZone[axis], target: "Safe Zone" },
-      ...otherSlots.flatMap((slot) => {
-        const size = axis === "x" ? slot.width : slot.height;
-        return [slot[axis], slot[axis] + size / 2, slot[axis] + size]
-          .map((position) => ({ position, target: "Slot" as const }));
-      }),
-    ];
-    for (const { position, target } of targets) {
+    for (const { position, target } of alignmentTargets(axis, safeZone, otherSlots)) {
       for (const anchor of anchors) {
         const offset = position - (current[axis] + length * anchor);
         const pointerAnchor = kind === "move" ? unclamped[axis] + length * anchor : end(unclamped, axis);
@@ -173,5 +178,16 @@ export function snapSlot({ rect, unclamped = rect, pageSize, safeZone, otherSlot
     if (!guide) throw new Error("A snapped guide no longer matches the Slot.");
     return guide;
   });
+  if (chosen.length > 0) {
+    for (const axis of ["x", "y"] as const) {
+      for (const { position, target } of alignmentTargets(axis, safeZone, otherSlots)) {
+        if ([0, 0.5, 1].some((anchor) => Math.abs(snapped[axis] + size(snapped, axis) * anchor - position) < 1e-9)
+          && !guides.some((guide) => guide.target !== "Equal gap"
+            && guide.axis === axis && Math.abs(guide.position - position) < 1e-9)) {
+          guides.push({ axis, position, target });
+        }
+      }
+    }
+  }
   return { rect: snapped, guides };
 }

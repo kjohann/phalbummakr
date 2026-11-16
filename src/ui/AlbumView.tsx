@@ -677,7 +677,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
               {dragPreview.guides.map((guide) => {
                 if (guide.target === "Equal gap") {
                   return (
-                    <g key={guide.axis} role="img" aria-label="Snap to Equal gap">
+                    <g key={`${guide.axis}-gap`} role="img" aria-label="Snap to Equal gap">
                       {guide.gaps.map((gap) => {
                         const x1 = trimLeft + (guide.axis === "x" ? gap.start : guide.cross) * trimWidth;
                         const y1 = trimTop + (guide.axis === "y" ? gap.start : guide.cross) * trimHeight;
@@ -700,7 +700,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
                 const x = trimLeft + guide.position * trimWidth;
                 const y = trimTop + guide.position * trimHeight;
                 return (
-                  <g key={guide.axis} role="img" aria-label={`Snap to ${guide.target}`}>
+                  <g key={`${guide.axis}-${guide.position}`} role="img" aria-label={`Snap to ${guide.target}`}>
                     {guide.axis === "x"
                       ? <line x1={x} y1={trimTop} x2={x} y2={trimTop + trimHeight} />
                       : <line x1={trimLeft} y1={y} x2={trimLeft + trimWidth} y2={y} />}

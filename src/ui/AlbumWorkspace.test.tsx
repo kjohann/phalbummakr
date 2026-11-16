@@ -665,6 +665,41 @@ it("temporarily bypasses and restores snapping with Alt during a Slot drag", asy
   });
 });
 
+it("shows every aligned Slot edge and center during a drag and clears them with Alt", async () => {
+  const { ports, files } = disk();
+  const album = createAlbum({ name: "Existing", pageCount: 2 });
+  album.pages[0].slots = [
+    { id: "active", type: "photo", x: 0.125, y: 0.35, width: 0.125, height: 0.25, placement: null },
+    { id: "reference", type: "photo", x: 0.625, y: 0.25, width: 0.125, height: 0.25, placement: null },
+  ];
+  files.set("Existing", serializeAlbum(album));
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+
+  const slot = await screen.findByRole("button", { name: "Page 1 Photo Slot 1" });
+  const page = within(screen.getByRole("group", { name: "Spread editor" })).getByRole("button", { name: "Select Page 1" });
+  const trimTop = parseFloat(page.style.top) + 6;
+  const endY = 100 - 0.096 * 420;
+  const guidePositions = () => screen.getAllByLabelText("Snap to Slot").map((guide) => {
+    const line = guide.querySelector("line")!;
+    expect(line.getAttribute("y1")).toBe(line.getAttribute("y2"));
+    return Number(line.getAttribute("y1"));
+  });
+  fireEvent.mouseDown(slot, { button: 0, clientX: 100, clientY: 100 });
+  fireEvent.mouseMove(window, { clientX: 100, clientY: endY });
+  expect(guidePositions()).toEqual([trimTop + 105, trimTop + 157.5, trimTop + 210]);
+
+  fireEvent.keyDown(window, { key: "Alt", altKey: true });
+  expect(screen.queryByLabelText("Snap to Slot")).toBeNull();
+  fireEvent.keyUp(window, { key: "Alt", altKey: false });
+  expect(guidePositions()).toEqual([trimTop + 105, trimTop + 157.5, trimTop + 210]);
+  fireEvent.mouseUp(window, { clientX: 100, clientY: endY });
+  expect(screen.queryByLabelText("Snap to Slot")).toBeNull();
+  await waitFor(() => {
+    expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].y).toBeCloseTo(0.25, 9);
+  });
+});
+
 it("finishes a snapped Slot drag and clears guides on window focus loss", async () => {
   const { ports, files } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);

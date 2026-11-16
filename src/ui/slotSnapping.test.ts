@@ -54,6 +54,48 @@ it("snaps a Photo Slot's resized edges without moving its fixed corner", () => {
   ]);
 });
 
+it("shows matching top, center and bottom guides for equal-height Slots", () => {
+  const result = snapSlot({
+    rect: { x: 0.125, y: 0.254, width: 0.125, height: 0.25 },
+    pageSize: { width: 600, height: 400 },
+    safeZone: { x: 0.02, y: 0.03 },
+    otherSlots: [
+      { x: 0.625, y: 0.25, width: 0.125, height: 0.25 },
+      { x: 0.8, y: 0.25, width: 0.125, height: 0.25 },
+      { x: 0.5, y: 0.245, width: 0.125, height: 0.25 },
+    ],
+    kind: "move",
+    resizeHeight: true,
+  });
+  expect(result.rect.y).toBeCloseTo(0.25, 9);
+  expect(result.guides).toEqual([
+    { axis: "y", position: 0.25, target: "Slot" },
+    { axis: "y", position: 0.375, target: "Slot" },
+    { axis: "y", position: 0.5, target: "Slot" },
+  ]);
+});
+
+it("shows all alignments on both axes after resizing and Text Slot reflow", () => {
+  const result = snapSlot({
+    rect: { x: 0.125, y: 0.125, width: 0.254, height: 0.1 },
+    pageSize: { width: 600, height: 400 },
+    safeZone: { x: 0.02, y: 0.03 },
+    otherSlots: [{ x: 0.125, y: 0.125, width: 0.25, height: 0.25 }],
+    kind: "resize",
+    resizeHeight: false,
+    project: (rect) => ({ ...rect, height: rect.width <= 0.25 ? 0.25 : 0.1 }),
+  });
+  expect(result.rect).toEqual({ x: 0.125, y: 0.125, width: 0.25, height: 0.25 });
+  expect(result.guides).toEqual([
+    { axis: "x", position: 0.375, target: "Slot" },
+    { axis: "x", position: 0.125, target: "Slot" },
+    { axis: "x", position: 0.25, target: "Slot" },
+    { axis: "y", position: 0.125, target: "Slot" },
+    { axis: "y", position: 0.25, target: "Slot" },
+    { axis: "y", position: 0.375, target: "Slot" },
+  ]);
+});
+
 it("centers a moving Slot between two Slots with equal gaps", () => {
   const result = snapSlot({
     rect: { x: 0.379, y: 0.25, width: 0.25, height: 0.25 },
@@ -107,10 +149,15 @@ it("matches equal gaps when resizing a Text Slot without changing its height", (
   expect(result.rect.x).toBe(0.375);
   expect(result.rect.width).toBeCloseTo(0.25, 9);
   expect(result.rect.height).toBe(0.25);
-  expect(result.guides).toEqual([{
-    axis: "x", target: "Equal gap", cross: 0.375,
-    gaps: [{ start: 0.25, end: 0.375 }, { start: 0.625, end: 0.75 }],
-  }]);
+  expect(result.guides).toEqual([
+    {
+      axis: "x", target: "Equal gap", cross: 0.375,
+      gaps: [{ start: 0.25, end: 0.375 }, { start: 0.625, end: 0.75 }],
+    },
+    { axis: "y", position: 0.25, target: "Slot" },
+    { axis: "y", position: 0.375, target: "Slot" },
+    { axis: "y", position: 0.5, target: "Slot" },
+  ]);
 });
 
 it("does not claim equal gaps through an intervening Slot", () => {
