@@ -62,9 +62,16 @@ export default function TextSlotControls({ anchor, viewport, style, fonts, fontE
     if (fontSize !== style.fontSize) onStyle({ fontSize });
   }
 
-  const left = Math.max(8, Math.min(anchor.x, viewport.width - size.width - 8));
+  const fitsAbove = anchor.y >= size.height + 8;
+  const fitsBelow = anchor.y + anchor.height + size.height + 8 <= viewport.height - 8;
+  const fitsLeft = anchor.x >= size.width + 16;
+  const fitsRight = anchor.x + anchor.width + size.width + 16 <= viewport.width;
+  const beside = !fitsAbove && !fitsBelow && (fitsLeft || fitsRight);
+  const left = beside
+    ? fitsLeft ? anchor.x - size.width - 8 : anchor.x + anchor.width + 8
+    : Math.max(8, Math.min(anchor.x, viewport.width - size.width - 8));
   const top = Math.max(8, Math.min(
-    anchor.y >= size.height + 8 ? anchor.y - size.height - 8 : anchor.y + anchor.height + 8,
+    beside ? anchor.y : fitsAbove ? anchor.y - size.height - 8 : anchor.y + anchor.height + 8,
     viewport.height - size.height - 8,
   ));
   const menuWidth = Math.min(180, Math.max(0, viewport.width - 16));

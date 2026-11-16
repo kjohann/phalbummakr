@@ -82,6 +82,43 @@ function setExactFontSize(points: string) {
   fireEvent.keyDown(input, { key: "Enter" });
 }
 
+it("rotates a Text Slot and keeps its in-place editor oriented while its content grows", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Text Slot" }));
+  const editor = screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" });
+  fireEvent.change(editor, { target: { value: "One\nTwo" } });
+  await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0]).toMatchObject({ text: "One\nTwo" }));
+  const before = deserializeAlbum(files.get("Existing")!).pages[0].slots[0];
+  fireEvent.click(screen.getByRole("button", { name: "Rotate Slot clockwise" }));
+  expect(editor.style.transform).toContain("rotate(90deg)");
+  expect(editor.style.left).toBe("50%");
+  expect(editor.style.top).toBe("50%");
+  fireEvent.change(editor, { target: { value: "One\nTwo\nThree" } });
+  await waitFor(() => {
+    const saved = deserializeAlbum(files.get("Existing")!).pages[0].slots[0];
+    expect(saved).toMatchObject({ rotation: 90, text: "One\nTwo\nThree" });
+    expect(saved.height * 210).toBeCloseTo(before.width * 297);
+    expect(saved.width * 297).toBeCloseTo(3 * 18 * 1.2 / (72 / 25.4));
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Rotate Slot counterclockwise" }));
+  await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].rotation).toBe(0));
+});
+
+it("resizes the writing width of a sideways Text Slot using its vertical handle", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Text Slot" }));
+  fireEvent.click(screen.getByRole("button", { name: "Rotate Slot clockwise" }));
+  const slot = screen.getByRole("button", { name: "Page 1 Text Slot 1" });
+  const before = parseFloat(slot.style.height);
+  drag(screen.getByRole("button", { name: "Resize Page 1 Text Slot 1" }), 0, 42);
+  expect(parseFloat(slot.style.height)).toBeCloseTo(before + 42);
+  await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].height * 420).toBeCloseTo(before + 42));
+});
+
 it("positions right-page text controls before the first ResizeObserver notification", () => {
   vi.stubGlobal("ResizeObserver", class {
     observe() {}
@@ -102,6 +139,16 @@ it("positions right-page text controls before the first ResizeObserver notificat
   fireEvent.change(screen.getByLabelText("Font size"), { target: { value: "custom" } });
   expect(controls.style.left).toBe("770px");
   expect(controls.style.top).toBe("78px");
+});
+
+it("keeps the text toolbar beside a tall Slot when it cannot fit above or below", () => {
+  render(<TextSlotControls anchor={{ x: 800, y: 10, width: 20, height: 380 }}
+    viewport={{ width: 1278, height: 400 }}
+    style={{ fontFamily: "Arial", fontSize: 18, color: "#000000", bold: false, italic: false, underline: false, align: "left" }}
+    fonts={["Arial"]} fontError={null} disabled={false}
+    onStyle={vi.fn()} onRetryFonts={vi.fn()} onShortcut={vi.fn()} />);
+  const controls = screen.getByRole("toolbar", { name: "Text Slot controls" });
+  expect(parseFloat(controls.style.left) + 440).toBeLessThanOrEqual(800);
 });
 
 it("fits Text Slot height to its content and persists growth and shrinkage", async () => {
@@ -847,6 +894,27 @@ function photoDrop(photo: { path: string; width: number; height: number; orienta
   })]]);
   return { dataTransfer: { types: [...data.keys()], getData: (type: string) => data.get(type) ?? "", dropEffect: "none" } };
 }
+
+it("pans a rotated Photo in the direction dragged on the Page", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Photo Slot" }));
+  const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  fireEvent.drop(slot, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
+  fireEvent.click(screen.getByRole("button", { name: "Rotate Slot clockwise" }));
+  fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+  await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].rotation).toBe(90));
+  const before = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop;
+  vi.spyOn(slot, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 200, 100));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Crop photo" }));
+  drag(slot, 20, 0);
+  await waitFor(() => {
+    const crop = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop;
+    expect(crop.x).toBeCloseTo(before.x);
+    expect(crop.y).toBeCloseTo(before.y + before.height * 0.1);
+  });
+});
 
 it("keeps the sibling Photo browser in sync with edits and Album switches", async () => {
   const { ports, files } = disk();

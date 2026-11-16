@@ -1,13 +1,73 @@
 import { expect, it } from "vitest";
 import { createAlbum, deserializeAlbum, serializeAlbum } from "./album";
 import {
-  addPhotoSlot, deleteSlot, fitPhotoRect, moveSlot, panCrop, placePhoto, placePhotoOnPage,
-  placementDisplayCrop, resizeSlot, setPlacementCrop, setPlacementFit, zoomCrop,
+  addPhotoSlot, addTextSlot, deleteSlot, fitPhotoRect, moveSlot, panCrop, placePhoto, placePhotoOnPage,
+  placementDisplayCrop, resizeSlot, rotateSlot, setPlacementCrop, setPlacementFit, zoomCrop,
 } from "./slots";
 
 function slotOf(album: ReturnType<typeof createAlbum>, page = 0) {
   return album.pages[page].slots[0];
 }
+
+it("rotates a placed Slot around its physical centre without clamping or changing its Crop", () => {
+  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1");
+  const placed = placePhoto(album, "page-1", "slot-1", { path: "a.jpg", width: 6000, height: 4000, orientation: 1 });
+  const atEdge = moveSlot(placed, "page-1", "slot-1", 0, 0);
+  const rotated = rotateSlot(atEdge, "page-1", "slot-1", 90);
+  const before = slotOf(atEdge);
+  const after = slotOf(rotated);
+  expect(after.rotation).toBe(90);
+  expect(after.width * 297).toBeCloseTo(before.height * 210);
+  expect(after.height * 210).toBeCloseTo(before.width * 297);
+  expect(after.x + after.width / 2).toBeCloseTo(before.x + before.width / 2);
+  expect(after.y + after.height / 2).toBeCloseTo(before.y + before.height / 2);
+  expect(after.y).toBeLessThan(-3 / 210);
+  expect(after.placement).toEqual(before.placement);
+  expect(deserializeAlbum(serializeAlbum(rotated))).toEqual(rotated);
+  const restored = slotOf(rotateSlot(rotated, "page-1", "slot-1", -90));
+  expect(restored.rotation).toBe(0);
+  expect(restored.x).toBeCloseTo(before.x);
+  expect(restored.y).toBeCloseTo(before.y);
+  expect(restored.width).toBeCloseTo(before.width);
+  expect(restored.height).toBeCloseTo(before.height);
+});
+
+it("uses the Slot's content orientation when placing and resizing a Photo in a rotated Slot", () => {
+  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1");
+  const photo = { path: "a.jpg", width: 6000, height: 4000, orientation: 1 };
+  const original = placePhoto(album, "page-1", "slot-1", photo);
+  const rotatedEmpty = rotateSlot(album, "page-1", "slot-1", 90);
+  const placed = placePhoto(rotatedEmpty, "page-1", "slot-1", photo);
+  expect(slotOf(placed).placement).toEqual(slotOf(original).placement);
+  const resized = resizeSlot(placed, "page-1", "slot-1", 0.2, 0.3);
+  const crop = slotOf(resized).placement!.crop;
+  expect(crop.width).toBeCloseTo(0.7070707);
+  expect(crop.height).toBeCloseTo(1);
+  expect(crop.x).toBeCloseTo(0.1464646);
+});
+
+it("keeps an overflowing sideways Text Slot outside the Bleed when moved within it", () => {
+  const album = addTextSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1");
+  const rotated = rotateSlot(album, "page-1", "slot-1", 90);
+  const slot = slotOf(rotated);
+  const overflowing = { ...rotated, pages: [{ ...rotated.pages[0], slots: [{ ...slot, x: -0.2, width: 0.3 }] }] };
+  const moved = slotOf(moveSlot(overflowing, "page-1", "slot-1", -0.19, slot.y));
+  expect(moved.x).toBeCloseTo(-0.19);
+});
+
+it("supports all quarter turns and rejects invalid stored orientations while reading old Albums", () => {
+  const album = addTextSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1");
+  expect(deserializeAlbum(serializeAlbum(album))).toEqual(album);
+  let current = album;
+  for (const rotation of [270, 180, 90, 0]) {
+    current = rotateSlot(current, "page-1", "slot-1", -90);
+    expect(slotOf(current).rotation).toBe(rotation);
+    expect(deserializeAlbum(serializeAlbum(current))).toEqual(current);
+  }
+  const json = JSON.parse(serializeAlbum(current));
+  json.pages[0].slots[0].rotation = 45;
+  expect(() => deserializeAlbum(JSON.stringify(json))).toThrow(/slot/i);
+});
 
 it("deletes a Slot and its Placement, leaving the other Slots", () => {
   const album = addPhotoSlot(addPhotoSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1"), "page-1");

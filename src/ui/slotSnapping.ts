@@ -24,6 +24,7 @@ interface SnapOptions {
   safeZone: { x: number; y: number };
   otherSlots: Rectangle[];
   kind: "move" | "resize";
+  resizeWidth?: boolean;
   resizeHeight: boolean;
   project?: (rect: Rectangle) => Rectangle;
 }
@@ -77,7 +78,7 @@ function guideForRect(candidate: Candidate, rect: Rectangle, otherSlots: Rectang
   return { ...candidate.guide, cross: (start + finish) / 2 };
 }
 
-export function snapSlot({ rect, unclamped = rect, pageSize, safeZone, otherSlots, kind, resizeHeight, project }: SnapOptions): {
+export function snapSlot({ rect, unclamped = rect, pageSize, safeZone, otherSlots, kind, resizeWidth = true, resizeHeight, project }: SnapOptions): {
   rect: Rectangle;
   guides: SnapGuide[];
 } {
@@ -85,6 +86,7 @@ export function snapSlot({ rect, unclamped = rect, pageSize, safeZone, otherSlot
   const chosen: Candidate[] = [];
 
   for (const axis of ["x", "y"] as const) {
+    if (kind === "resize" && axis === "x" && !resizeWidth) continue;
     if (kind === "resize" && axis === "y" && !resizeHeight) continue;
     const current = snapped;
     const length = size(current, axis);

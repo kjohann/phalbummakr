@@ -27,7 +27,7 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 011 | [Undo and redo](011-undo-redo.md)                            | 006        | todo   |
 | 012 | [Page Export](012-page-export.md)                            | 007, 009   | todo   |
 | 013 | [Slot snapping](013-slot-snapping.md)                         | 006, 009   | done   |
-| 014 | [Slot rotation](014-slot-rotation.md)                         | 006, 009   | todo   |
+| 014 | [Slot rotation](014-slot-rotation.md)                         | 006, 009   | done   |
 | 015 | [Drag-to-swap Placements](015-drag-to-swap.md)                | 006, 007   | todo   |
 
 ## Addenda

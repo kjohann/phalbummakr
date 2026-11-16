@@ -85,6 +85,11 @@ Drag a Photo from the grid onto a Slot to place or replace it, or onto an empty
 part of a Page to create a Slot. The editor uses cached thumbnails and previews,
 not original files.
 
+Select either kind of Slot and use **Rotate left** or **Rotate right** to turn
+it and its content by 90 degrees. Rotation keeps the Slot's centre fixed and
+may extend it beyond the Bleed. Its orientation remains with the Slot when a
+Photo is replaced, and is saved with the Album.
+
 Select a filled Slot and enable **Crop photo** to pan by dragging the Photo. Use
 the mouse wheel over the selected Placement or the zoom buttons to adjust its
 Crop; the Photo always covers the Slot. **Fit** instead shows the whole Photo
@@ -104,7 +109,8 @@ can work on Windows. The app does not currently accept file drops from Explorer.
 Use **Add Text Slot** to place a caption or title on the selected Page. Type in
 place; double-click a Text Slot or select it and press Enter to edit it again.
 Escape finishes editing. Drag its outline (or the **Move** handle while editing)
-and use the right-edge handle to change its width. Height automatically fits
+and use the edge handle to change its writing width (the bottom edge for a
+sideways Slot). Height automatically fits
 the content, growing and shrinking as text, font or width changes.
 **Delete Slot** removes it.
 

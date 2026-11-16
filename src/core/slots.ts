@@ -17,6 +17,8 @@ export interface Placement {
   fit: boolean;
 }
 
+export type SlotRotation = 0 | 90 | 180 | 270;
+
 export interface PhotoSlot {
   id: string;
   type: "photo";
@@ -25,6 +27,7 @@ export interface PhotoSlot {
   y: number;
   width: number;
   height: number;
+  rotation?: SlotRotation;
   placement: Placement | null;
 }
 
@@ -49,6 +52,7 @@ export interface TextSlot {
   y: number;
   width: number;
   height: number;
+  rotation?: SlotRotation;
   text: string;
   style: TextStyle;
   placement?: never;
@@ -130,11 +134,34 @@ function clamp(value: number, min: number, max: number) {
 export function moveSlot(album: Album, pageId: string, slotId: string, x: number, y: number): Album {
   if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error("Slot position must be a finite number.");
   const box = bleedBox(album);
-  return editSlot(album, pageId, slotId, (slot) => ({
-    ...slot,
-    x: clamp(x, box.left, Math.max(box.left, box.right - slot.width)),
-    y: clamp(y, box.top, slot.type === "text" ? box.bottom : Math.max(box.top, box.bottom - slot.height)),
-  }));
+  return editSlot(album, pageId, slotId, (slot) => {
+    const textRotation = slot.type === "text" ? slot.rotation ?? 0 : null;
+    const minX = textRotation === 90 ? box.left - slot.width : box.left;
+    const maxX = textRotation === 270 ? box.right : box.right - slot.width;
+    const minY = textRotation === 180 ? box.top - slot.height : box.top;
+    const maxY = textRotation === 0 ? box.bottom : box.bottom - slot.height;
+    return {
+      ...slot,
+      x: clamp(x, minX, Math.max(minX, maxX)),
+      y: clamp(y, minY, Math.max(minY, maxY)),
+    };
+  });
+}
+
+export function rotateSlot(album: Album, pageId: string, slotId: string, turn: 90 | -90): Album {
+  if (turn !== 90 && turn !== -90) throw new Error("Slot rotation must be a 90 degree turn.");
+  const { widthMm, heightMm } = pageDimensions(album.pageFormat);
+  return editSlot(album, pageId, slotId, (slot) => {
+    const width = slot.height * heightMm / widthMm;
+    const height = slot.width * widthMm / heightMm;
+    const rotation = ((slot.rotation ?? 0) + turn + 360) % 360 as SlotRotation;
+    return {
+      ...slot, rotation,
+      x: slot.x + (slot.width - width) / 2,
+      y: slot.y + (slot.height - height) / 2,
+      width, height,
+    };
+  });
 }
 
 const MIN_SLOT_SIZE = 0.02;
@@ -150,10 +177,12 @@ export function resizeSlot(album: Album, pageId: string, slotId: string, width: 
   if (!Number.isFinite(width) || !Number.isFinite(height)) throw new Error("Slot size must be a finite number.");
   const box = bleedBox(album);
   return editSlot(album, pageId, slotId, (slot) => {
+    const sidewaysText = slot.type === "text" && (slot.rotation === 90 || slot.rotation === 270);
     const resized = {
       ...slot,
-      width: clamp(width, MIN_SLOT_SIZE, Math.max(MIN_SLOT_SIZE, box.right - slot.x)),
-      height: slot.type === "text" ? slot.height : clamp(height, MIN_SLOT_SIZE, Math.max(MIN_SLOT_SIZE, box.bottom - slot.y)),
+      width: sidewaysText ? slot.width : clamp(width, MIN_SLOT_SIZE, Math.max(MIN_SLOT_SIZE, box.right - slot.x)),
+      height: slot.type === "text" && !sidewaysText ? slot.height
+        : clamp(height, MIN_SLOT_SIZE, Math.max(MIN_SLOT_SIZE, box.bottom - slot.y)),
     };
     if (slot.type !== "photo" || !slot.placement) return resized;
     const { crop } = slot.placement;
@@ -193,7 +222,8 @@ export interface PlaceablePhoto {
 
 function slotAspect(album: Album, slot: Slot): number {
   const { widthMm, heightMm } = pageDimensions(album.pageFormat);
-  return (slot.width * widthMm) / (slot.height * heightMm);
+  const aspect = (slot.width * widthMm) / (slot.height * heightMm);
+  return slot.rotation === 90 || slot.rotation === 270 ? 1 / aspect : aspect;
 }
 
 function centredCrop(photoAspect: number, targetAspect: number, centreX = 0.5, centreY = 0.5): Crop {
@@ -332,9 +362,12 @@ export function validateSlots(slots: unknown): asserts slots is Slot[] {
   const ids = new Set<string>();
   for (const slot of slots) {
     if ((!exactRecord(slot, ["id", "type", "x", "y", "width", "height", "placement"])
-      && !exactRecord(slot, ["id", "type", "x", "y", "width", "height", "text", "style"]))
+      && !exactRecord(slot, ["id", "type", "x", "y", "width", "height", "placement", "rotation"])
+      && !exactRecord(slot, ["id", "type", "x", "y", "width", "height", "text", "style"])
+      && !exactRecord(slot, ["id", "type", "x", "y", "width", "height", "text", "style", "rotation"]))
       || typeof slot.id !== "string" || !slot.id || ids.has(slot.id)
       || !finite(slot.x) || !finite(slot.y) || !finite(slot.width) || !finite(slot.height)
+      || ("rotation" in slot && slot.rotation !== 0 && slot.rotation !== 90 && slot.rotation !== 180 && slot.rotation !== 270)
       || slot.width <= 0 || slot.height <= 0) {
       throw new Error("Invalid or unsupported Slot.");
     }

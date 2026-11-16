@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type Keybo
 import { Group, Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva";
 import {
   addPage, addPhotoSlot, addTextSlot, albumSpreads, deletePage, deleteSlot, duplicatePage, movePage, moveSlot, pageDimensions,
-  fitPhotoRect, panCrop, placePhoto, placePhotoOnPage, placementDisplayCrop, photoUsage, resizeSlot, setPlacementCrop,
+  fitPhotoRect, panCrop, placePhoto, placePhotoOnPage, placementDisplayCrop, photoUsage, resizeSlot, rotateSlot, setPlacementCrop,
   setPlacementFit, setSlotText, setTextStyle, zoomCrop, POINTS_PER_MM, TEXT_LINE_HEIGHT,
   type Album, type Crop, type PageFormat, type PhotoPreviewPorts, type Rectangle, type Slot, type TextSlot, type TextStyle,
 } from "../core";
@@ -51,6 +51,7 @@ function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, trimHeig
   const page = updated.pages.find((item) => item.id === drag.pageId)!;
   const proposed = page.slots.find((item) => item.id === drag.slotId)!;
   const dimensions = pageDimensions(album.pageFormat);
+  const sidewaysText = slot.type === "text" && (slot.rotation === 90 || slot.rotation === 270);
   const property = (axis: "x" | "y") => drag.kind === "move" ? axis : axis === "x" ? "width" : "height";
   const snapped = snapSlot({
     rect: proposed,
@@ -59,7 +60,8 @@ function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, trimHeig
     safeZone: { x: album.pageFormat.safeZoneMm / dimensions.widthMm, y: album.pageFormat.safeZoneMm / dimensions.heightMm },
     otherSlots: page.slots.filter((item) => item.id !== drag.slotId),
     kind: drag.kind,
-    resizeHeight: slot.type === "photo",
+    resizeWidth: !sidewaysText,
+    resizeHeight: slot.type === "photo" || sidewaysText,
     project: (rect) => {
       const candidate = fitTextSlots(apply(rect), album);
       return candidate.pages.find((item) => item.id === drag.pageId)!.slots.find((item) => item.id === drag.slotId)!;
@@ -283,9 +285,12 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
       let nextCrop = baseCrop;
       updateCropPreview({ pageId, slotId, crop: baseCrop });
       const move = (moved: MouseEvent) => {
-        nextCrop = panCrop(baseCrop,
-          -(moved.clientX - startX) / rect.width * baseCrop.width,
-          -(moved.clientY - startY) / rect.height * baseCrop.height);
+        const dx = (moved.clientX - startX) / rect.width;
+        const dy = (moved.clientY - startY) / rect.height;
+        const [localX, localY] = slot.rotation === 90 ? [dy, -dx]
+          : slot.rotation === 180 ? [-dx, -dy]
+            : slot.rotation === 270 ? [-dy, dx] : [dx, dy];
+        nextCrop = panCrop(baseCrop, -localX * baseCrop.width, -localY * baseCrop.height);
         updateCropPreview({ pageId, slotId, crop: nextCrop });
       };
       const finish = () => {
@@ -313,10 +318,11 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
     }
     const startX = event.clientX;
     const startY = event.clientY;
+    const sidewaysText = slot?.type === "text" && (slot.rotation === 90 || slot.rotation === 270);
     let latest: SlotDrag = { pageId, slotId, kind, dx: 0, dy: 0, bypass: event.altKey };
     const offset = (moved: MouseEvent): SlotDrag => ({
-      pageId, slotId, kind, dx: moved.clientX - startX,
-      dy: kind === "resize" && slot?.type === "text" ? 0 : moved.clientY - startY,
+      pageId, slotId, kind, dx: kind === "resize" && sidewaysText ? 0 : moved.clientX - startX,
+      dy: kind === "resize" && slot?.type === "text" && !sidewaysText ? 0 : moved.clientY - startY,
       bypass: moved.altKey,
     });
     const move = (moved: MouseEvent) => {
@@ -457,6 +463,10 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
         }}>Add Text Slot</button>
         <button type="button" className="button-quiet" disabled={disabled || !selectedSlot}
           onClick={() => selectedSlot && removeSlot(selectedPage.id, selectedSlot.id)}>Delete Slot</button>
+        <button type="button" className="button-quiet" aria-label="Rotate Slot counterclockwise" disabled={disabled || !selectedSlot}
+          onClick={() => selectedSlot && changeAlbum((current) => rotateSlot(current, selectedPage.id, selectedSlot.id, -90))}>Rotate left</button>
+        <button type="button" className="button-quiet" aria-label="Rotate Slot clockwise" disabled={disabled || !selectedSlot}
+          onClick={() => selectedSlot && changeAlbum((current) => rotateSlot(current, selectedPage.id, selectedSlot.id, 90))}>Rotate right</button>
         {selectedSlot?.placement && (
           <>
             <span className="toolbar-divider" aria-hidden="true" />
@@ -491,17 +501,23 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
                   {page.slots.map((slot) => {
                     const rect = slotRect(slot, originX + side * (pageWidth + gap) + bleedMm * scale);
                     const slotId = `${page.id}:${slot.id}`;
-                    if (slot.type === "text") return (
-                      <TextContent key={slotId} slot={slot} id={slotId} rect={rect} scale={scale} format={album.pageFormat}
-                        hidden={editingText === slotId} onOverflow={reportTextOverflow} />
+                    const sideways = slot.rotation === 90 || slot.rotation === 270;
+                    const localRect = { x: 0, y: 0, width: sideways ? rect.height : rect.width, height: sideways ? rect.width : rect.height };
+                    return (
+                      <Group key={slotId} x={rect.x + rect.width / 2} y={rect.y + rect.height / 2}
+                        offsetX={localRect.width / 2} offsetY={localRect.height / 2} rotation={slot.rotation ?? 0}>
+                        {slot.type === "text" ? (
+                          <TextContent slot={slot} id={slotId} rect={localRect} scale={scale} format={album.pageFormat}
+                            hidden={editingText === slotId} onOverflow={reportTextOverflow} />
+                        ) : slot.placement ? (
+                          <PlacementImage {...localRect} crop={placementDisplayCrop(slot.placement)} fit={slot.placement.fit}
+                            root={root} path={slot.placement.photoPath} photoPorts={photoPorts}
+                            thumbnail={thumbnailBySlot[slotId]} attempt={previewStates[slotId]?.path === slot.placement.photoPath
+                              ? previewStates[slotId].attempt : 0}
+                            slotId={slotId} onStatus={reportPreviewStatus} />
+                        ) : <Rect {...localRect} fill="#e8ebe6" stroke="#9aa49c" strokeWidth={1} dash={[4, 3]} />}
+                      </Group>
                     );
-                    return slot.placement ? (
-                      <PlacementImage key={slotId} {...rect} crop={placementDisplayCrop(slot.placement)} fit={slot.placement.fit}
-                        root={root} path={slot.placement.photoPath} photoPorts={photoPorts}
-                        thumbnail={thumbnailBySlot[slotId]} attempt={previewStates[slotId]?.path === slot.placement.photoPath
-                          ? previewStates[slotId].attempt : 0}
-                        slotId={slotId} onStatus={reportPreviewStatus} />
-                    ) : <Rect key={slot.id} {...rect} fill="#e8ebe6" stroke="#9aa49c" strokeWidth={1} dash={[4, 3]} />;
                   })}
                 </LayerPage>
               ))}
@@ -613,6 +629,12 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
               {slot.type === "text" && editingText === targetId && (
                 <textarea className="slot-text-editor" aria-label={`Edit ${name}`} autoFocus value={slot.text} disabled={textDisabled}
                   style={{
+                    ...(slot.rotation ? {
+                      inset: "auto", left: "50%", top: "50%",
+                      width: slot.rotation === 90 || slot.rotation === 270 ? rect.height : rect.width,
+                      height: slot.rotation === 90 || slot.rotation === 270 ? rect.width : rect.height,
+                      transform: `translate(-50%, -50%) rotate(${slot.rotation}deg)`,
+                    } : {}),
                     fontFamily: slot.style.fontFamily, fontSize: slot.style.fontSize / POINTS_PER_MM * scale,
                     color: slot.style.color, fontWeight: slot.style.bold ? "bold" : "normal",
                     fontStyle: slot.style.italic ? "italic" : "normal", textAlign: slot.style.align,
@@ -638,7 +660,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
                   onMouseDown={(event) => startSlotDrag(event, page.id, slot.id, "move")}>Move</span>
               )}
               {!disabled && (
-                <span className={`slot-resize-handle${slot.type === "text" ? " slot-resize-handle--text" : ""}`} aria-label={`Resize ${name}`} role="button"
+                <span className={`slot-resize-handle${slot.type === "text" ? slot.rotation === 90 || slot.rotation === 270 ? " slot-resize-handle--text-sideways" : " slot-resize-handle--text" : ""}`} aria-label={`Resize ${name}`} role="button"
                   onMouseDown={(event) => startSlotDrag(event, page.id, slot.id, "resize")} />
               )}
             </div>
@@ -780,7 +802,7 @@ function TextContent({ slot, id, rect, scale, format, hidden, onOverflow }: {
   slot: TextSlot; id: string; rect: Rectangle;
   scale: number; format: PageFormat; hidden: boolean; onOverflow: (id: string, overflow: boolean) => void;
 }) {
-  const layout = useMemo(() => measureTextSlot(slot, format), [slot.text, slot.style, slot.width, format]);
+  const layout = useMemo(() => measureTextSlot(slot, format), [slot.text, slot.style, slot.width, slot.height, slot.rotation, format]);
   useEffect(() => { onOverflow(id, layout.tooWide); }, [id, layout.tooWide, onOverflow]);
   const textScale = scale / POINTS_PER_MM;
   return (
