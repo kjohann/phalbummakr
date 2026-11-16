@@ -2,6 +2,9 @@
 
 Status: done · Depends on: 006, 009
 
+Follow-up: [Upright Photos on placement](014-addendum.md) supersedes orientation
+inheritance for newly placed and replacement Photos.
+
 ## What
 
 Rotate a Slot together with the content it holds.

@@ -13,7 +13,8 @@ vi.mock("react-konva", () => ({
   Layer: ({ children }: { children: ReactNode }) => <>{children}</>,
   Rect: () => null,
   Text: () => null,
-  Group: ({ children }: { children: ReactNode }) => <>{children}</>,
+  Group: ({ children, rotation }: { children: ReactNode; rotation?: number }) =>
+    <div data-slot-rotation={rotation}>{children}</div>,
   Image: ({ image, opacity }: { image: HTMLImageElement; opacity?: number }) =>
     <img alt="Placement" src={image.src} style={{ opacity }} />,
 }));
@@ -894,6 +895,39 @@ function photoDrop(photo: { path: string; width: number; height: number; orienta
   })]]);
   return { dataTransfer: { types: [...data.keys()], getData: (type: string) => data.get(type) ?? "", dropEffect: "none" } };
 }
+
+it("keeps a portrait Photo upright when dropped into a rotated empty Slot and saves it", async () => {
+  const { ports, files } = disk();
+  const { container } = render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Photo Slot" }));
+  fireEvent.click(screen.getByRole("button", { name: "Rotate Slot clockwise" }));
+  await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].rotation).toBe(90));
+  expect(container.querySelector("[data-slot-rotation]")?.getAttribute("data-slot-rotation")).toBe("90");
+  const before = deserializeAlbum(files.get("Existing")!).pages[0].slots[0];
+  fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }),
+    photoDrop({ path: "portrait.jpg", width: 6000, height: 4000, orientation: 6 }));
+  await waitFor(() => {
+    const saved = deserializeAlbum(files.get("Existing")!).pages[0].slots[0];
+    expect(saved.rotation ?? 0).toBe(0);
+    expect(saved).toMatchObject({ x: before.x, y: before.y, width: before.width, height: before.height });
+    expect(saved.placement!.crop.width).toBeCloseTo(1);
+    expect(saved.placement!.crop.height).toBeCloseTo(0.942857);
+  });
+  expect(container.querySelector("[data-slot-rotation]")?.getAttribute("data-slot-rotation")).toBe("0");
+  fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+  await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop.width).toBeLessThan(1));
+  const cropBeforePan = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop;
+  const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  vi.spyOn(slot, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 200, 100));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Crop photo" }));
+  drag(slot, 20, 0);
+  await waitFor(() => {
+    const crop = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop;
+    expect(crop.x).toBeCloseTo(cropBeforePan.x - cropBeforePan.width * 0.1);
+    expect(crop.y).toBeCloseTo(cropBeforePan.y);
+  });
+});
 
 it("pans a rotated Photo in the direction dragged on the Page", async () => {
   const { ports, files } = disk();

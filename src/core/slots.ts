@@ -255,7 +255,9 @@ export function placePhoto(album: Album, pageId: string, slotId: string, photo: 
   const upright = uprightPhotoAspect(photo);
   return editSlot(album, pageId, slotId, (slot) => {
     if (slot.type !== "photo") throw new Error("Slot is not a Photo Slot.");
-    return { ...slot, placement: { photoPath: photo.path, crop: centredCrop(upright, slotAspect(album, slot)), fit: false } };
+    // Turns already changed the Page-space bounds; only the old content orientation is reset.
+    const uprightSlot: PhotoSlot = { ...slot, rotation: 0 };
+    return { ...uprightSlot, placement: { photoPath: photo.path, crop: centredCrop(upright, slotAspect(album, uprightSlot)), fit: false } };
   });
 }
 

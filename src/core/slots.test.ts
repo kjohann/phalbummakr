@@ -32,18 +32,42 @@ it("rotates a placed Slot around its physical centre without clamping or changin
   expect(restored.height).toBeCloseTo(before.height);
 });
 
-it("uses the Slot's content orientation when placing and resizing a Photo in a rotated Slot", () => {
+it("keeps a newly placed Photo upright in a rotated portrait Slot and when resizing it", () => {
   const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1");
-  const photo = { path: "a.jpg", width: 6000, height: 4000, orientation: 1 };
-  const original = placePhoto(album, "page-1", "slot-1", photo);
+  const photo = { path: "a.jpg", width: 4000, height: 6000, orientation: 1 };
   const rotatedEmpty = rotateSlot(album, "page-1", "slot-1", 90);
   const placed = placePhoto(rotatedEmpty, "page-1", "slot-1", photo);
-  expect(slotOf(placed).placement).toEqual(slotOf(original).placement);
+  expect(slotOf(placed).rotation ?? 0).toBe(0);
+  const { x, y, width, height } = slotOf(rotatedEmpty);
+  expect(slotOf(placed)).toMatchObject({ x, y, width, height });
+  expect(slotOf(placed).placement!.crop.width).toBeCloseTo(1);
+  expect(slotOf(placed).placement!.crop.height).toBeCloseTo(0.942857);
   const resized = resizeSlot(placed, "page-1", "slot-1", 0.2, 0.3);
   const crop = slotOf(resized).placement!.crop;
-  expect(crop.width).toBeCloseTo(0.7070707);
-  expect(crop.height).toBeCloseTo(1);
-  expect(crop.x).toBeCloseTo(0.1464646);
+  expect(crop.width).toBeCloseTo(1);
+  expect(crop.height).toBeCloseTo(0.7070707);
+  expect(crop.y).toBeCloseTo(0.1464646);
+});
+
+it.each([90, 180, 270] as const)("keeps replacement Photos upright after %i degrees of Slot rotation", (rotation) => {
+  const photo = { path: "a.jpg", width: 6000, height: 4000, orientation: 1 };
+  let album = placePhoto(addPhotoSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1"), "page-1", "slot-1", photo);
+  for (let turn = 0; turn < rotation; turn += 90) album = rotateSlot(album, "page-1", "slot-1", 90);
+  const before = slotOf(album);
+  const restored = deserializeAlbum(serializeAlbum(album));
+  expect(slotOf(restored)).toEqual(before);
+  const replaced = placePhoto(restored, "page-1", "slot-1", { ...photo, path: "b.jpg", orientation: 6 });
+  const after = slotOf(replaced);
+  expect(after).toMatchObject({ rotation: 0, x: before.x, y: before.y, width: before.width, height: before.height });
+  expect(after.placement!.photoPath).toBe("b.jpg");
+  const targetAspect = after.width * 297 / (after.height * 210);
+  expect(after.placement!.crop.width / after.placement!.crop.height).toBeCloseTo(targetAspect / (2 / 3));
+  const fit = setPlacementFit(replaced, "page-1", "slot-1", true);
+  expect(deserializeAlbum(serializeAlbum(fit))).toEqual(fit);
+  const rotated = slotOf(rotateSlot(fit, "page-1", "slot-1", -90));
+  expect(rotated.rotation).toBe(270);
+  expect(rotated.placement).toEqual(slotOf(fit).placement);
+  expect(slotOf(album)).toEqual(before);
 });
 
 it("keeps an overflowing sideways Text Slot outside the Bleed when moved within it", () => {

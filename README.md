@@ -87,8 +87,10 @@ not original files.
 
 Select either kind of Slot and use **Rotate left** or **Rotate right** to turn
 it and its content by 90 degrees. Rotation keeps the Slot's centre fixed and
-may extend it beyond the Bleed. Its orientation remains with the Slot when a
-Photo is replaced, and is saved with the Album.
+may extend it beyond the Bleed. Newly placed or replacement Photos keep their
+original upright orientation (including EXIF orientation), without changing the
+Slot's position or dimensions. Rotating an occupied Slot still turns its current
+content, and that orientation is saved with the Album.
 
 Select a filled Slot and enable **Crop photo** to pan by dragging the Photo. Use
 the mouse wheel over the selected Placement or the zoom buttons to adjust its
