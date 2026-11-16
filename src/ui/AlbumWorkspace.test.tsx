@@ -665,6 +665,23 @@ it("temporarily bypasses and restores snapping with Alt during a Slot drag", asy
   });
 });
 
+it("finishes a snapped Slot drag and clears guides on window focus loss", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Photo Slot" }));
+
+  const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  fireEvent.mouseDown(slot, { button: 0, clientX: 100, clientY: 100 });
+  fireEvent.mouseMove(window, { clientX: 100 - 0.3 * 594 + 4, clientY: 100 });
+  expect(screen.getByLabelText("Snap to Page edge")).toBeTruthy();
+  fireEvent.blur(window);
+  expect(screen.queryByLabelText("Snap to Page edge")).toBeNull();
+  await waitFor(() => {
+    expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].x).toBeCloseTo(0, 9);
+  });
+});
+
 it("ignores an unreachable snap target in favor of a reachable one when resizing", async () => {
   const { ports, files } = disk();
   const album = createAlbum({ name: "Existing", pageCount: 2 });

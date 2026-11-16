@@ -10,7 +10,7 @@ it("snaps near the Safe Zone but leaves a free position unchanged", () => {
     resizeHeight: true,
   };
   const near = snapSlot({ ...options, rect: { x: 0.026, y: 0.2, width: 0.3, height: 0.2 } });
-  expect(near.rect.x).toBeCloseTo(0.02);
+  expect(near.rect.x).toBeCloseTo(0.02, 9);
   expect(near.guides).toContainEqual({ axis: "x", position: 0.02, target: "Safe Zone" });
 
   const free = snapSlot({ ...options, rect: { x: 0.09, y: 0.2, width: 0.3, height: 0.2 } });
@@ -27,8 +27,8 @@ it("aligns a moving Slot with another Slot's edge and center on independent axes
     kind: "move",
     resizeHeight: true,
   });
-  expect(result.rect.x).toBeCloseTo(0.22);
-  expect(result.rect.y).toBeCloseTo(0.55);
+  expect(result.rect.x).toBeCloseTo(0.22, 9);
+  expect(result.rect.y).toBeCloseTo(0.55, 9);
   expect(result.guides).toEqual([
     { axis: "x", position: 0.42, target: "Slot" },
     { axis: "y", position: 0.6, target: "Slot" },
@@ -46,8 +46,8 @@ it("snaps a Photo Slot's resized edges without moving its fixed corner", () => {
   });
   expect(result.rect.x).toBe(0.2);
   expect(result.rect.y).toBe(0.2);
-  expect(result.rect.width).toBeCloseTo(0.3);
-  expect(result.rect.height).toBeCloseTo(0.8);
+  expect(result.rect.width).toBeCloseTo(0.3, 9);
+  expect(result.rect.height).toBeCloseTo(0.8, 9);
   expect(result.guides).toEqual([
     { axis: "x", position: 0.5, target: "Slot" },
     { axis: "y", position: 1, target: "Page edge" },
@@ -128,6 +128,44 @@ it("does not claim equal gaps through an intervening Slot", () => {
   });
   expect(result.rect.x).toBeCloseTo(0.4921875, 9);
   expect(result.guides).toContainEqual({ axis: "x", position: 0.4921875, target: "Slot" });
+});
+
+it("finds equal gaps in one row even when another row has an intervening Slot", () => {
+  const result = snapSlot({
+    rect: { x: 0.379, y: 0.125, width: 0.25, height: 0.625 },
+    pageSize: { width: 600, height: 400 },
+    safeZone: { x: 0.02, y: 0.03 },
+    otherSlots: [
+      { x: 0.125, y: 0.125, width: 0.125, height: 0.125 },
+      { x: 0.75, y: 0.125, width: 0.125, height: 0.125 },
+      { x: 0.43, y: 0.625, width: 0.04, height: 0.125 },
+    ],
+    kind: "move",
+    resizeHeight: true,
+  });
+  expect(result.rect.x).toBeCloseTo(0.375, 9);
+  expect(result.guides).toContainEqual({
+    axis: "x", target: "Equal gap", cross: 0.1875,
+    gaps: [{ start: 0.25, end: 0.375 }, { start: 0.625, end: 0.75 }],
+  });
+});
+
+it("rejects a gap obstructed after a resized Text Slot reflows", () => {
+  const result = snapSlot({
+    rect: { x: 0.375, y: 0.2, width: 0.254, height: 0.1 },
+    pageSize: { width: 600, height: 400 },
+    safeZone: { x: 0.02, y: 0.03 },
+    otherSlots: [
+      { x: 0.125, y: 0.125, width: 0.125, height: 0.375 },
+      { x: 0.75, y: 0.125, width: 0.125, height: 0.375 },
+      { x: 0.3, y: 0.35, width: 0.02, height: 0.1 },
+    ],
+    kind: "resize",
+    resizeHeight: false,
+    project: (rect) => ({ ...rect, height: rect.width < 0.252 ? 0.3 : 0.1 }),
+  });
+  expect(result.rect.width).toBe(0.254);
+  expect(result.guides).toEqual([]);
 });
 
 it("uses a six-screen-pixel proximity threshold at different Page scales", () => {

@@ -1,6 +1,6 @@
 # 013 – Slot snapping
 
-Status: doing · Depends on: 006, 009
+Status: done · Depends on: 006, 009
 
 ## What
 
@@ -8,10 +8,10 @@ Make it easier to align Photo and Text Slots while preserving free placement.
 
 ## Acceptance criteria
 
-- [ ] Moving or resizing a Photo Slot or Text Slot snaps it to Page edges, the Safe Zone, other Slots, and equal gaps between Slots when it is near an alignment target.
-- [ ] Snapping is optional proximity assistance: a Slot can be placed anywhere, including the first Slot on an empty Page; no target is mandatory.
-- [ ] Alignment guides show which target is being snapped to.
-- [ ] A temporary modifier-key bypass allows free placement even while a Slot is within snap distance.
+- [x] Moving or resizing a Photo Slot or Text Slot snaps it to Page edges, the Safe Zone, other Slots, and equal gaps between Slots when it is near an alignment target.
+- [x] Snapping is optional proximity assistance: a Slot can be placed anywhere, including the first Slot on an empty Page; no target is mandatory.
+- [x] Alignment guides show which target is being snapped to.
+- [x] A temporary modifier-key bypass allows free placement even while a Slot is within snap distance.
 
 ## Implementation and verification
 
@@ -28,9 +28,19 @@ Make it easier to align Photo and Text Slots while preserving free placement.
   targets against the fitted height after reflow.
 - Focused geometry and workspace tests cover proximity, both Slot types,
   movement, resizing, gaps, constraint handling, text reflow and Alt.
+- Verification passed: 107 frontend tests, lint, typecheck and production
+  build. The existing Vite chunk-size warning remains.
 - A browser check with an in-memory Album exercised actual mouse and Alt
-  gestures, equal-gap guides, Page and Safe Zone guides, and saved geometry.
-  It did not exercise the integrated native WebView2 application.
+  gestures, multi-row equal-gap guides, Page and Safe Zone guides, and saved
+  geometry. It did not exercise the integrated native WebView2 application.
+
+## Review
+
+- **Standards:** no blocking findings. Snap geometry is isolated from the
+  editor and reuses the shared Rectangle type.
+- **Spec:** review found and fixed equal-gap targets missed when another row
+  interleaves the references, and a guide obstructed after text reflow. Both
+  have regression tests.
 
 ## Earlier considerations reviewed
 
@@ -46,3 +56,11 @@ Make it easier to align Photo and Text Slots while preserving free placement.
   splitting is unrelated to snapping.
 - **009 and its addendum:** Text controls remain extracted and attached.
   Missing-font warnings and native checks of text controls remain deferred.
+
+## Future considerations (low priority)
+
+- Check Slot gestures, guides and Alt in the integrated WebView2 app; the
+  browser check used an in-memory Album.
+- Equal-gap detection scans Slot pairs. A synthetic Page with 500 overlapping
+  Slots averaged about 24 ms per geometry calculation without rendering; profile
+  and optimize if unusually dense Pages become a real workflow.

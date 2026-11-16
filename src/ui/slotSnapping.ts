@@ -15,7 +15,7 @@ interface GapGuide {
 
 export type SnapGuide = AlignmentGuide | GapGuide;
 
-const SNAP_DISTANCE = 6;
+const SNAP_DISTANCE_PX = 6;
 
 interface SnapOptions {
   rect: Rectangle;
@@ -28,12 +28,18 @@ interface SnapOptions {
   project?: (rect: Rectangle) => Rectangle;
 }
 
-interface Candidate {
+type Candidate = {
   offset: number;
   distance: number;
-  guide: SnapGuide;
-  crossRange: { start: number; end: number } | null;
-}
+} & (
+  | { guide: AlignmentGuide; crossRange: null }
+  | {
+    guide: GapGuide;
+    crossRange: { start: number; end: number };
+    references: [Rectangle, Rectangle];
+    clearRanges: GapGuide["gaps"];
+  }
+);
 
 function size(rect: Rectangle, axis: "x" | "y") {
   return axis === "x" ? rect.width : rect.height;
@@ -43,13 +49,16 @@ function end(rect: Rectangle, axis: "x" | "y") {
   return rect[axis] + size(rect, axis);
 }
 
-function guideForRect(candidate: Candidate, rect: Rectangle): SnapGuide | null {
+function guideForRect(candidate: Candidate, rect: Rectangle, otherSlots: Rectangle[]): SnapGuide | null {
   if (!candidate.crossRange) return candidate.guide;
-  if (candidate.guide.target !== "Equal gap") throw new Error("Only equal-gap guides have a cross range.");
   const crossAxis = candidate.guide.axis === "x" ? "y" : "x";
   const start = Math.max(candidate.crossRange.start, rect[crossAxis]);
   const finish = Math.min(candidate.crossRange.end, end(rect, crossAxis));
-  return start < finish ? { ...candidate.guide, cross: (start + finish) / 2 } : null;
+  if (start >= finish || otherSlots.some((slot) => !candidate.references.includes(slot)
+    && slot[crossAxis] < finish && end(slot, crossAxis) > start
+    && candidate.clearRanges.some((range) => slot[candidate.guide.axis] < range.end
+      && end(slot, candidate.guide.axis) > range.start))) return null;
+  return { ...candidate.guide, cross: (start + finish) / 2 };
 }
 
 export function snapSlot({ rect, unclamped = rect, pageSize, safeZone, otherSlots, kind, resizeHeight, project }: SnapOptions): {
@@ -82,7 +91,7 @@ export function snapSlot({ rect, unclamped = rect, pageSize, safeZone, otherSlot
         const offset = position - (current[axis] + length * anchor);
         const pointerAnchor = kind === "move" ? unclamped[axis] + length * anchor : end(unclamped, axis);
         const distance = Math.abs(position - pointerAnchor) * pixels;
-        if (distance <= SNAP_DISTANCE) {
+        if (distance <= SNAP_DISTANCE_PX) {
           candidates.push({ offset, distance, guide: { axis, position, target }, crossRange: null });
         }
       }
@@ -93,54 +102,52 @@ export function snapSlot({ rect, unclamped = rect, pageSize, safeZone, otherSlot
       const neighbors = otherSlots.filter((slot) => slot[crossAxis] < end(current, crossAxis) && end(slot, crossAxis) > current[crossAxis])
         .sort((a, b) => a[axis] - b[axis]);
       for (let index = 0; index + 1 < neighbors.length; index += 1) {
-        const left = neighbors[index];
-        const right = neighbors[index + 1];
-        const crossRange = {
-          start: Math.max(left[crossAxis], right[crossAxis]),
-          end: Math.min(end(left, crossAxis), end(right, crossAxis)),
-        };
-        const crossStart = Math.max(current[crossAxis], crossRange.start);
-        const crossEnd = Math.min(end(current, crossAxis), crossRange.end);
-        const existingGap = right[axis] - end(left, axis);
-        if (crossStart >= crossEnd || existingGap <= 0) continue;
-        const available = (start: number, finish: number) => !neighbors.some((slot) => slot !== left && slot !== right
-          && slot[axis] < finish && end(slot, axis) > start);
-        const offer = (edge: number, gaps: GapGuide["gaps"]) => {
-          const offset = edge - (kind === "move" ? current[axis] : current[axis] + length);
-          const pointerEdge = kind === "move" ? unclamped[axis] : end(unclamped, axis);
-          const distance = Math.abs(edge - pointerEdge) * pixels;
-          if (distance > SNAP_DISTANCE) return;
-          candidates.push({
-            offset, distance, crossRange,
-            guide: {
-              axis, target: "Equal gap", cross: (crossStart + crossEnd) / 2,
-              gaps,
-            },
-          });
-        };
-        if (kind === "move") {
-          const betweenGap = (existingGap - length) / 2;
-          if (betweenGap > 0) {
-            const start = end(left, axis) + betweenGap;
-            offer(start, [{ start: end(left, axis), end: start }, { start: start + length, end: right[axis] }]);
-          }
-          const after = end(right, axis) + existingGap;
-          if (available(end(right, axis), after + length)) {
-            offer(after, [{ start: end(left, axis), end: right[axis] }, { start: end(right, axis), end: after }]);
-          }
-          const before = left[axis] - existingGap - length;
-          if (available(before, left[axis])) {
-            offer(before, [{ start: before + length, end: left[axis] }, { start: end(left, axis), end: right[axis] }]);
-          }
-        } else {
-          const leftGap = current[axis] - end(left, axis);
-          const betweenEnd = right[axis] - leftGap;
-          if (leftGap > 0 && betweenEnd > current[axis]) {
-            offer(betweenEnd, [{ start: end(left, axis), end: current[axis] }, { start: betweenEnd, end: right[axis] }]);
-          }
-          const beforeEnd = left[axis] - existingGap;
-          if (beforeEnd > current[axis] && available(current[axis], left[axis])) {
-            offer(beforeEnd, [{ start: beforeEnd, end: left[axis] }, { start: end(left, axis), end: right[axis] }]);
+        const first = neighbors[index];
+        for (let nextIndex = index + 1; nextIndex < neighbors.length; nextIndex += 1) {
+          const second = neighbors[nextIndex];
+          const crossRange = {
+            start: Math.max(first[crossAxis], second[crossAxis]),
+            end: Math.min(end(first, crossAxis), end(second, crossAxis)),
+          };
+          const crossStart = Math.max(current[crossAxis], crossRange.start);
+          const crossEnd = Math.min(end(current, crossAxis), crossRange.end);
+          const existingGap = second[axis] - end(first, axis);
+          if (crossStart >= crossEnd || existingGap <= 0) continue;
+          const offer = (edge: number, gaps: GapGuide["gaps"], ranges: GapGuide["gaps"]) => {
+            const offset = edge - (kind === "move" ? current[axis] : current[axis] + length);
+            const pointerEdge = kind === "move" ? unclamped[axis] : end(unclamped, axis);
+            const distance = Math.abs(edge - pointerEdge) * pixels;
+            if (distance > SNAP_DISTANCE_PX) return;
+            candidates.push({
+              offset, distance, crossRange, references: [first, second], clearRanges: ranges,
+              guide: {
+                axis, target: "Equal gap", cross: (crossStart + crossEnd) / 2,
+                gaps,
+              },
+            });
+          };
+          const existing = { start: end(first, axis), end: second[axis] };
+          if (kind === "move") {
+            const betweenGap = (existingGap - length) / 2;
+            if (betweenGap > 0) {
+              const start = end(first, axis) + betweenGap;
+              offer(start, [{ start: end(first, axis), end: start }, { start: start + length, end: second[axis] }], [existing]);
+            }
+            const after = end(second, axis) + existingGap;
+            offer(after, [existing, { start: end(second, axis), end: after }],
+              [existing, { start: end(second, axis), end: after + length }]);
+            const before = first[axis] - existingGap - length;
+            offer(before, [{ start: before + length, end: first[axis] }, existing], [existing, { start: before, end: first[axis] }]);
+          } else {
+            const firstGap = current[axis] - end(first, axis);
+            const betweenEnd = second[axis] - firstGap;
+            if (firstGap > 0 && betweenEnd > current[axis]) {
+              offer(betweenEnd, [{ start: end(first, axis), end: current[axis] }, { start: betweenEnd, end: second[axis] }], [existing]);
+            }
+            const beforeEnd = first[axis] - existingGap;
+            if (beforeEnd > current[axis]) {
+              offer(beforeEnd, [{ start: beforeEnd, end: first[axis] }, existing], [existing, { start: current[axis], end: first[axis] }]);
+            }
           }
         }
       }
@@ -154,12 +161,17 @@ export function snapSlot({ rect, unclamped = rect, pageSize, safeZone, otherSlot
       const projected = project ? project(next) : next;
       const property = kind === "move" ? axis : axis === "x" ? "width" : "height";
       if (Math.abs(projected[property] - next[property]) >= 1e-9
-        || !guideForRect(candidate, projected)
-        || chosen.some((previous) => !guideForRect(previous, projected))) continue;
+        || !guideForRect(candidate, projected, otherSlots)
+        || chosen.some((previous) => !guideForRect(previous, projected, otherSlots))) continue;
       snapped = projected;
       chosen.push(candidate);
       break;
     }
   }
-  return { rect: snapped, guides: chosen.map((candidate) => guideForRect(candidate, snapped)!) };
+  const guides = chosen.map((candidate) => {
+    const guide = guideForRect(candidate, snapped, otherSlots);
+    if (!guide) throw new Error("A snapped guide no longer matches the Slot.");
+    return guide;
+  });
+  return { rect: snapped, guides };
 }
