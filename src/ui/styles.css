@@ -547,11 +547,13 @@ body {
 }
 
 .guide-legend span:first-child { color: #9e6d4e; }
-.guide-legend span:last-child { color: #56829d; }
+.guide-legend span:nth-child(3) { color: #56829d; }
 
 .workspace-footer {
   display: flex;
   flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 4px 12px;
   justify-content: space-between;
   color: #7d847d;
 }
@@ -662,6 +664,29 @@ body {
   box-sizing: border-box;
   border: 1px solid transparent;
   cursor: move;
+}
+
+.snap-guides {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.snap-guides line {
+  stroke: #c3337a;
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+
+.snap-guides text {
+  fill: #a32160;
+  font-size: 11px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: #ffffff;
+  stroke-width: 3px;
 }
 
 .slot-overlay:hover,

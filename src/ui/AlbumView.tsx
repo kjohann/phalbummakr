@@ -7,6 +7,7 @@ import {
   type Album, type Crop, type PageFormat, type PhotoPreviewPorts, type Rectangle, type Slot, type TextSlot, type TextStyle,
 } from "../core";
 import { hasPhotoDrag, readPhotoDrag } from "./photoDrag";
+import { snapSlot, type SnapGuide } from "./slotSnapping";
 import type { FontPorts } from "./tauriFontPorts";
 import { fitTextSlots, measureTextSlot, textFontStyle } from "./textLayout";
 import TextSlotControls from "./TextSlotControls";
@@ -30,15 +31,49 @@ interface SlotDrag {
   kind: "move" | "resize";
   dx: number;
   dy: number;
+  bypass: boolean;
 }
 
-function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, trimHeight: number): Album {
+function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, trimHeight: number): {
+  album: Album;
+  guides: SnapGuide[];
+} {
   const slot = album.pages.find((page) => page.id === drag.pageId)?.slots.find((item) => item.id === drag.slotId);
-  if (!slot) return album;
-  const updated = drag.kind === "move"
-    ? moveSlot(album, drag.pageId, drag.slotId, slot.x + drag.dx / trimWidth, slot.y + drag.dy / trimHeight)
-    : resizeSlot(album, drag.pageId, drag.slotId, slot.width + drag.dx / trimWidth, slot.height + drag.dy / trimHeight);
-  return fitTextSlots(updated, album);
+  if (!slot) return { album, guides: [] };
+  const unclamped = drag.kind === "move"
+    ? { ...slot, x: slot.x + drag.dx / trimWidth, y: slot.y + drag.dy / trimHeight }
+    : { ...slot, width: slot.width + drag.dx / trimWidth, height: slot.height + drag.dy / trimHeight };
+  const apply = (rect: Rectangle) => drag.kind === "move"
+    ? moveSlot(album, drag.pageId, drag.slotId, rect.x, rect.y)
+    : resizeSlot(album, drag.pageId, drag.slotId, rect.width, rect.height);
+  const updated = fitTextSlots(apply(unclamped), album);
+  if (drag.bypass) return { album: updated, guides: [] };
+  const page = updated.pages.find((item) => item.id === drag.pageId)!;
+  const proposed = page.slots.find((item) => item.id === drag.slotId)!;
+  const dimensions = pageDimensions(album.pageFormat);
+  const property = (axis: "x" | "y") => drag.kind === "move" ? axis : axis === "x" ? "width" : "height";
+  const snapped = snapSlot({
+    rect: proposed,
+    unclamped,
+    pageSize: { width: trimWidth, height: trimHeight },
+    safeZone: { x: album.pageFormat.safeZoneMm / dimensions.widthMm, y: album.pageFormat.safeZoneMm / dimensions.heightMm },
+    otherSlots: page.slots.filter((item) => item.id !== drag.slotId),
+    kind: drag.kind,
+    resizeHeight: slot.type === "photo",
+    project: (rect) => {
+      const candidate = fitTextSlots(apply(rect), album);
+      return candidate.pages.find((item) => item.id === drag.pageId)!.slots.find((item) => item.id === drag.slotId)!;
+    },
+  });
+  const result = fitTextSlots(apply(snapped.rect), album);
+  const actual = result.pages.find((item) => item.id === drag.pageId)!.slots.find((item) => item.id === drag.slotId)!;
+  return {
+    album: result,
+    guides: snapped.guides.filter((guide) => {
+      const key = property(guide.axis);
+      return Math.abs(actual[key] - snapped.rect[key]) < 1e-9;
+    }),
+  };
 }
 
 export default function AlbumView({ album: savedAlbum, onChange, disabled, textDisabled, root, photoPorts, fontPorts, onDuplicatePhoto, onCropPendingChange }: Props) {
@@ -79,9 +114,10 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
 
   const trimWidth = dimensions.widthMm * scale;
   const trimHeight = dimensions.heightMm * scale;
+  const dragPreview = slotDrag && scale > 0 ? applySlotDrag(savedAlbum, slotDrag, trimWidth, trimHeight) : null;
   const album = cropPreview
     ? setPlacementCrop(savedAlbum, cropPreview.pageId, cropPreview.slotId, cropPreview.crop)
-    : slotDrag && scale > 0 ? applySlotDrag(savedAlbum, slotDrag, trimWidth, trimHeight) : savedAlbum;
+    : dragPreview?.album ?? savedAlbum;
   const visiblePageIndex = Math.max(0, album.pages.findIndex((page) => page.id === selectedId));
   const selectedPage = album.pages[visiblePageIndex];
   const spreads = albumSpreads(album);
@@ -277,23 +313,42 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
     }
     const startX = event.clientX;
     const startY = event.clientY;
+    let latest: SlotDrag = { pageId, slotId, kind, dx: 0, dy: 0, bypass: event.altKey };
     const offset = (moved: MouseEvent): SlotDrag => ({
-      pageId, slotId, kind, dx: moved.clientX - startX, dy: moved.clientY - startY,
+      pageId, slotId, kind, dx: moved.clientX - startX,
+      dy: kind === "resize" && slot?.type === "text" ? 0 : moved.clientY - startY,
+      bypass: moved.altKey,
     });
-    const move = (moved: MouseEvent) => setSlotDrag(offset(moved));
-    const up = (released: MouseEvent) => {
-      stop();
-      const drag = offset(released);
-      if (drag.dx !== 0 || drag.dy !== 0) changeAlbum((current) => applySlotDrag(current, drag, trimWidth, trimHeight));
+    const move = (moved: MouseEvent) => {
+      latest = offset(moved);
+      setSlotDrag(latest.dx !== 0 || latest.dy !== 0 ? latest : null);
     };
+    const modifier = (pressed: KeyboardEvent) => {
+      if (pressed.key !== "Alt") return;
+      if (pressed.type === "keydown") pressed.preventDefault();
+      latest = { ...latest, bypass: pressed.type === "keydown" };
+      if (latest.dx !== 0 || latest.dy !== 0) setSlotDrag(latest);
+    };
+    const finish = (drag: SlotDrag) => {
+      stop();
+      if (drag.dx !== 0 || drag.dy !== 0) changeAlbum((current) => applySlotDrag(current, drag, trimWidth, trimHeight).album);
+    };
+    const up = (released: MouseEvent) => finish(offset(released));
+    const blur = () => finish(latest);
     const stop = () => {
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
+      window.removeEventListener("keydown", modifier);
+      window.removeEventListener("keyup", modifier);
+      window.removeEventListener("blur", blur);
       stopSlotDrag.current = null;
       setSlotDrag(null);
     };
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", up);
+    window.addEventListener("keydown", modifier);
+    window.addEventListener("keyup", modifier);
+    window.addEventListener("blur", blur);
     stopSlotDrag.current = stop;
   }
 
@@ -613,6 +668,53 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
             </Fragment>
           );
         }))}
+        {slotDrag && dragPreview && dragPreview.guides.length > 0 && (() => {
+          const side = spread.left?.id === slotDrag.pageId ? 0 : 1;
+          const trimLeft = originX + side * (pageWidth + gap) + bleedMm * scale;
+          const trimTop = originY + bleedMm * scale;
+          return (
+            <svg className="snap-guides" width={viewport.width} height={viewport.height}>
+              {dragPreview.guides.map((guide) => {
+                if (guide.target === "Equal gap") {
+                  return (
+                    <g key={guide.axis} role="img" aria-label="Snap to Equal gap">
+                      {guide.gaps.map((gap) => {
+                        const x1 = trimLeft + (guide.axis === "x" ? gap.start : guide.cross) * trimWidth;
+                        const y1 = trimTop + (guide.axis === "y" ? gap.start : guide.cross) * trimHeight;
+                        const x2 = trimLeft + (guide.axis === "x" ? gap.end : guide.cross) * trimWidth;
+                        const y2 = trimTop + (guide.axis === "y" ? gap.end : guide.cross) * trimHeight;
+                        return (
+                          <g key={gap.start}>
+                            <line x1={x1} y1={y1} x2={x2} y2={y2} />
+                            <line x1={x1 - (guide.axis === "y" ? 4 : 0)} y1={y1 - (guide.axis === "x" ? 4 : 0)}
+                              x2={x1 + (guide.axis === "y" ? 4 : 0)} y2={y1 + (guide.axis === "x" ? 4 : 0)} />
+                            <line x1={x2 - (guide.axis === "y" ? 4 : 0)} y1={y2 - (guide.axis === "x" ? 4 : 0)}
+                              x2={x2 + (guide.axis === "y" ? 4 : 0)} y2={y2 + (guide.axis === "x" ? 4 : 0)} />
+                            <text x={(x1 + x2) / 2 + 3} y={(y1 + y2) / 2 - 4}>=</text>
+                          </g>
+                        );
+                      })}
+                    </g>
+                  );
+                }
+                const x = trimLeft + guide.position * trimWidth;
+                const y = trimTop + guide.position * trimHeight;
+                return (
+                  <g key={guide.axis} role="img" aria-label={`Snap to ${guide.target}`}>
+                    {guide.axis === "x"
+                      ? <line x1={x} y1={trimTop} x2={x} y2={trimTop + trimHeight} />
+                      : <line x1={trimLeft} y1={y} x2={trimLeft + trimWidth} y2={y} />}
+                    <text x={guide.axis === "x" ? x + (guide.position > 0.8 ? -4 : 4) : trimLeft + 4}
+                      y={guide.axis === "x" ? trimTop + trimHeight - 6 : y + (guide.position < 0.5 ? 13 : -4)}
+                      textAnchor={guide.axis === "x" && guide.position > 0.8 ? "end" : "start"}>
+                      {guide.target}
+                    </text>
+                  </g>
+                );
+              })}
+            </svg>
+          );
+        })()}
         {scale > 0 && selectedSlot?.type === "text" && (
           <TextSlotControls key={`${selectedPage.id}:${selectedSlot.id}`} style={selectedSlot.style}
             anchor={slotRect(selectedSlot, originX + (spread.left?.id === selectedPage.id ? 0 : pageWidth + gap) + bleedMm * scale)}
@@ -623,7 +725,10 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
       </div>
       <div className="workspace-footer">
         <span>PAGE {visiblePageIndex + 1} OF {album.pages.length}</span>
-        <span className="guide-legend"><span>Bleed: {bleedMm} mm</span><span>Trim edge</span><span>Safe Zone: {safeZoneMm} mm</span></span>
+        <span className="guide-legend">
+          <span>Bleed: {bleedMm} mm</span><span>Trim edge</span><span>Safe Zone: {safeZoneMm} mm</span>
+          <span>Hold Alt for free placement</span>
+        </span>
       </div>
       <nav className="spread-strip" aria-label="Spreads" ref={stripRef} onDragOver={(event) => {
         if (disabled || !draggedId.current) return;

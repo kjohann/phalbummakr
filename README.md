@@ -108,6 +108,13 @@ and use the right-edge handle to change its width. Height automatically fits
 the content, growing and shrinking as text, font or width changes.
 **Delete Slot** removes it.
 
+When moving or resizing either kind of Slot, nearby Page edges, Safe Zone edges,
+other Slot edges and centers, and equal gaps on the same Page attract the Slot
+within six screen pixels. Guides identify the alignment or mark the equal gaps.
+Hold **Alt** at any point during the gesture to bypass snapping and place or
+resize freely; releasing it restores snapping. Text Slot height still fits its
+content automatically.
+
 A compact toolbar follows the selected Text Slot. It offers installed Windows
 fonts, size presets (12, 18, 24, 36, 48 and 72 pt), **Custom...** for an exact point
 size, colour and alignment. **Format** groups bold, italic and underline.

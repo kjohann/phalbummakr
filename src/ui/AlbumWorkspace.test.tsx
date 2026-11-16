@@ -225,6 +225,53 @@ it("moves and width-resizes Text Slots while retaining fitted height and keyboar
   expect(screen.queryByRole("button", { name: "Page 1 Text Slot 1" })).toBeNull();
 });
 
+it("snaps a Text Slot's width to the Safe Zone after releasing Alt", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Text Slot" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" }), { target: { value: "One\nTwo" } });
+
+  const slot = screen.getByRole("button", { name: "Page 1 Text Slot 1" });
+  const handle = screen.getByRole("button", { name: "Resize Page 1 Text Slot 1" });
+  const safeRight = 1 - 5 / 297;
+  const endX = 100 + (safeRight - 0.7) * 594 + 3;
+  fireEvent.mouseDown(handle, { button: 0, clientX: 100, clientY: 100, altKey: true });
+  fireEvent.mouseMove(window, { clientX: endX, clientY: 180, altKey: true });
+  expect(parseFloat(slot.style.width)).toBeCloseTo((safeRight - 0.3) * 594 + 3);
+  expect(screen.queryByLabelText("Snap to Safe Zone")).toBeNull();
+
+  fireEvent.keyUp(window, { key: "Alt", altKey: false });
+  expect(parseFloat(slot.style.width)).toBeCloseTo((safeRight - 0.3) * 594);
+  expect(parseFloat(slot.style.height)).toBeCloseTo(30.48);
+  expect(screen.getByLabelText("Snap to Safe Zone")).toBeTruthy();
+  fireEvent.mouseUp(window, { clientX: endX, clientY: 180 });
+  await waitFor(() => {
+    const saved = deserializeAlbum(files.get("Existing")!).pages[0].slots[0];
+    expect(saved.width).toBeCloseTo(safeRight - 0.3, 9);
+    expect(saved.y).toBeCloseTo(0.3, 9);
+    expect(saved.height).toBeCloseTo(30.48 / 420, 9);
+  });
+});
+
+it("does not resize or snap a Text Slot when its handle moves only vertically", async () => {
+  const { ports, files } = disk();
+  const album = addTextSlot(createAlbum({ name: "Existing", pageCount: 2 }), "page-1");
+  album.pages[0].slots[0].width = 1 - 5 / 297 - 0.3 + 3 / 594;
+  files.set("Existing", serializeAlbum(album));
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+
+  const slot = await screen.findByRole("button", { name: "Page 1 Text Slot 1" });
+  const width = parseFloat(slot.style.width);
+  const handle = screen.getByRole("button", { name: "Resize Page 1 Text Slot 1" });
+  fireEvent.mouseDown(handle, { button: 0, clientX: 100, clientY: 100 });
+  fireEvent.mouseMove(window, { clientX: 100, clientY: 150 });
+  expect(parseFloat(slot.style.width)).toBeCloseTo(width);
+  expect(screen.queryByLabelText("Snap to Safe Zone")).toBeNull();
+  fireEvent.mouseUp(window, { clientX: 100, clientY: 150 });
+});
+
 it("keeps growing beyond the Page with a warning and clears it after text shrinks", async () => {
   const { ports, files } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
@@ -569,6 +616,149 @@ function drag(element: Element, dx: number, dy: number) {
   fireEvent.mouseMove(window, { clientX: 100 + dx, clientY: 100 + dy });
   fireEvent.mouseUp(window, { clientX: 100 + dx, clientY: 100 + dy });
 }
+
+it("snaps a Photo Slot to a nearby Page edge, shows a guide, and saves the position", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Photo Slot" }));
+
+  const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  const page = within(screen.getByRole("group", { name: "Spread editor" })).getByRole("button", { name: "Select Page 1" });
+  fireEvent.mouseDown(slot, { button: 0, clientX: 100, clientY: 100 });
+  fireEvent.mouseMove(window, { clientX: 100 - 0.3 * 594 + 4, clientY: 100 });
+
+  expect(parseFloat(slot.style.left)).toBeCloseTo(parseFloat(page.style.left) + 6);
+  expect(screen.getByLabelText("Snap to Page edge")).toBeTruthy();
+  fireEvent.mouseUp(window, { clientX: 100 - 0.3 * 594 + 4, clientY: 100 });
+  expect(screen.queryByLabelText("Snap to Page edge")).toBeNull();
+  await waitFor(() => {
+    expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].x).toBeCloseTo(0);
+  });
+});
+
+it("temporarily bypasses and restores snapping with Alt during a Slot drag", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Photo Slot" }));
+
+  const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  const page = within(screen.getByRole("group", { name: "Spread editor" })).getByRole("button", { name: "Select Page 1" });
+  const trimLeft = parseFloat(page.style.left) + 6;
+  const endX = 100 - 0.3 * 594 + 4;
+  fireEvent.mouseDown(slot, { button: 0, clientX: 100, clientY: 100 });
+  fireEvent.mouseMove(window, { clientX: endX, clientY: 100 });
+  expect(parseFloat(slot.style.left)).toBeCloseTo(trimLeft);
+
+  fireEvent.keyDown(window, { key: "Alt", altKey: true });
+  expect(parseFloat(slot.style.left)).toBeCloseTo(trimLeft + 4);
+  expect(screen.queryByLabelText("Snap to Page edge")).toBeNull();
+  fireEvent.keyUp(window, { key: "Alt", altKey: false });
+  expect(parseFloat(slot.style.left)).toBeCloseTo(trimLeft);
+  expect(screen.getByLabelText("Snap to Page edge")).toBeTruthy();
+
+  fireEvent.keyDown(window, { key: "Alt", altKey: true });
+  fireEvent.mouseUp(window, { clientX: endX, clientY: 100, altKey: true });
+  await waitFor(() => {
+    expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].x).toBeCloseTo(4 / 594, 9);
+  });
+});
+
+it("ignores an unreachable snap target in favor of a reachable one when resizing", async () => {
+  const { ports, files } = disk();
+  const album = createAlbum({ name: "Existing", pageCount: 2 });
+  album.pages[0].slots = [
+    { id: "active", type: "photo", x: 0.3, y: 0.1, width: 0.3, height: 0.2, placement: null },
+    { id: "unreachable", type: "photo", x: 0.317, y: 0.5, width: 0.1, height: 0.1, placement: null },
+    { id: "reachable", type: "photo", x: 0.324, y: 0.75, width: 0.1, height: 0.1, placement: null },
+  ];
+  files.set("Existing", serializeAlbum(album));
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+
+  const slot = await screen.findByRole("button", { name: "Page 1 Photo Slot 1" });
+  const handle = screen.getByRole("button", { name: "Resize Page 1 Photo Slot 1" });
+  fireEvent.mouseDown(handle, { button: 0, clientX: 100, clientY: 100 });
+  fireEvent.mouseMove(window, { clientX: 100 - 0.284 * 594, clientY: 100 });
+  expect(parseFloat(slot.style.width)).toBeCloseTo(0.024 * 594);
+  expect(screen.getByLabelText("Snap to Slot")).toBeTruthy();
+  fireEvent.mouseUp(window, { clientX: 100 - 0.284 * 594, clientY: 100 });
+  await waitFor(() => {
+    expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].width).toBeCloseTo(0.024, 9);
+  });
+});
+
+it("reaches the Bleed when dragged well past the Page edge", async () => {
+  const { ports, files } = disk();
+  const album = createAlbum({ name: "Existing", pageCount: 2, bleedMm: 2 });
+  album.pages[0].slots.push({
+    id: "slot-1", type: "photo", x: 0.3, y: 0.3, width: 0.4, height: 0.4, placement: null,
+  });
+  files.set("Existing", serializeAlbum(album));
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+
+  const slot = await screen.findByRole("button", { name: "Page 1 Photo Slot 1" });
+  const page = within(screen.getByRole("group", { name: "Spread editor" })).getByRole("button", { name: "Select Page 1" });
+  fireEvent.mouseDown(slot, { button: 0, clientX: 100, clientY: 100 });
+  fireEvent.mouseMove(window, { clientX: -400, clientY: 100 });
+  expect(parseFloat(slot.style.left)).toBeCloseTo(parseFloat(page.style.left));
+  expect(screen.queryByLabelText("Snap to Page edge")).toBeNull();
+  fireEvent.mouseUp(window, { clientX: -400, clientY: 100 });
+  await waitFor(() => {
+    expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].x).toBeCloseTo(-2 / 297, 9);
+  });
+});
+
+it("does not snap a Text Slot to a gap that disappears after text reflows", async () => {
+  const { ports, files } = disk();
+  const album = addTextSlot(createAlbum({ name: "Existing", pageCount: 2 }), "page-1");
+  const text = album.pages[0].slots[0];
+  if (text.type !== "text") throw new Error("Expected a Text Slot.");
+  Object.assign(text, { x: 0.375, y: 0.3, width: 0.2, text: "ABCDEFGHIJKLMNOPQRS" });
+  album.pages[0].slots.push(
+    { id: "left", type: "photo", x: 0.125, y: 0.35, width: 0.125, height: 0.02, placement: null },
+    { id: "right", type: "photo", x: 0.745, y: 0.35, width: 0.125, height: 0.02, placement: null },
+  );
+  files.set("Existing", serializeAlbum(album));
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+
+  const slot = await screen.findByRole("button", { name: "Page 1 Text Slot 1" });
+  const handle = screen.getByRole("button", { name: "Resize Page 1 Text Slot 1" });
+  fireEvent.mouseDown(handle, { button: 0, clientX: 100, clientY: 100 });
+  fireEvent.mouseMove(window, { clientX: 100 + 0.042 * 594, clientY: 100 });
+  expect(parseFloat(slot.style.width)).toBeCloseTo(0.242 * 594);
+  expect(screen.queryByLabelText("Snap to Equal gap")).toBeNull();
+  fireEvent.mouseUp(window, { clientX: 100 + 0.042 * 594, clientY: 100 });
+  await waitFor(() => {
+    expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].width).toBeCloseTo(0.242, 9);
+  });
+});
+
+it("shows equal-gap guides while moving a Text Slot between Photo Slots", async () => {
+  const { ports, files } = disk();
+  const album = addTextSlot(createAlbum({ name: "Existing", pageCount: 2 }), "page-1");
+  Object.assign(album.pages[0].slots[0], { x: 0.3, y: 0.25, width: 0.25 });
+  album.pages[0].slots.push(
+    { id: "left", type: "photo", x: 0.125, y: 0.25, width: 0.125, height: 0.25, placement: null },
+    { id: "right", type: "photo", x: 0.75, y: 0.25, width: 0.125, height: 0.25, placement: null },
+  );
+  files.set("Existing", serializeAlbum(album));
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+
+  const slot = await screen.findByRole("button", { name: "Page 1 Text Slot 1" });
+  fireEvent.mouseDown(slot, { button: 0, clientX: 100, clientY: 100 });
+  fireEvent.mouseMove(window, { clientX: 100 + 0.079 * 594, clientY: 100 });
+  expect(screen.getByLabelText("Snap to Equal gap")).toBeTruthy();
+  fireEvent.mouseUp(window, { clientX: 100 + 0.079 * 594, clientY: 100 });
+  expect(screen.queryByLabelText("Snap to Equal gap")).toBeNull();
+  await waitFor(() => {
+    expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].x).toBeCloseTo(0.375, 9);
+  });
+});
 
 it("adds, moves, resizes and deletes Photo Slots on the selected Page and persists their Page fractions", async () => {
   const { ports, files } = disk();
