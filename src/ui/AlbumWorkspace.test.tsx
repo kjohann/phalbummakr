@@ -896,6 +896,102 @@ function photoDrop(photo: { path: string; width: number; height: number; orienta
   return { dataTransfer: { types: [...data.keys()], getData: (type: string) => data.get(type) ?? "", dropEffect: "none" } };
 }
 
+function placementTransfer() {
+  const data = new Map<string, string>();
+  return {
+    get types() { return [...data.keys()]; },
+    setData: (type: string, value: string) => data.set(type, value),
+    getData: (type: string) => data.get(type) ?? "",
+    effectAllowed: "none", dropEffect: "none",
+  };
+}
+
+it("swaps placed Photos through the Photo drag handle without moving their Slots", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Photo Slot" }));
+  fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }),
+    photoDrop({ path: "a.jpg", width: 6000, height: 4000, orientation: 1 }));
+  fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 2" }),
+    photoDrop({ path: "b.jpg", width: 4000, height: 6000, orientation: 1 }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Fit Photo" }));
+  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  const before = deserializeAlbum(files.get("Existing")!).pages[0].slots;
+  const dataTransfer = placementTransfer();
+  fireEvent.dragStart(screen.getByLabelText("Drag Photo from Page 1 Photo Slot 1"), { dataTransfer });
+  const target = screen.getByRole("button", { name: "Page 1 Photo Slot 2" });
+  fireEvent.dragOver(target, { dataTransfer });
+  expect(screen.getByText("Swap Photos")).toBeTruthy();
+  fireEvent.drop(target, { dataTransfer });
+  fireEvent.dragEnd(window, { dataTransfer });
+  await waitFor(() => {
+    const after = deserializeAlbum(files.get("Existing")!).pages[0].slots;
+    expect(after[0]).toEqual({ ...before[0], placement: before[1].placement });
+    expect(after[1]).toEqual({ ...before[1], placement: before[0].placement });
+  });
+  expect(screen.queryByText(/already used in this Album/)).toBeNull();
+});
+
+it("offers Replace instead after a swap, removing the displaced Photo and retaining the moved Placement", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Photo Slot" }));
+  fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }),
+    photoDrop({ path: "a.jpg", width: 6000, height: 4000, orientation: 1 }));
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 2" }),
+    photoDrop({ path: "b.jpg", width: 4000, height: 6000, orientation: 1 }));
+  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  const dataTransfer = placementTransfer();
+  fireEvent.dragStart(screen.getByLabelText("Drag Photo from Page 1 Photo Slot 1"), { dataTransfer });
+  fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 2" }), { dataTransfer });
+  fireEvent.dragEnd(window, { dataTransfer });
+  await waitFor(() => expect((screen.getByRole("button", { name: "Replace instead" }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole("button", { name: "Replace instead" }));
+  await waitFor(() => {
+    const saved = deserializeAlbum(files.get("Existing")!);
+    expect(saved.pages[0].slots[0].placement).toBeNull();
+    expect(saved.pages[0].slots[1].placement!.photoPath).toBe("a.jpg");
+    expect([...photoUsage(saved)]).toEqual([["a.jpg", 1]]);
+  });
+  expect(screen.queryByRole("button", { name: "Replace instead" })).toBeNull();
+});
+
+it("moves a Placement to an empty Slot, retaining a pending Crop and ignoring a drop onto itself", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Photo Slot" }));
+  const source = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  fireEvent.drop(source, photoDrop({ path: "a.jpg", width: 6000, height: 4000, orientation: 1 }));
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  fireEvent.click(source);
+  fireEvent.click(screen.getByRole("checkbox", { name: "Crop photo" }));
+  fireEvent.wheel(source, { deltaY: -120 });
+  const firstDrag = placementTransfer();
+  fireEvent.dragStart(screen.getByLabelText("Drag Photo from Page 1 Photo Slot 1"), { dataTransfer: firstDrag });
+  fireEvent.drop(source, { dataTransfer: firstDrag });
+  fireEvent.dragEnd(window, { dataTransfer: firstDrag });
+  const secondDrag = placementTransfer();
+  fireEvent.dragStart(screen.getByLabelText("Drag Photo from Page 1 Photo Slot 1"), { dataTransfer: secondDrag });
+  const target = screen.getByRole("button", { name: "Page 1 Photo Slot 2" });
+  fireEvent.dragOver(target, { dataTransfer: secondDrag });
+  expect(screen.getByText("Move Photo")).toBeTruthy();
+  fireEvent.drop(target, { dataTransfer: secondDrag });
+  fireEvent.dragEnd(window, { dataTransfer: secondDrag });
+  expect(screen.queryByRole("button", { name: "Replace instead" })).toBeNull();
+  await waitFor(() => {
+    const saved = deserializeAlbum(files.get("Existing")!);
+    expect(saved.pages[0].slots[0].placement).toBeNull();
+    expect(saved.pages[0].slots[1].placement!.photoPath).toBe("a.jpg");
+    expect(saved.pages[0].slots[1].placement!.crop.width).toBeLessThan(0.9);
+  });
+});
+
 it("keeps a portrait Photo upright when dropped into a rotated empty Slot and saves it", async () => {
   const { ports, files } = disk();
   const { container } = render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);

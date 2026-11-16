@@ -2,12 +2,41 @@ import { expect, it } from "vitest";
 import { createAlbum, deserializeAlbum, serializeAlbum } from "./album";
 import {
   addPhotoSlot, addTextSlot, deleteSlot, fitPhotoRect, moveSlot, panCrop, placePhoto, placePhotoOnPage,
-  placementDisplayCrop, resizeSlot, rotateSlot, setPlacementCrop, setPlacementFit, zoomCrop,
+  placementDisplayCrop, resizeSlot, rotateSlot, setPlacementCrop, setPlacementFit, swapPlacements, zoomCrop,
 } from "./slots";
 
 function slotOf(album: ReturnType<typeof createAlbum>, page = 0) {
   return album.pages[page].slots[0];
 }
+
+it("swaps Placements across Pages, keeping Slot geometry and refitting Crops without distortion", () => {
+  let album = createAlbum({ name: "Test", pageCount: 2 });
+  album = addPhotoSlot(addPhotoSlot(album, "page-1"), "page-2");
+  album = resizeSlot(album, "page-2", "slot-1", 0.2, 0.6);
+  album = placePhoto(album, "page-1", "slot-1", { path: "a.jpg", width: 6000, height: 4000, orientation: 1 });
+  album = placePhoto(album, "page-2", "slot-1", { path: "b.jpg", width: 4000, height: 6000, orientation: 1 });
+  album = setPlacementCrop(album, "page-1", "slot-1", zoomCrop(slotOf(album).placement!.crop, 2));
+  album = setPlacementFit(album, "page-2", "slot-1", true);
+  album = rotateSlot(album, "page-2", "slot-1", 90);
+  const first = slotOf(album);
+  const second = slotOf(album, 1);
+  const swapped = swapPlacements(album, { pageId: "page-1", slotId: "slot-1" }, { pageId: "page-2", slotId: "slot-1" });
+  expect(slotOf(swapped)).toEqual({ ...first, placement: expect.objectContaining({ photoPath: "b.jpg", fit: true }) });
+  expect(slotOf(swapped, 1)).toEqual({ ...second, placement: expect.objectContaining({ photoPath: "a.jpg", fit: false }) });
+  const fittedCrop = slotOf(swapped).placement!.crop;
+  expect(fittedCrop.width).toBeCloseTo(1);
+  expect(fittedCrop.height).toBeCloseTo(0.471380471);
+  expect(fittedCrop.x + fittedCrop.width / 2).toBeCloseTo(0.5);
+  expect(fittedCrop.y + fittedCrop.height / 2).toBeCloseTo(0.5);
+  const crop = slotOf(swapped, 1).placement!.crop;
+  expect(crop.width).toBeCloseTo(0.157142857);
+  expect(crop.height).toBeCloseTo(0.5);
+  expect(crop.x + crop.width / 2).toBeCloseTo(0.5);
+  expect(crop.y + crop.height / 2).toBeCloseTo(0.5);
+  expect(deserializeAlbum(serializeAlbum(swapped))).toEqual(swapped);
+  expect(slotOf(album)).toEqual(first);
+  expect(slotOf(album, 1)).toEqual(second);
+});
 
 it("rotates a placed Slot around its physical centre without clamping or changing its Crop", () => {
   const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 1 }), "page-1");

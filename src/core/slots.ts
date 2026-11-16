@@ -184,31 +184,8 @@ export function resizeSlot(album: Album, pageId: string, slotId: string, width: 
       height: slot.type === "text" && !sidewaysText ? slot.height
         : clamp(height, MIN_SLOT_SIZE, Math.max(MIN_SLOT_SIZE, box.bottom - slot.y)),
     };
-    if (slot.type !== "photo" || !slot.placement) return resized;
-    const { crop } = slot.placement;
-    // The Crop has the old Slot's printed aspect, so it also records the Photo's upright aspect.
-    const previousAspect = slotAspect(album, slot);
-    const photoAspect = previousAspect * crop.height / crop.width;
-    const previousCover = centredCrop(photoAspect, previousAspect);
-    const nextCover = centredCrop(photoAspect, slotAspect(album, resized));
-    // Keep the zoom relative to cover and the Crop centre where the Photo edges allow it.
-    const zoomScale = Math.min(1, crop.width / previousCover.width);
-    const cropWidth = nextCover.width * zoomScale;
-    const cropHeight = nextCover.height * zoomScale;
-    return {
-      ...slot,
-      width: resized.width,
-      height: resized.height,
-      placement: {
-        ...slot.placement,
-        crop: {
-          x: clamp(crop.x + crop.width / 2 - cropWidth / 2, 0, 1 - cropWidth),
-          y: clamp(crop.y + crop.height / 2 - cropHeight / 2, 0, 1 - cropHeight),
-          width: cropWidth,
-          height: cropHeight,
-        },
-      },
-    };
+    if (slot.type !== "photo" || resized.type !== "photo" || !slot.placement) return resized;
+    return { ...resized, placement: refitPlacement(album, slot.placement, slot, resized) };
   });
 }
 
@@ -235,6 +212,57 @@ function centredCrop(photoAspect: number, targetAspect: number, centreX = 0.5, c
     width,
     height,
   };
+}
+
+function refitPlacement(album: Album, placement: Placement, from: PhotoSlot, to: PhotoSlot): Placement {
+  const { crop } = placement;
+  const previousAspect = slotAspect(album, from);
+  if (Math.abs(previousAspect - slotAspect(album, to)) < 1e-12) return placement;
+  const photoAspect = previousAspect * crop.height / crop.width;
+  const previousCover = centredCrop(photoAspect, previousAspect);
+  const nextCover = centredCrop(photoAspect, slotAspect(album, to));
+  const zoomScale = Math.min(1, crop.width / previousCover.width);
+  const width = nextCover.width * zoomScale;
+  const height = nextCover.height * zoomScale;
+  return {
+    ...placement,
+    crop: {
+      x: clamp(crop.x + crop.width / 2 - width / 2, 0, 1 - width),
+      y: clamp(crop.y + crop.height / 2 - height / 2, 0, 1 - height),
+      width,
+      height,
+    },
+  };
+}
+
+export interface SlotAddress {
+  pageId: string;
+  slotId: string;
+}
+
+export function removePlacement(album: Album, address: SlotAddress): Album {
+  return editSlot(album, address.pageId, address.slotId, (slot) => {
+    if (slot.type !== "photo" || !slot.placement) throw new Error("Photo Slot has no Placement.");
+    return { ...slot, placement: null };
+  });
+}
+
+export function swapPlacements(album: Album, from: SlotAddress, to: SlotAddress): Album {
+  const source = album.pages.find((page) => page.id === from.pageId)?.slots.find((slot) => slot.id === from.slotId);
+  const target = album.pages.find((page) => page.id === to.pageId)?.slots.find((slot) => slot.id === to.slotId);
+  if (source?.type !== "photo" || !source.placement) throw new Error("Source Photo Slot has no Placement.");
+  if (target?.type !== "photo") throw new Error("Target is not a Photo Slot.");
+  if (from.pageId === to.pageId && from.slotId === to.slotId) return album;
+  const sourcePlacement = source.placement;
+  const targetPlacement = target.placement;
+  const moved = editSlot(album, from.pageId, from.slotId, (slot) => {
+    if (slot.type !== "photo") throw new Error("Source is not a Photo Slot.");
+    return { ...slot, placement: targetPlacement ? refitPlacement(album, targetPlacement, target, source) : null };
+  });
+  return editSlot(moved, to.pageId, to.slotId, (slot) => {
+    if (slot.type !== "photo") throw new Error("Target is not a Photo Slot.");
+    return { ...slot, placement: refitPlacement(album, sourcePlacement, source, target) };
+  });
 }
 
 function uprightPhotoAspect(photo: PlaceablePhoto): number {

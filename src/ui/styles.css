@@ -714,6 +714,23 @@ body {
   background: rgb(86 130 157 / 18%);
 }
 
+.slot-photo-drag-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 3px 6px;
+  background: #415d50;
+  color: #fff;
+  font-size: 11px;
+  cursor: grab;
+  visibility: hidden;
+}
+
+.slot-overlay:hover .slot-photo-drag-handle,
+.slot-overlay[aria-pressed="true"] .slot-photo-drag-handle {
+  visibility: visible;
+}
+
 .slot-drop-label {
   position: absolute;
   top: 50%;
