@@ -5,8 +5,10 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createAlbum, serializeAlbum } from "../core";
 import App, { type DocumentPorts } from "./App";
 
-type MenuEntry = { text: string; action?: () => void; items?: MenuEntry[] };
-const native = vi.hoisted(() => ({ enabled: false, items: [] as MenuEntry[] }));
+type MenuEntry = { id?: string; text: string; enabled?: boolean; action?: () => void; items?: MenuEntry[] };
+const native = vi.hoisted(() => ({
+  enabled: false, items: [] as MenuEntry[], installed: vi.fn(), update: vi.fn(), released: vi.fn(),
+}));
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => native.enabled, invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
@@ -17,14 +19,36 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 vi.mock("@tauri-apps/api/menu", () => ({
   Menu: { new: async (menu: { items: MenuEntry[] }) => {
-    native.items = menu.items[0].items ?? [];
-    return { setAsAppMenu: async () => null, close: async () => {} };
+    const items = menu.items[0].items ?? [];
+    native.items = items;
+    return {
+      setAsAppMenu: async () => { native.installed(); return null; },
+      get: async (id: string) => id === "file" ? {
+        get: async (itemId: string) => {
+          const item = items.find((entry) => entry.id === itemId);
+          return item ? {
+            setEnabled: async (enabled: boolean) => { await native.update(); item.enabled = enabled; },
+            close: async () => { native.released(itemId); },
+          } : null;
+        },
+        close: async () => { native.released("file"); },
+      } : null,
+      close: async () => {},
+    };
   } },
 }));
 vi.mock("./AlbumWorkspace", () => ({
-  default: ({ document, suspended }: { document: { album: { title: string } }; suspended?: boolean }) => {
+  default: ({ document, suspended, onBusyChange }: {
+    document: { album: { title: string } };
+    suspended?: boolean;
+    onBusyChange: (busy: boolean) => void;
+  }) => {
     const [title, setTitle] = useState(document.album.title);
-    return <><p>{title}</p><button type="button" disabled={suspended} onClick={() => setTitle("Edited Album")}>Edit mock Album</button></>;
+    return <><p>{title}</p>
+      <button type="button" disabled={suspended} onClick={() => setTitle("Edited Album")}>Edit mock Album</button>
+      <button type="button" onClick={() => onBusyChange(true)}>Begin mock edit</button>
+      <button type="button" onClick={() => onBusyChange(false)}>Finish mock save</button>
+    </>;
   },
 }));
 vi.mock("./PhotoBrowser", () => ({ default: () => null }));
@@ -33,6 +57,72 @@ afterEach(() => {
   cleanup();
   native.enabled = false;
   native.items = [];
+  native.installed.mockClear();
+  native.update.mockReset();
+  native.released.mockClear();
+});
+
+it("updates File menu availability without reinstalling the native menu during edits and autosaves", async () => {
+  native.enabled = true;
+  const path = "D:\\Photos\\album.phalbum";
+  const settings = { lastAlbum: path, recentAlbums: [path] };
+  const ports: DocumentPorts = {
+    settings: async () => settings,
+    exists: async () => true,
+    read: async () => serializeAlbum(createAlbum({ name: "Original" })),
+    write: vi.fn(),
+    remember: vi.fn(),
+    forget: vi.fn(),
+    close: vi.fn(),
+    parent: async () => "D:\\Photos",
+    chooseNew: async () => null,
+    chooseOpen: async () => null,
+  };
+  render(<App ports={ports} />);
+  await screen.findByText("Original");
+  await waitFor(() => expect(native.items.find((entry) => entry.text === "Close Album")?.enabled).toBe(true));
+  const installs = native.installed.mock.calls.length;
+  for (let edit = 0; edit < 3; edit++) {
+    fireEvent.click(screen.getByRole("button", { name: "Begin mock edit" }));
+    await waitFor(() => expect(native.items.filter((entry) => entry.text !== "Exit").map((entry) => entry.enabled))
+      .toEqual([false, false, false, false]));
+    expect(native.installed).toHaveBeenCalledTimes(installs);
+    fireEvent.click(screen.getByRole("button", { name: "Finish mock save" }));
+    await waitFor(() => expect(native.items.filter((entry) => entry.text !== "Exit").map((entry) => entry.enabled))
+      .toEqual([true, true, true, true]));
+    expect(native.installed).toHaveBeenCalledTimes(installs);
+  }
+  for (const id of ["file", "new-album", "open-album", "open-recent", "close-album"]) {
+    expect(native.released).toHaveBeenCalledWith(id);
+  }
+});
+
+it("reports native menu update failures and releases the retrieved item and submenu handles", async () => {
+  native.enabled = true;
+  const path = "D:\\Photos\\album.phalbum";
+  const settings = { lastAlbum: path, recentAlbums: [path] };
+  const ports: DocumentPorts = {
+    settings: async () => settings,
+    exists: async () => true,
+    read: async () => serializeAlbum(createAlbum({ name: "Original" })),
+    write: vi.fn(),
+    remember: vi.fn(),
+    forget: vi.fn(),
+    close: vi.fn(),
+    parent: async () => "D:\\Photos",
+    chooseNew: async () => null,
+    chooseOpen: async () => null,
+  };
+  render(<App ports={ports} />);
+  await screen.findByText("Original");
+  await waitFor(() => expect(native.items.find((entry) => entry.text === "Close Album")?.enabled).toBe(true));
+  const installs = native.installed.mock.calls.length;
+  native.released.mockClear();
+  native.update.mockRejectedValueOnce(new Error("Menu update denied"));
+  fireEvent.click(screen.getByRole("button", { name: "Begin mock edit" }));
+  expect((await screen.findByRole("alert")).textContent).toContain("Menu update denied");
+  expect(native.released.mock.calls).toEqual([["new-album"], ["file"]]);
+  expect(native.installed).toHaveBeenCalledTimes(installs);
 });
 
 it("restores the last Album using its file's folder and stored title", async () => {

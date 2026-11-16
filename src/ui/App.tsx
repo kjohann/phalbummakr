@@ -80,6 +80,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
   const operationRef = useRef(false);
   const documentId = useRef(0);
   const menuRef = useRef<Menu | null>(null);
+  const menuRecent = useRef<string[] | null>(null);
   const menuQueue = useRef<Promise<void>>(Promise.resolve());
 
   const reportBusy = useCallback((value: boolean) => {
@@ -222,15 +223,43 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
     let active = true;
     menuQueue.current = menuQueue.current.then(async () => {
       if (!active) return;
+      // Replacing a Windows menu briefly resizes the WebView.
+      if (menuRef.current && menuRecent.current === recent) {
+        const file = await menuRef.current.get("file");
+        if (!file) throw new Error("The File menu is missing.");
+        try {
+          if (!("get" in file)) throw new Error("The File menu is not a submenu.");
+          const enabledById = {
+            "new-album": !busy && !restoring,
+            "open-album": !busy && !restoring,
+            "open-recent": !busy && !restoring && recent.length > 0,
+            "close-album": !busy && !restoring && (document !== null || draft !== null),
+          };
+          for (const [id, enabled] of Object.entries(enabledById)) {
+            const item = await file.get(id);
+            if (!item) throw new Error(`The File menu item ${id} is missing.`);
+            try {
+              if (!("setEnabled" in item)) throw new Error(`The File menu item ${id} cannot be enabled.`);
+              await item.setEnabled(enabled);
+            } finally {
+              await item.close();
+            }
+          }
+        } finally {
+          await file.close();
+        }
+        return;
+      }
       const menu = await Menu.new({ items: [{
+        id: "file",
         text: "File",
         items: [
-          { text: "New Album…", enabled: !busy && !restoring, action: () => actions.current.newAlbum() },
-          { text: "Open Album…", enabled: !busy && !restoring, action: () => actions.current.openAlbum() },
-          { text: "Open Recent", enabled: !busy && !restoring && recent.length > 0, items: recent.map((path) => ({
+          { id: "new-album", text: "New Album…", enabled: !busy && !restoring, action: () => actions.current.newAlbum() },
+          { id: "open-album", text: "Open Album…", enabled: !busy && !restoring, action: () => actions.current.openAlbum() },
+          { id: "open-recent", text: "Open Recent", enabled: !busy && !restoring && recent.length > 0, items: recent.map((path) => ({
             text: path.replaceAll("&", "&&"), action: () => actions.current.openRecent(path),
           })) },
-          { text: "Close Album", enabled: !busy && !restoring && (document !== null || draft !== null), action: () => actions.current.closeAlbum() },
+          { id: "close-album", text: "Close Album", enabled: !busy && !restoring && (document !== null || draft !== null), action: () => actions.current.closeAlbum() },
           { text: "Exit", action: () => actions.current.exit() },
         ],
       }] });
@@ -239,6 +268,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
         const previous = await menu.setAsAppMenu();
         const previousOwned = menuRef.current;
         menuRef.current = menu;
+        menuRecent.current = recent;
         await previous?.close();
         await previousOwned?.close();
       } catch (cause) {
@@ -246,7 +276,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
         throw cause;
       }
     }).catch((cause: unknown) => {
-      if (active) setError(`Could not install File menu: ${String(cause)}`);
+      if (active) setError(`Could not update File menu: ${String(cause)}`);
     });
     return () => { active = false; };
   }, [recent, busy, restoring, document, draft]);

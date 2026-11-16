@@ -43,6 +43,7 @@ Work order for the layout rework: 016, 017, 018, 019, 020, then 011.
 | -------- | ----- | ------ |
 | [004 addendum – Spread layout and Album settings](004-addendum.md) | 004 | done |
 | [004 addendum – Hide the Albums folder](004-addendum.md#section-2--hide-the-albums-folder) | 004 | done |
+| [004 addendum - Stable autosave status](004-addendum.md#section-3---stable-autosave-status) | 004 | done |
 | [006 addendum – Drop feedback, Slots on drop and faster previews](006-addendum.md) | 006 | doing |
 | [008 addendum – Filesystem-aware Photo Usage](008-addendum.md) | 008 | todo |
 | [009 addendum - Auto-height text boxes and attached controls](009-addendum.md) | 009 | done |
@@ -50,6 +51,8 @@ Work order for the layout rework: 016, 017, 018, 019, 020, then 011.
 | [013 addendum - All aligned snap guides](013-addendum.md) | 013 | done |
 | [014 addendum - Upright Photos on placement](014-addendum.md) | 014 | done |
 | [015 addendum - Swap-only interaction and compact handle](015-addendum.md) | 015 | done |
+| [016 addendum - Quiet saving and a native Save command](016-addendum.md) | 016 | todo |
+| [016 addendum - Stable native menu during autosave](016-addendum.md#section-2---stable-native-menu-during-autosave) | 016 | done |
 
 ## After the MVP
 

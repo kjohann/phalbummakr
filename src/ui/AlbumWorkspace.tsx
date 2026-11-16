@@ -255,7 +255,6 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
                 </form>
               )}
             </div>
-            <span role="status">{saveStatus === "saved" && !cropPending ? "Saved" : saveStatus === "error" ? "Not saved" : "Saving..."}</span>
           </div>
           <AlbumView key={current.filename} album={current.album} onChange={changeAlbum}
             root={root} photoPorts={photoPorts} fontPorts={fontPorts}

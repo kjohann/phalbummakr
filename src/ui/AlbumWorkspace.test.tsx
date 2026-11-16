@@ -75,12 +75,43 @@ function disk() {
   return { ports, files };
 }
 
+async function waitForAutosave() {
+  await waitFor(() => expect(
+    (screen.getByRole("button", { name: "Open Album Existing" }) as HTMLButtonElement).disabled,
+  ).toBe(false));
+}
+
 function setExactFontSize(points: string) {
   fireEvent.change(screen.getByLabelText("Font size"), { target: { value: "custom" } });
   const input = screen.getByLabelText("Font size (pt)");
   fireEvent.change(input, { target: { value: points } });
   fireEvent.keyDown(input, { key: "Enter" });
 }
+
+it("autosaves an Album document without rendering save-status feedback", async () => {
+  const { ports, files } = disk();
+  const write = ports.write;
+  let finishWrite: () => void = () => {};
+  const pendingWrite = new Promise<void>((resolve) => { finishWrite = resolve; });
+  ports.write = vi.fn<AlbumPorts["write"]>(async (...args) => { await pendingWrite; await write(...args); });
+  const onBusyChange = vi.fn();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} onBusyChange={onBusyChange}
+    document={{ path: "Existing", album: createAlbum({ name: "Existing", pageCount: 2 }) }} />);
+  expect(screen.queryByRole("status")).toBeNull();
+
+  vi.useFakeTimers();
+  fireEvent.click(screen.getByRole("button", { name: "Add Page" }));
+  expect(onBusyChange).toHaveBeenLastCalledWith(true);
+  expect(screen.queryByRole("status")).toBeNull();
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  expect(ports.write).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole("status")).toBeNull();
+
+  await act(async () => { finishWrite(); await pendingWrite; });
+  expect(deserializeAlbum(files.get("Existing")!).pages).toHaveLength(3);
+  expect(onBusyChange).toHaveBeenLastCalledWith(false);
+  expect(screen.queryByRole("status")).toBeNull();
+});
 
 it("opens a selected Album file and saves edits back to that file", async () => {
   const { ports } = disk();
@@ -506,7 +537,7 @@ it("keeps starting side and print settings in Album settings, validates them, an
   fireEvent.change(screen.getByLabelText("Safe Zone (mm)"), { target: { value: "7" } });
   fireEvent.change(screen.getByLabelText("Export resolution (DPI)"), { target: { value: "600" } });
   fireEvent.submit(screen.getByRole("form", { name: "Album settings" }));
-  await waitFor(() => expect(screen.getByText("Saved").textContent).toBe("Saved"));
+  await waitForAutosave();
   fireEvent.click(screen.getByRole("button", { name: "Open Album Existing" }));
   await waitFor(() => expect(screen.queryByLabelText("Bleed (mm)")).toBeNull());
   fireEvent.click(screen.getByRole("button", { name: "Album settings" }));
@@ -571,7 +602,7 @@ it("drag-reorders Pages, keeps the moved Page selected, supports keyboard-friend
   expect(reopened.pages.map((page) => page.id)).toEqual(["page-2", "page-3", "page-4", "page-1"]);
   const before = serializeAlbum(reopened);
   fireEvent.drop(strip.getByRole("button", { name: "Select Page 1" }), { dataTransfer });
-  expect(screen.getByRole("status").textContent).toBe("Saved");
+  expect((screen.getByRole("button", { name: "Open Album Existing" }) as HTMLButtonElement).disabled).toBe(false);
   expect(serializeAlbum(deserializeAlbum(await ports.read("D:\\Photos", "Existing")))).toBe(before);
 });
 
@@ -613,7 +644,7 @@ it("debounces changes, blocks navigation until saved, and reopens the persisted 
   expect(deserializeAlbum(files.get("Existing")!).startingSide).toBe("right");
   await act(() => vi.advanceTimersByTimeAsync(1));
   expect(deserializeAlbum(files.get("Existing")!).startingSide).toBe("left");
-  expect(screen.getByRole("status").textContent).toBe("Saved");
+  expect((screen.getByRole("button", { name: "Open Album Existing" }) as HTMLButtonElement).disabled).toBe(false);
   expect(ports.write).toHaveBeenCalledTimes(1);
   vi.useRealTimers();
   fireEvent.click(screen.getByRole("button", { name: "Open Album Existing" }));
@@ -634,7 +665,7 @@ it("keeps unsaved changes after a failed save, prevents leaving, and retries exp
   fireEvent.change(screen.getByLabelText("Page 1 side"), { target: { value: "left" } });
   await act(() => vi.advanceTimersByTimeAsync(500));
   expect(screen.getByRole("alert").textContent).toContain("Disk full");
-  expect(screen.getByRole("status").textContent).toBe("Not saved");
+  expect(screen.queryByText("Not saved")).toBeNull();
   for (const name of ["Add Page", "Duplicate Page", "Delete Page", "Move Page later"]) {
     expect((screen.getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(true);
   }
@@ -649,7 +680,7 @@ it("keeps unsaved changes after a failed save, prevents leaving, and retries exp
   await act(() => vi.advanceTimersByTimeAsync(500));
   expect(deserializeAlbum(files.get("Existing")!).startingSide).toBe("left");
   expect(screen.queryByRole("alert")).toBeNull();
-  expect(screen.getByRole("status").textContent).toBe("Saved");
+  expect((screen.getByRole("button", { name: "Open Album Existing" }) as HTMLButtonElement).disabled).toBe(false);
 });
 
 it("keeps the previous Album available when opening malformed JSON fails and does not overwrite duplicates", async () => {
@@ -898,7 +929,7 @@ it("adds, moves, resizes and deletes Photo Slots on the selected Page and persis
   // 59.4 px is 0.1 of the 594 px trim width; 42 px is 0.1 of the 420 px trim height.
   drag(slot, 59.4, 42);
   drag(screen.getByRole("button", { name: "Resize Page 1 Photo Slot 1" }), 59.4, -42);
-  await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Saved"));
+  await waitForAutosave();
   const [saved] = deserializeAlbum(files.get("Existing")!).pages[0].slots;
   expect(saved.x).toBeCloseTo(0.4, 9);
   expect(saved.y).toBeCloseTo(0.4, 9);
@@ -911,7 +942,7 @@ it("adds, moves, resizes and deletes Photo Slots on the selected Page and persis
   fireEvent.click(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }));
   fireEvent.click(screen.getByRole("button", { name: "Delete Slot" }));
   expect(screen.queryByRole("button", { name: /^Page 1 Photo Slot/ })).toBeNull();
-  await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Saved"));
+  await waitForAutosave();
   expect(deserializeAlbum(files.get("Existing")!).pages[0].slots).toEqual([]);
 });
 
@@ -944,7 +975,7 @@ it("swaps placed Photos through the Photo drag handle without moving their Slots
   fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 2" }),
     photoDrop({ path: "b.jpg", width: 4000, height: 6000, orientation: 1 }));
   fireEvent.click(screen.getByRole("checkbox", { name: "Fit Photo" }));
-  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  await waitForAutosave();
   const before = deserializeAlbum(files.get("Existing")!).pages[0].slots;
   const dataTransfer = placementTransfer();
   fireEvent.dragStart(screen.getByLabelText("Drag Photo from Page 1 Photo Slot 1"), { dataTransfer });
@@ -971,7 +1002,7 @@ it("swaps without adding post-swap controls and uses an icon-only Photo drag han
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 2" }),
     photoDrop({ path: "b.jpg", width: 4000, height: 6000, orientation: 1 }));
-  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  await waitForAutosave();
   const dataTransfer = placementTransfer();
   const handle = screen.getByLabelText("Drag Photo from Page 1 Photo Slot 1");
   fireEvent.dragStart(handle, { dataTransfer });
@@ -1028,7 +1059,7 @@ it("keeps a Photo drag source mounted while a pending save finishes", async () =
   fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }),
     photoDrop({ path: "a.jpg", width: 6000, height: 4000, orientation: 1 }));
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
-  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  await waitForAutosave();
   fireEvent.click(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }));
 
   vi.useFakeTimers();
@@ -1126,7 +1157,7 @@ it("keeps the sibling Photo browser in sync with edits and Album switches", asyn
   expect(screen.getByLabelText("Used 1 time in this Album")).toBeTruthy();
   fireEvent.click(screen.getByRole("checkbox", { name: "Unused in this Album" }));
   expect(screen.queryByText("tree.jpg")).toBeNull();
-  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  await waitForAutosave();
   fireEvent.click(screen.getByRole("button", { name: "Open Album Other" }));
   await screen.findByRole("heading", { name: "Other" });
   expect(await screen.findByText("tree.jpg")).toBeTruthy();
@@ -1153,7 +1184,7 @@ it("keeps a duplicate drop and its Usage while a wheel Crop gesture is pending",
   fireEvent.drop(firstSlot, photoDrop(photo));
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   const secondSlot = screen.getByRole("button", { name: "Page 1 Photo Slot 2" });
-  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  await waitForAutosave();
   const originalCrop = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop;
 
   vi.useFakeTimers();
@@ -1180,7 +1211,7 @@ it("keeps the replacement Photo's centred Crop when a wheel gesture was pending"
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
   fireEvent.drop(slot, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
-  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  await waitForAutosave();
 
   vi.useFakeTimers();
   fireEvent.click(screen.getByRole("checkbox", { name: "Crop photo" }));
@@ -1206,7 +1237,7 @@ it("keeps Album switching locked until a wheel Crop gesture is saved", async () 
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
   fireEvent.drop(slot, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
-  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  await waitForAutosave();
   const originalWidth = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop.width;
 
   vi.useFakeTimers();
@@ -1214,7 +1245,6 @@ it("keeps Album switching locked until a wheel Crop gesture is saved", async () 
   fireEvent.wheel(slot, { deltaY: -100 });
   const otherAlbum = screen.getByRole("button", { name: "Open Album Other" }) as HTMLButtonElement;
   expect(otherAlbum.disabled).toBe(true);
-  expect(screen.getByText("Saving...")).toBeTruthy();
 
   await act(() => vi.advanceTimersByTimeAsync(220));
   await act(() => vi.advanceTimersByTimeAsync(500));
@@ -1234,7 +1264,7 @@ it("combines a wheel Crop gesture with an immediate Zoom in command", async () =
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
   fireEvent.drop(slot, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
-  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  await waitForAutosave();
 
   vi.useFakeTimers();
   fireEvent.click(screen.getByRole("checkbox", { name: "Crop photo" }));
@@ -1258,7 +1288,7 @@ it("preserves wheel Crop gestures when moving between Photo Slots", async () => 
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   const secondSlot = screen.getByRole("button", { name: "Page 1 Photo Slot 2" });
   fireEvent.drop(secondSlot, photoDrop({ path: "portrait.jpg", width: 4000, height: 6000, orientation: 1 }));
-  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  await waitForAutosave();
   const original = deserializeAlbum(files.get("Existing")!).pages[0].slots.map((slot) => slot.placement!.crop.width);
 
   vi.useFakeTimers();
@@ -1283,7 +1313,7 @@ it("deletes a Photo Slot safely while its wheel Crop gesture is pending", async 
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
   fireEvent.drop(slot, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
-  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  await waitForAutosave();
 
   vi.useFakeTimers();
   fireEvent.click(screen.getByRole("checkbox", { name: "Crop photo" }));
@@ -1304,7 +1334,7 @@ it("does not start an earlier save during a Crop pan", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
   fireEvent.drop(slot, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
-  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  await waitForAutosave();
 
   vi.useFakeTimers();
   const writesBefore = vi.mocked(ports.write).mock.calls.length;
@@ -1336,7 +1366,7 @@ it("finishes a Crop pan when the window loses focus", async () => {
   const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
   fireEvent.drop(slot, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
   fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
-  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  await waitForAutosave();
   const original = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop;
 
   vi.useFakeTimers();
@@ -1361,7 +1391,7 @@ it("serializes saves when a Slot drag ends during an earlier Crop save", async (
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
   fireEvent.drop(slot, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
-  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  await waitForAutosave();
 
   vi.useFakeTimers();
   const writesBefore = vi.mocked(ports.write).mock.calls.length;
@@ -1402,7 +1432,7 @@ it("wheel-zooms only the selected Photo Slot in Crop mode and prevents scrolling
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   const secondSlot = screen.getByRole("button", { name: "Page 1 Photo Slot 2" });
   fireEvent.drop(secondSlot, photoDrop({ path: "portrait.jpg", width: 4000, height: 6000, orientation: 1 }));
-  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  await waitForAutosave();
   const original = deserializeAlbum(files.get("Existing")!).pages[0].slots.map((slot) => slot.placement!.crop);
 
   vi.useFakeTimers();
@@ -1410,13 +1440,13 @@ it("wheel-zooms only the selected Photo Slot in Crop mode and prevents scrolling
   const withoutCrop = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -100 });
   fireEvent(firstSlot, withoutCrop);
   expect(withoutCrop.defaultPrevented).toBe(false);
-  expect(screen.queryByText("Saving...")).toBeNull();
+  expect((screen.getByRole("button", { name: "Open Album Existing" }) as HTMLButtonElement).disabled).toBe(false);
 
   fireEvent.click(screen.getByRole("checkbox", { name: "Crop photo" }));
   const unselected = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -100 });
   fireEvent(secondSlot, unselected);
   expect(unselected.defaultPrevented).toBe(false);
-  expect(screen.queryByText("Saving...")).toBeNull();
+  expect((screen.getByRole("button", { name: "Open Album Existing" }) as HTMLButtonElement).disabled).toBe(false);
 
   const selected = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -100 });
   fireEvent(firstSlot, selected);
@@ -1456,7 +1486,7 @@ it("reports Album changes and warns without blocking duplicate drops on Slots an
   fireEvent(page, dropEvent);
   expect(screen.getByText("tree.jpg is already used in this Album.")).toBeTruthy();
   expect(photoUsage(onAlbumChange.mock.lastCall![0]!).get("tree.jpg")).toBe(3);
-  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  await waitForAutosave();
   expect(photoUsage(deserializeAlbum(files.get("Existing")!)).get("tree.jpg")).toBe(3);
 });
 
@@ -1514,7 +1544,7 @@ it("creates and selects a Photo Slot when a Photo is dropped on a blank Page", a
   const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
   expect(slot.getAttribute("aria-pressed")).toBe("true");
   expect(screen.queryByText("Place Photo")).toBeNull();
-  await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  await waitForAutosave();
   expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.photoPath).toBe("tree.jpg");
 });
 
@@ -1628,7 +1658,7 @@ it("places a dropped Photo in a Photo Slot, replaces it on a second drop, and dr
   expect(photoPorts.preview).toHaveBeenCalledWith("D:\\Photos", "2024/tree.jpg");
   fireEvent.dragOver(slot, photoDrop({ path: "snow.png", width: 4000, height: 6000, orientation: 1 }));
   expect(screen.getByText("Replace Photo")).toBeTruthy();
-  await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Saved"));
+  await waitForAutosave();
   const placement = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!;
   expect(placement.photoPath).toBe("2024/tree.jpg");
   expect(placement.crop.y).toBe(0);
@@ -1636,7 +1666,7 @@ it("places a dropped Photo in a Photo Slot, replaces it on a second drop, and dr
 
   fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }), photoDrop({ path: "snow.png", width: 4000, height: 6000, orientation: 1 }));
   await waitFor(() => expect(screen.getByRole("img", { name: "Placement" }).getAttribute("src")).toBe(`data:image/jpeg;base64,${btoa("snow.png")}`));
-  await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Saved"));
+  await waitForAutosave();
   const [replaced] = deserializeAlbum(files.get("Existing")!).pages[0].slots;
   expect(replaced.placement!.photoPath).toBe("snow.png");
   expect(screen.getAllByRole("img", { name: "Placement" })).toHaveLength(1);
@@ -1650,7 +1680,7 @@ it("keeps Crop local during a pan gesture, commits at release, and persists Fit"
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
   fireEvent.drop(slot, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
-  await waitFor(() => expect(screen.getByText("Saved").textContent).toBe("Saved"));
+  await waitForAutosave();
   const original = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop;
 
   vi.useFakeTimers();

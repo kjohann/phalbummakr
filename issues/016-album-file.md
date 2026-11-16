@@ -1,6 +1,6 @@
 # 016 – Open an Album file
 
-Status: done · Depends on: 004
+Status: done · Depends on: 004 · Addendum: [016-addendum](016-addendum.md)
 
 ## What
 
