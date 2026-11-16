@@ -1,6 +1,6 @@
 # 016 – Open an Album file
 
-Status: todo · Depends on: 004
+Status: doing · Depends on: 004
 
 ## What
 
@@ -38,6 +38,6 @@ The app does not migrate old Albums. For each `Albums/X.album.json` in a Library
 
 1. Move it up to the Library folder, next to the Photos' folders.
 2. Rename it to `X.phalbum`.
-3. Apply any format change made in this issue, such as renaming `name` to `title` or bumping `schemaVersion`. Whoever implements this issue keeps these steps exact.
+3. In the JSON, rename `name` to `title` and change `schemaVersion` from `1` to `2`.
 
 Then delete the `Albums/` folder and the empty `.phalbummakr` marker. Photo paths need no change. After [017](017-book-structure.md) the Album also needs its `startingSide` removed and an even Page count; see that issue.

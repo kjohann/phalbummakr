@@ -1,46 +1,196 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { Menu } from "@tauri-apps/api/menu";
+import { dirname } from "@tauri-apps/api/path";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useEffect, useRef, useState } from "react";
-import { libraryName, openLibrary, restoreLastLibrary, type Album, type Library } from "../core";
+import { open, save } from "@tauri-apps/plugin-dialog";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { createAlbum, deserializeAlbum, serializeAlbum, type Album } from "../core";
 import AlbumWorkspace from "./AlbumWorkspace";
 import PhotoBrowser from "./PhotoBrowser";
-import { tauriLibraryPorts } from "./tauriLibraryPorts";
 
-type BridgeState = "connecting" | "connected" | "unavailable";
+interface Settings {
+  lastAlbum: string | null;
+  recentAlbums: string[];
+}
 
-type LibraryState =
-  | { status: "restoring" }
-  | { status: "closed" }
-  | { status: "open"; library: Library };
+export interface DocumentPorts {
+  settings(): Promise<Settings>;
+  exists(path: string): Promise<boolean>;
+  read(path: string): Promise<string>;
+  write(path: string, json: string, create: boolean): Promise<void>;
+  remember(path: string): Promise<void>;
+  forget(path: string): Promise<void>;
+  close(): Promise<void>;
+  parent(path: string): Promise<string>;
+  chooseNew(): Promise<string | null>;
+  chooseOpen(): Promise<string | null>;
+}
 
-function LibraryWorkspace({ root, onBusyChange }: { root: string; onBusyChange: (busy: boolean) => void }) {
-  const [album, setAlbum] = useState<Album | null>(null);
+const filters = [{ name: "Album", extensions: ["phalbum"] }];
+const desktopPorts: DocumentPorts = {
+  settings: () => invoke("album_settings"),
+  exists: (path) => invoke("album_exists", { path }),
+  read: (path) => invoke("read_album_file", { path }),
+  write: (path, json, create) => invoke("write_album_file", { path, json, create }),
+  remember: (path) => invoke("remember_album", { path }),
+  forget: (path) => invoke("forget_album", { path }),
+  close: () => invoke("close_album"),
+  parent: dirname,
+  chooseNew: () => save({ defaultPath: "New Album.phalbum", filters }),
+  chooseOpen: () => open({ multiple: false, directory: false, filters }),
+};
+
+interface OpenDocument {
+  id: number;
+  path: string;
+  root: string;
+  album: Album;
+}
+
+function DocumentWorkspace({ document, onBusyChange, onTitleChange }: {
+  document: OpenDocument;
+  onBusyChange: (busy: boolean) => void;
+  onTitleChange: (album: Album | null) => void;
+}) {
+  const [album, setAlbum] = useState<Album | null>(document.album);
+  const reportAlbum = useCallback((next: Album | null) => {
+    setAlbum(next);
+    onTitleChange(next);
+  }, [onTitleChange]);
   return (
     <div className="library-workspace">
-      <PhotoBrowser root={root} album={album} />
-      <AlbumWorkspace root={root} onBusyChange={onBusyChange} onAlbumChange={setAlbum} />
+      <PhotoBrowser root={document.root} album={album} />
+      <AlbumWorkspace root={document.root} document={document} onBusyChange={onBusyChange} onAlbumChange={reportAlbum} />
     </div>
   );
 }
 
-export default function App() {
-  const [bridgeState, setBridgeState] = useState<BridgeState>("connecting");
-  const [libraryState, setLibraryState] = useState<LibraryState>({ status: "restoring" });
-  const [opening, setOpening] = useState(false);
-  const [albumBusy, setAlbumBusy] = useState(false);
+export default function App({ ports = desktopPorts }: { ports?: DocumentPorts }) {
+  const [document, setDocument] = useState<OpenDocument | null>(null);
+  const [title, setTitle] = useState<string | null>(null);
+  const [recent, setRecent] = useState<string[]>([]);
+  const [draft, setDraft] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState(true);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const albumBusyRef = useRef(false);
+  const busyRef = useRef(false);
+  const operationRef = useRef(false);
+  const documentId = useRef(0);
+
+  const reportBusy = useCallback((value: boolean) => {
+    busyRef.current = value;
+    setBusy(value || operationRef.current);
+  }, []);
+  const reportTitle = useCallback((album: Album | null) => setTitle(album?.title ?? null), []);
+
+  async function refreshRecent() {
+    setRecent((await ports.settings()).recentAlbums);
+  }
+
+  async function load(path: string) {
+    if (!(await ports.exists(path))) {
+      await ports.forget(path);
+      await refreshRecent();
+      setError(`Album file no longer exists: ${path}`);
+      return;
+    }
+    const album = deserializeAlbum(await ports.read(path));
+    const root = await ports.parent(path);
+    setDocument({ id: ++documentId.current, path, root, album });
+    setTitle(album.title);
+    setDraft(null);
+    await ports.remember(path);
+    await refreshRecent();
+  }
+
+  async function run(action: () => Promise<void>, label: string) {
+    if (busyRef.current || operationRef.current) {
+      setError("Please wait for the Album operation to finish, or retry its failed save.");
+      return;
+    }
+    operationRef.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+    } catch (cause) {
+      setError(`${label}: ${String(cause)}`);
+    } finally {
+      operationRef.current = false;
+      setBusy(busyRef.current);
+    }
+  }
 
   useEffect(() => {
-    albumBusyRef.current = albumBusy;
-  }, [albumBusy]);
+    let active = true;
+    operationRef.current = true;
+    async function restore() {
+      try {
+        const settings = await ports.settings();
+        if (!active) return;
+        setRecent(settings.recentAlbums);
+        const path = settings.lastAlbum;
+        if (!path) return;
+        if (!(await ports.exists(path))) {
+          if (!active) return;
+          await ports.forget(path);
+          if (active) {
+            setRecent((await ports.settings()).recentAlbums);
+            setError(`Last Album file no longer exists: ${path}`);
+          }
+          return;
+        }
+        const album = deserializeAlbum(await ports.read(path));
+        const root = await ports.parent(path);
+        if (!active) return;
+        setDocument({ id: ++documentId.current, path, root, album });
+        setTitle(album.title);
+        await ports.remember(path);
+        if (active) setRecent((await ports.settings()).recentAlbums);
+      } catch (cause) {
+        if (active) setError(`Could not restore Album: ${String(cause)}`);
+      } finally {
+        if (active) {
+          operationRef.current = false;
+          setBusy(busyRef.current);
+          setRestoring(false);
+        }
+      }
+    }
+    void restore();
+    return () => { active = false; };
+  }, [ports]);
+
+  const actions = useRef<{ newAlbum: () => void; openAlbum: () => void; openRecent: (path: string) => void; closeAlbum: () => void; exit: () => void }>(
+    { newAlbum: () => {}, openAlbum: () => {}, openRecent: () => {}, closeAlbum: () => {}, exit: () => {} },
+  );
+  actions.current = {
+    newAlbum: () => void run(async () => {
+      const path = await ports.chooseNew();
+      if (path) setDraft(path);
+    }, "Could not create Album"),
+    openAlbum: () => void run(async () => {
+      const path = await ports.chooseOpen();
+      if (path) await load(path);
+    }, "Could not open Album"),
+    openRecent: (path) => void run(() => load(path), "Could not open Album"),
+    closeAlbum: () => void run(async () => {
+      await ports.close();
+      setDocument(null);
+      setTitle(null);
+      setDraft(null);
+    }, "Could not close Album"),
+    exit: () => {
+      if (isTauri()) void getCurrentWindow().close().catch((cause: unknown) => setError(`Could not close window: ${String(cause)}`));
+    },
+  };
 
   useEffect(() => {
     if (!isTauri()) return;
     let active = true;
     let unlisten: (() => void) | undefined;
     getCurrentWindow().onCloseRequested((event) => {
-      if (albumBusyRef.current) {
+      if (busyRef.current || operationRef.current) {
         event.preventDefault();
         setError("Please wait for the Album operation to finish, or retry its failed save, before closing.");
       }
@@ -50,94 +200,91 @@ export default function App() {
     }).catch((cause: unknown) => {
       if (active) setError(`Could not protect unsaved Albums on close: ${String(cause)}`);
     });
-    return () => {
-      active = false;
-      unlisten?.();
-    };
+    return () => { active = false; unlisten?.(); };
   }, []);
 
   useEffect(() => {
-    let active = true;
-    invoke<string>("greet", { name: "phalbummakr" })
-      .then(() => {
-        if (active) setBridgeState("connected");
-      })
-      .catch(() => {
-        if (active) setBridgeState("unavailable");
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+    if (!isTauri()) return;
+    getCurrentWindow().setTitle(title === null ? "phalbummakr" : `${title} — phalbummakr`)
+      .catch((cause: unknown) => setError(`Could not set window title: ${String(cause)}`));
+  }, [title]);
 
   useEffect(() => {
+    if (!isTauri()) return;
     let active = true;
-    restoreLastLibrary(tauriLibraryPorts)
-      .then((library) => {
-        if (active) setLibraryState(library ? { status: "open", library } : { status: "closed" });
-      })
-      .catch(() => {
-        if (active) setLibraryState({ status: "closed" });
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+    Menu.new({ items: [{
+      text: "File",
+      items: [
+        { text: "New Album…", enabled: !busy && !restoring, action: () => actions.current.newAlbum() },
+        { text: "Open Album…", enabled: !busy && !restoring, action: () => actions.current.openAlbum() },
+        { text: "Open Recent", enabled: !busy && !restoring && recent.length > 0, items: recent.map((path) => ({
+          text: path.replaceAll("&", "&&"), action: () => actions.current.openRecent(path),
+        })) },
+        { text: "Close Album", enabled: !busy && (document !== null || draft !== null), action: () => actions.current.closeAlbum() },
+        { text: "Exit", action: () => actions.current.exit() },
+      ],
+    }] }).then(async (menu) => {
+      if (!active) { await menu.close(); return; }
+      const previous = await menu.setAsAppMenu();
+      await previous?.close();
+    }).catch((cause: unknown) => {
+      if (active) setError(`Could not install File menu: ${String(cause)}`);
+    });
+    return () => { active = false; };
+  }, [recent, busy, restoring, document, draft]);
 
-  async function handleOpenLibrary() {
-    setOpening(true);
-    setError(null);
-    try {
-      const library = await openLibrary(tauriLibraryPorts);
-      if (library) setLibraryState({ status: "open", library });
-    } catch (cause) {
-      setError(`Could not open the Library: ${String(cause)}`);
-    } finally {
-      setOpening(false);
-    }
+  async function create(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!draft) return;
+    const form = new FormData(event.currentTarget);
+    await run(async () => {
+      const album = createAlbum({
+        name: String(form.get("title")),
+        pageCount: Number(form.get("pageCount")),
+        startingSide: form.get("startingSide") === "left" ? "left" : "right",
+        bleedMm: Number(form.get("bleedMm")),
+        safeZoneMm: Number(form.get("safeZoneMm")),
+        dpi: Number(form.get("dpi")),
+      });
+      await ports.write(draft, serializeAlbum(album), true);
+      const root = await ports.parent(draft);
+      setDocument({ id: ++documentId.current, path: draft, root, album });
+      setTitle(album.title);
+      setDraft(null);
+      await ports.remember(draft);
+      await refreshRecent();
+    }, "Could not create Album");
   }
 
   return (
     <main className="app-shell">
-      <header className="topbar">
-        <div className="wordmark" aria-label="phalbummakr">
-          <span className="wordmark-mark" aria-hidden="true" />
-          <span>phalbummakr</span>
-          {libraryState.status === "open" && (
-            <span className="library-name" title={libraryState.library.root}>
-              {libraryName(libraryState.library)}
-            </span>
-          )}
-        </div>
-        <div className="topbar-actions">
-          {libraryState.status === "open" && (
-            <button type="button" className="button-quiet" onClick={handleOpenLibrary} disabled={opening || albumBusy}>
-              Open another Library…
-            </button>
-          )}
-          <div className={`bridge-status bridge-status-${bridgeState}`} role="status">
-            <span className="status-dot" aria-hidden="true" />
-            {bridgeState === "connecting" && "Connecting to desktop"}
-            {bridgeState === "connected" && "Desktop ready"}
-            {bridgeState === "unavailable" && "Browser preview"}
+      {error && <p className="error-banner" role="alert">{error}</p>}
+      {draft ? (
+        <form className="album-form new-album-form" role="dialog" aria-modal="true" onSubmit={(event) => void create(event)} aria-label="Album settings">
+          <h1>Album settings</h1>
+          <label>Title<textarea name="title" defaultValue="New Album" autoFocus disabled={busy} rows={2} /></label>
+          <label>Page Format<select name="pageFormat" disabled={busy}><option>A4 - landscape (297 x 210 mm)</option></select></label>
+          <label>Bleed (mm)<input name="bleedMm" type="number" min="0" step="any" defaultValue="3" required disabled={busy} /></label>
+          <label>Safe Zone (mm)<input name="safeZoneMm" type="number" min="0" max="104.99" step="any" defaultValue="5" required disabled={busy} /></label>
+          <label>Export resolution (DPI)<input name="dpi" type="number" min="1" step="any" defaultValue="300" required disabled={busy} /></label>
+          <label>Page 1 side<select name="startingSide" defaultValue="right" disabled={busy}><option value="right">Right</option><option value="left">Left</option></select></label>
+          <label>Page count<input name="pageCount" type="number" min="1" max="10000" step="1" defaultValue="24" required disabled={busy} /></label>
+          <div className="album-toolbar">
+            <button type="submit" className="button-primary" disabled={busy}>Create Album</button>
+            <button type="button" className="button-quiet" disabled={busy} onClick={() => setDraft(null)}>Cancel</button>
           </div>
-        </div>
-      </header>
-      {error && (
-        <p className="error-banner" role="alert">
-          {error}
-        </p>
-      )}
-      {libraryState.status === "open" && (
-        <LibraryWorkspace key={libraryState.library.root} root={libraryState.library.root} onBusyChange={setAlbumBusy} />
-      )}
-      {libraryState.status === "closed" && (
-        <section className="welcome" aria-label="Open a Library">
-          <h1>Open a Library</h1>
-          <p>Pick the folder that holds your Photos. If it isn't a Library yet, you can make it one.</p>
-          <button type="button" className="button-primary" onClick={handleOpenLibrary} disabled={opening}>
-            Open Library…
-          </button>
+        </form>
+      ) : document ? (
+        <DocumentWorkspace key={document.id} document={document} onBusyChange={reportBusy} onTitleChange={reportTitle} />
+      ) : !restoring && (
+        <section className="welcome" aria-label="Open an Album">
+          <h1>Open an Album</h1>
+          <button type="button" className="button-primary" onClick={actions.current.newAlbum} disabled={busy}>New Album…</button>
+          <button type="button" className="button-quiet" onClick={actions.current.openAlbum} disabled={busy}>Open Album…</button>
+          {recent.length > 0 && <><h2>Recent Albums</h2><ul>{recent.map((path) => (
+            <li key={path}><button type="button" className="button-quiet" disabled={busy}
+              onClick={() => actions.current.openRecent(path)}>{path}</button></li>
+          ))}</ul></>}
         </section>
       )}
     </main>

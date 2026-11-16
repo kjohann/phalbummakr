@@ -8,11 +8,11 @@
 
 ## Run
 
-Install dependencies with `npm install`, then start the desktop app with `npm run tauri dev`. On start the app reopens the last Library, or asks you to open a folder as a Library. A folder is a Library if it contains a `.phalbummakr/` folder, and the app offers to create one if it is missing. The last opened Library is remembered in `settings.json` in the per-machine app data folder (`%LOCALAPPDATA%\com.phalbummakr.app` on Windows), never inside the Library. The status in the top bar comes from the Rust `greet` command and shows whether the desktop bridge answers. To run the UI in a browser instead, use `npm run dev`. Opening a Library needs the desktop app.
+Install dependencies with `npm install`, then start the desktop app with `npm run tauri dev`. On start the app reopens the last Album, or shows a start screen to create or open one. The last and recent Albums are remembered in `settings.json` in per-machine app data (`%LOCALAPPDATA%\com.phalbummakr.app` on Windows), never inside the Library. Album dialogs require the desktop app.
 
 ## Browse Photos
 
-Opening a Library scans its folders for JPEG and PNG Photos, excluding
+Opening an Album scans its folder (the Library) for JPEG and PNG Photos, excluding
 `.phalbummakr/`, `Exports/` and symbolic links. The photo browser sits beside the
 Album workspace and starts at the Library root. Open folder tiles to browse
 subfolders, including empty folders; use the breadcrumbs to return to any ancestor
@@ -38,16 +38,19 @@ where they live on disk; browsing never moves or copies originals.
 
 ## Albums
 
-Use **New Album** to choose a name, Page Format and print settings. Initially the
+Use **File > New Album** to choose a `.phalbum` file, then a title, Page Format and print settings. Initially the
 only Page Format is **A4 landscape (297 x 210 mm)**; width and height are not
 entered manually. Defaults are 24 empty white Pages, Page 1 on the right, 3 mm
 Bleed, 5 mm Safe Zone and 300 DPI. Page counts from 1 to 10,000 are supported.
-Names must be valid Windows filenames (up to 100 characters).
+The title is free text and is independent of the filename.
 
-Albums live in `Albums/<name>.album.json` under the Library, with a versioned JSON
-model owned by the TypeScript domain core. Use the Album list to open an existing
-Album and **Refresh Albums** to pick up disk changes. Unsupported schema versions or content are rejected rather than
-silently discarded. Creating an Album never overwrites an existing file.
+Each Album is a `.phalbum` file containing versioned JSON. Its folder is the
+Library; Photo paths are relative to that folder. Use **File > Open Album** or
+**Open Recent** to open one. Unsupported schema versions or content are rejected
+rather than silently discarded. Creating an Album never overwrites an existing file.
+Existing `Albums/*.album.json` files are not migrated automatically: move each
+file to the Library root, rename it to `.phalbum`, rename its JSON `name` field
+to `title`, and change `schemaVersion` from `1` to `2`.
 
 The editor shows facing Pages, with a horizontally scrollable Spread strip below
 it. Select a Page from the strip, the Page selector, or the editor itself. Page 1
@@ -63,18 +66,18 @@ Spreads update from the new order, while Page identities remain stable. The
 selected thumbnail scrolls into view. The editor keeps the trim edge at A4
 proportions, with Bleed outside it and a dashed Safe Zone inside it.
 
-**Album settings** contains **Page 1 side** and the print settings. Starting-side
-changes apply immediately; use **Apply print settings** for Bleed, Safe Zone and
-DPI changes. The Page Format remains A4 landscape. All applied edits autosave
-after 500 ms without another change. Album and
-Library switching are blocked until saving finishes; save failures keep the
+**Album settings** contains the title, **Page 1 side** and the print settings. Starting-side
+changes apply immediately; use **Apply print settings** for the title, Bleed,
+Safe Zone and DPI changes. The Page Format remains A4 landscape. All applied edits
+autosave after 500 ms without another change. Album switching is blocked until
+saving finishes; save failures keep the
 changes in memory and offer **Retry save**. Closing the desktop window is also
 blocked during an Album operation or while changes remain unsaved. Each write
-uses a unique temporary file in `Albums/`, flushes it, then atomically replaces
+uses a unique temporary file beside the Album, flushes it, then atomically replaces
 the destination. This keeps the previous file intact if replacement fails.
 Page operations pause during a write or after a save failure, but Page selection
 remains available. Text editing can continue during a write; subsequent changes
-are saved in the next write. Album and Library switching also wait for an
+are saved in the next write. Album switching also waits for an
 in-progress Crop gesture to finish and save.
 
 ## Photo Slots, Crop and Usage

@@ -26,9 +26,6 @@ pub struct ScanResult {
 
 pub fn scan_library(root: &Path) -> Result<ScanResult, String> {
     let root = root.canonicalize().map_err(|error| error.to_string())?;
-    if !crate::library::is_library(&root) {
-        return Err("The folder is no longer a Library.".into());
-    }
     let mut result = ScanResult {
         photos: Vec::new(),
         folders: Vec::new(),
@@ -67,7 +64,7 @@ fn scan_folder(root: &Path, folder: &Path, result: &mut ScanResult) -> Result<()
             continue;
         }
         if kind.is_dir() {
-            if is_hidden_folder(&entry.file_name(), folder == root) {
+            if is_hidden_folder(&entry.file_name()) {
                 continue;
             }
             match relative_path(root, &path) {
@@ -183,13 +180,10 @@ fn resolve_photo(
 ) -> Result<(std::path::PathBuf, std::path::PathBuf), String> {
     let root = root.canonicalize().map_err(|error| error.to_string())?;
     let relative_path = Path::new(relative);
-    let hidden = relative_path
-        .components()
-        .enumerate()
-        .any(|(index, part)| match part {
-            Component::Normal(name) => is_hidden_folder(name, index == 0),
-            _ => true,
-        });
+    let hidden = relative_path.components().any(|part| match part {
+        Component::Normal(name) => is_hidden_folder(name),
+        _ => true,
+    });
     if hidden || !is_photo(relative_path) {
         return Err("Invalid Photo path.".into());
     }
@@ -197,17 +191,15 @@ fn resolve_photo(
         .join(relative_path)
         .canonicalize()
         .map_err(|error| error.to_string())?;
-    if !path.starts_with(&root) || !crate::library::is_library(&root) {
+    if !path.starts_with(&root) {
         return Err("The Photo is outside the Library.".into());
     }
     Ok((root, path))
 }
 
-/// Folders the scan hides: app data and Exports anywhere, and Albums at the Library root.
-fn is_hidden_folder(name: &std::ffi::OsStr, at_root: bool) -> bool {
-    name.eq_ignore_ascii_case(".phalbummakr")
-        || name.eq_ignore_ascii_case("Exports")
-        || (at_root && name.eq_ignore_ascii_case("Albums"))
+/// Folders the scan hides: app data and Exports anywhere.
+fn is_hidden_folder(name: &std::ffi::OsStr) -> bool {
+    name.eq_ignore_ascii_case(".phalbummakr") || name.eq_ignore_ascii_case("Exports")
 }
 
 /// Returns a cached rendition of a Photo, generating and caching it when missing or corrupt.
@@ -404,7 +396,6 @@ mod tests {
     #[test]
     fn reads_exif_capture_date_and_orientation_and_orders_oldest_first() {
         let dir = tempfile::tempdir().unwrap();
-        crate::library::create_library(dir.path()).unwrap();
         write_photo(&dir.path().join("no-exif.png"));
         write_exif_photo(&dir.path().join("rotated.jpg"), 6);
         let result = scan_library(dir.path()).unwrap();
@@ -425,7 +416,6 @@ mod tests {
     fn caches_oriented_thumbnails_across_calls_and_invalidates_changed_files() {
         let dir = tempfile::tempdir().unwrap();
         let cache = tempfile::tempdir().unwrap();
-        crate::library::create_library(dir.path()).unwrap();
         write_exif_photo(&dir.path().join("rotated.jpg"), 6);
         let photo = scan_library(dir.path()).unwrap().photos.remove(0);
         let first = thumbnail(dir.path(), cache.path(), &photo.path, &photo.revision).unwrap();
@@ -459,7 +449,6 @@ mod tests {
     fn thumbnails_apply_all_eight_exif_orientations_including_mirrors() {
         let dir = tempfile::tempdir().unwrap();
         let cache = tempfile::tempdir().unwrap();
-        crate::library::create_library(dir.path()).unwrap();
         for orientation in 1..=8 {
             write_exif_photo(&dir.path().join(format!("{orientation}.jpg")), orientation);
         }
@@ -496,7 +485,6 @@ mod tests {
     #[test]
     fn reports_unreadable_photos_without_hiding_valid_photos() {
         let dir = tempfile::tempdir().unwrap();
-        crate::library::create_library(dir.path()).unwrap();
         write_photo(&dir.path().join("valid.png"));
         fs::write(dir.path().join("broken.jpg"), "not a JPEG").unwrap();
         let result = scan_library(dir.path()).unwrap();
@@ -512,7 +500,6 @@ mod tests {
         let second = tempfile::tempdir().unwrap();
         let cache = tempfile::tempdir().unwrap();
         for dir in [&first, &second] {
-            crate::library::create_library(dir.path()).unwrap();
             write_photo(&dir.path().join("same.png"));
         }
         let original = scan_library(first.path()).unwrap().photos.remove(0);
@@ -548,10 +535,9 @@ mod tests {
     }
 
     #[test]
-    fn hides_the_library_root_albums_folder_but_not_nested_albums_folders() {
+    fn scans_albums_folders_without_a_library_marker() {
         let dir = tempfile::tempdir().unwrap();
         let cache = tempfile::tempdir().unwrap();
-        crate::library::create_library(dir.path()).unwrap();
         for folder in ["Albums/inside", "holiday/Albums"] {
             fs::create_dir_all(dir.path().join(folder)).unwrap();
         }
@@ -562,20 +548,16 @@ mod tests {
         let result = serde_json::to_value(scan_library(dir.path()).unwrap()).unwrap();
         assert_eq!(
             result["folders"],
-            serde_json::json!(["holiday", "holiday/Albums"])
+            serde_json::json!(["Albums", "Albums/inside", "holiday", "holiday/Albums"])
         );
-        assert_eq!(result["photos"][0]["path"], "holiday/Albums/kept.png");
-        assert_eq!(result["photos"].as_array().unwrap().len(), 1);
-        assert!(thumbnail(dir.path(), cache.path(), "Albums/hidden.png", "any").is_err());
-        assert!(thumbnail(dir.path(), cache.path(), "albums/hidden.png", "any").is_err());
-        assert!(preview(dir.path(), cache.path(), "Albums/hidden.png").is_err());
+        assert_eq!(result["photos"].as_array().unwrap().len(), 3);
+        assert!(preview(dir.path(), cache.path(), "Albums/hidden.png").is_ok());
     }
 
     #[test]
     fn previews_are_upright_at_most_1024_pixels_cached_and_rebuilt_when_the_photo_changes() {
         let dir = tempfile::tempdir().unwrap();
         let cache = tempfile::tempdir().unwrap();
-        crate::library::create_library(dir.path()).unwrap();
         image::RgbImage::new(3000, 1500)
             .save(dir.path().join("wide.jpg"))
             .unwrap();
@@ -633,7 +615,6 @@ mod tests {
     #[test]
     fn scans_a_library_with_2500_photos() {
         let dir = tempfile::tempdir().unwrap();
-        crate::library::create_library(dir.path()).unwrap();
         write_photo(&dir.path().join("sample.png"));
         let bytes = fs::read(dir.path().join("sample.png")).unwrap();
         fs::remove_file(dir.path().join("sample.png")).unwrap();
@@ -652,7 +633,6 @@ mod tests {
     #[test]
     fn preserves_nested_and_empty_folders_and_rescans_folder_changes() {
         let dir = tempfile::tempdir().unwrap();
-        crate::library::create_library(dir.path()).unwrap();
         for folder in [
             "holiday/beach",
             "empty",
@@ -687,7 +667,6 @@ mod tests {
     #[test]
     fn scans_nested_photos_skips_app_folders_and_rescans_disk() {
         let dir = tempfile::tempdir().unwrap();
-        crate::library::create_library(dir.path()).unwrap();
         for folder in ["holiday", "Exports", ".phalbummakr", "holiday/Exports"] {
             std::fs::create_dir_all(dir.path().join(folder)).unwrap();
         }
@@ -729,7 +708,6 @@ mod tests {
     fn previews_composite_transparent_pixels_onto_white() {
         let dir = tempfile::tempdir().unwrap();
         let cache = tempfile::tempdir().unwrap();
-        crate::library::create_library(dir.path()).unwrap();
         let image = image::RgbaImage::from_fn(40, 20, |x, _| {
             if x < 20 {
                 image::Rgba([0, 0, 0, 0])

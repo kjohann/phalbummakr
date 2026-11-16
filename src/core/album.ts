@@ -15,8 +15,8 @@ export interface Page {
 }
 
 export interface Album {
-  schemaVersion: 1;
-  name: string;
+  schemaVersion: 2;
+  title: string;
   pageFormat: PageFormat;
   startingSide: "left" | "right";
   pages: Page[];
@@ -102,8 +102,8 @@ export function createAlbum(options: AlbumOptions): Album {
   const pageCount = options.pageCount ?? 24;
   validatePageCount(pageCount);
   const album: Album = {
-    schemaVersion: 1,
-    name: options.name.trim(),
+    schemaVersion: 2,
+    title: options.name,
     pageFormat: {
       size: "A4",
       orientation: "landscape",
@@ -151,14 +151,11 @@ function validatePageCount(count: number): void {
 }
 
 function validateAlbum(value: unknown): asserts value is Album {
-  if (!record(value, ["schemaVersion", "name", "pageFormat", "startingSide", "pages"]) || value.schemaVersion !== 1) {
+  if (!record(value, ["schemaVersion", "title", "pageFormat", "startingSide", "pages"]) || value.schemaVersion !== 2) {
     throw new Error("Unsupported or invalid Album schema.");
   }
-  if (typeof value.name !== "string" || value.name !== value.name.trim() || !value.name
-    || value.name.length > 100 || /[<>:"/\\|?*]/.test(value.name)
-    || [...value.name].some((character) => character.charCodeAt(0) < 32)
-    || /[. ]$/.test(value.name) || /^(con|prn|aux|nul|com[1-9\u00b9\u00b2\u00b3]|lpt[1-9\u00b9\u00b2\u00b3])(\.|$)/i.test(value.name)) {
-    throw new Error("Album name must be 1-100 characters and a valid filename (not a reserved name).");
+  if (typeof value.title !== "string") {
+    throw new Error("Album title must be text.");
   }
   const format = value.pageFormat;
   if (!record(format, ["size", "orientation", "bleedMm", "safeZoneMm", "dpi"])

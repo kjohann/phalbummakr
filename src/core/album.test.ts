@@ -2,6 +2,14 @@ import { expect, it } from "vitest";
 import { addPage, albumSpreads, createAlbum, deletePage, deserializeAlbum, duplicatePage, movePage, pageDimensions, serializeAlbum } from "./album";
 import { addPhotoSlot, placePhoto } from "./slots";
 
+it("round trips a free-text Album title independently of its filename", () => {
+  const album = createAlbum({ name: "Family: summer / 2026" });
+  const saved = JSON.parse(serializeAlbum(album));
+  expect(saved.title).toBe("Family: summer / 2026");
+  expect(saved).not.toHaveProperty("name");
+  expect(deserializeAlbum(JSON.stringify(saved)).title).toBe("Family: summer / 2026");
+});
+
 it("moves a Page to its final position in either direction and re-pairs without changing identities", () => {
   const album = createAlbum({ name: "Test", pageCount: 4 });
   const moved = movePage(album, "page-1", 3);
@@ -72,8 +80,8 @@ it("keeps Page 1 alone on its chosen side and pairs the remaining Pages in order
 
 it("creates 24 empty white A4 landscape Pages, starting on the right, and round trips JSON", () => {
   const album = createAlbum({ name: "Christmas" });
-  expect(album.schemaVersion).toBe(1);
-  expect(album.name).toBe("Christmas");
+  expect(album.schemaVersion).toBe(2);
+  expect(album.title).toBe("Christmas");
   expect(album.startingSide).toBe("right");
   expect(album.pageFormat).toEqual({
     size: "A4", orientation: "landscape", bleedMm: 3, safeZoneMm: 5, dpi: 300,
@@ -85,7 +93,7 @@ it("creates 24 empty white A4 landscape Pages, starting on the right, and round 
   expect(deserializeAlbum(serializeAlbum(album))).toEqual(album);
 });
 
-it("loads a schema-v1 Album saved before Placements had the Fit field", () => {
+it("loads an Album saved before Placements had the Fit field", () => {
   const album = placePhoto(
     addPhotoSlot(createAlbum({ name: "Old Album", pageCount: 1 }), "page-1"),
     "page-1",
@@ -99,23 +107,20 @@ it("loads a schema-v1 Album saved before Placements had the Fit field", () => {
   delete oldSave.pages[0].slots[0].placement!.fit;
 
   const loaded = deserializeAlbum(JSON.stringify(oldSave));
-  expect(loaded.schemaVersion).toBe(1);
+  expect(loaded.schemaVersion).toBe(2);
   expect(loaded.pages[0].slots[0].placement!.fit).toBe(false);
   expect(JSON.parse(serializeAlbum(loaded)).pages[0].slots[0].placement.fit).toBe(false);
 });
 
 it("accepts a custom Page count, starting side and print settings", () => {
   const album = createAlbum({ name: " Summer ", pageCount: 3, startingSide: "left", bleedMm: 0, safeZoneMm: 8, dpi: 600 });
-  expect(album.name).toBe("Summer");
+  expect(album.title).toBe(" Summer ");
   expect(album.pages).toHaveLength(3);
   expect(album.startingSide).toBe("left");
   expect(album.pageFormat).toMatchObject({ bleedMm: 0, safeZoneMm: 8, dpi: 600 });
 });
 
-it("rejects unsafe names, invalid print settings and malformed or unsupported Albums instead of losing data", () => {
-  for (const name of ["", " ", "../outside", "a\\b", "CON", "nul.txt", "a.", "a:b"]) {
-    expect(() => createAlbum({ name })).toThrow(/name/i);
-  }
+it("rejects invalid print settings and malformed or unsupported Albums instead of losing data", () => {
   for (const pageCount of [0, -1, 1.5, Infinity, 10001]) {
     expect(() => createAlbum({ name: "Test", pageCount })).toThrow(/page count/i);
   }
@@ -124,7 +129,7 @@ it("rejects unsafe names, invalid print settings and malformed or unsupported Al
   }
   const valid = createAlbum({ name: "Test" });
   const invalid = [
-    { ...valid, schemaVersion: 2 },
+    { ...valid, schemaVersion: 1 },
     { ...valid, pageFormat: { ...valid.pageFormat, size: "A3" } },
     { ...valid, pageFormat: { ...valid.pageFormat, orientation: "portrait" } },
     { ...valid, startingSide: "middle" },

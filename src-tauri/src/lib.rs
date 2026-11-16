@@ -1,6 +1,5 @@
 mod albums;
 mod fonts;
-mod library;
 mod photos;
 mod settings;
 
@@ -21,25 +20,52 @@ fn settings_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
-fn is_library(folder: String) -> bool {
-    library::is_library(Path::new(&folder))
+fn album_settings(app: tauri::AppHandle) -> Result<settings::AlbumSettings, String> {
+    settings::read_album_settings(&settings_file(&app)?).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn create_library(folder: String) -> Result<(), String> {
-    library::create_library(Path::new(&folder)).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn recall_library(app: tauri::AppHandle) -> Result<Option<String>, String> {
-    Ok(settings::read_last_library(&settings_file(&app)?)
-        .map(|root| root.to_string_lossy().into_owned()))
-}
-
-#[tauri::command]
-fn remember_library(app: tauri::AppHandle, root: String) -> Result<(), String> {
-    settings::write_last_library(&settings_file(&app)?, Path::new(&root))
+fn remember_album(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    settings::remember_album(&settings_file(&app)?, Path::new(&path))
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn forget_album(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    settings::forget_album(&settings_file(&app)?, Path::new(&path))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn close_album(app: tauri::AppHandle) -> Result<(), String> {
+    settings::clear_last_album(&settings_file(&app)?).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn album_exists(path: String) -> Result<bool, String> {
+    match std::fs::metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+#[tauri::command]
+async fn read_album_file(path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || albums::read_file(Path::new(&path)))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn write_album_file(path: String, json: String, create: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        albums::write_file(Path::new(&path), &json, create)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -100,17 +126,17 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             greet,
-            is_library,
-            create_library,
-            recall_library,
-            remember_library,
+            album_settings,
+            remember_album,
+            forget_album,
+            close_album,
+            album_exists,
+            read_album_file,
+            write_album_file,
             scan_photos,
             photo_thumbnail,
             photo_preview,
             list_system_fonts,
-            list_albums,
-            read_album,
-            write_album
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -121,30 +147,4 @@ async fn list_system_fonts() -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(fonts::system_fonts)
         .await
         .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-async fn list_albums(root: String) -> Result<Vec<String>, String> {
-    tauri::async_runtime::spawn_blocking(move || albums::list(Path::new(&root)))
-        .await
-        .map_err(|error| error.to_string())?
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn read_album(root: String, name: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || albums::read(Path::new(&root), &name))
-        .await
-        .map_err(|error| error.to_string())?
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn write_album(root: String, name: String, json: String, create: bool) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        albums::write(Path::new(&root), &name, &json, create)
-    })
-    .await
-    .map_err(|error| error.to_string())?
-    .map_err(|error| error.to_string())
 }

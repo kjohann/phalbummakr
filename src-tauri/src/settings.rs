@@ -2,34 +2,55 @@ use serde::{Deserialize, Serialize};
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// Per-machine app settings. Never stored inside a Library.
 #[derive(Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Settings {
-    last_library: Option<PathBuf>,
+#[serde(default, rename_all = "camelCase")]
+pub struct AlbumSettings {
+    pub last_album: Option<PathBuf>,
+    pub recent_albums: Vec<PathBuf>,
 }
 
-fn read_settings(settings_file: &Path) -> Settings {
-    std::fs::read_to_string(settings_file)
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default()
-}
-
-pub fn read_last_library(settings_file: &Path) -> Option<PathBuf> {
-    read_settings(settings_file).last_library
-}
-
-pub fn write_last_library(settings_file: &Path, root: &Path) -> io::Result<()> {
-    let mut settings = read_settings(settings_file);
-    settings.last_library = Some(root.to_path_buf());
-    if let Some(parent) = settings_file.parent() {
-        std::fs::create_dir_all(parent)?;
+pub fn read_album_settings(path: &Path) -> io::Result<AlbumSettings> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => serde_json::from_str(&text).map_err(io::Error::other),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(AlbumSettings::default()),
+        Err(error) => Err(error),
     }
-    let json = serde_json::to_string_pretty(&settings)?;
-    let temp_file = settings_file.with_extension("json.tmp");
-    std::fs::write(&temp_file, json)?;
-    std::fs::rename(&temp_file, settings_file)
+}
+
+fn write_album_settings(path: &Path, settings: &AlbumSettings) -> io::Result<()> {
+    use std::io::Write;
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::other("Settings file has no parent"))?;
+    std::fs::create_dir_all(parent)?;
+    let mut temp = tempfile::NamedTempFile::new_in(parent)?;
+    serde_json::to_writer_pretty(&mut temp, settings)?;
+    temp.flush()?;
+    temp.persist(path).map_err(|error| error.error)?;
+    Ok(())
+}
+
+pub fn remember_album(path: &Path, album: &Path) -> io::Result<()> {
+    let mut settings = read_album_settings(path)?;
+    settings.last_album = Some(album.to_path_buf());
+    settings.recent_albums.retain(|entry| entry != album);
+    settings.recent_albums.insert(0, album.to_path_buf());
+    write_album_settings(path, &settings)
+}
+
+pub fn forget_album(path: &Path, album: &Path) -> io::Result<()> {
+    let mut settings = read_album_settings(path)?;
+    if settings.last_album.as_deref() == Some(album) {
+        settings.last_album = None;
+    }
+    settings.recent_albums.retain(|entry| entry != album);
+    write_album_settings(path, &settings)
+}
+
+pub fn clear_last_album(path: &Path) -> io::Result<()> {
+    let mut settings = read_album_settings(path)?;
+    settings.last_album = None;
+    write_album_settings(path, &settings)
 }
 
 #[cfg(test)]
@@ -37,28 +58,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn nothing_is_remembered_before_a_library_is_opened() {
+    fn remembers_recent_albums_in_order_and_forgets_missing_choices() {
         let dir = tempfile::tempdir().unwrap();
-        assert_eq!(read_last_library(&dir.path().join("settings.json")), None);
-    }
-
-    #[test]
-    fn remembers_the_last_library_across_reads() {
-        let dir = tempfile::tempdir().unwrap();
-        let settings = dir.path().join("app-data").join("settings.json");
-        write_last_library(&settings, Path::new(r"D:\Photos\Family")).unwrap();
-        write_last_library(&settings, Path::new(r"D:\Photos\Holidays")).unwrap();
+        let path = dir.path().join("settings.json");
+        remember_album(&path, Path::new("first.phalbum")).unwrap();
+        remember_album(&path, Path::new("second.phalbum")).unwrap();
+        remember_album(&path, Path::new("first.phalbum")).unwrap();
+        let saved = read_album_settings(&path).unwrap();
+        assert_eq!(saved.last_album, Some(PathBuf::from("first.phalbum")));
         assert_eq!(
-            read_last_library(&settings),
-            Some(PathBuf::from(r"D:\Photos\Holidays"))
+            saved.recent_albums,
+            vec![
+                PathBuf::from("first.phalbum"),
+                PathBuf::from("second.phalbum")
+            ]
         );
-    }
-
-    #[test]
-    fn a_corrupt_settings_file_remembers_nothing() {
-        let dir = tempfile::tempdir().unwrap();
-        let settings = dir.path().join("settings.json");
-        std::fs::write(&settings, "{ not json").unwrap();
-        assert_eq!(read_last_library(&settings), None);
+        forget_album(&path, Path::new("first.phalbum")).unwrap();
+        let saved = read_album_settings(&path).unwrap();
+        assert_eq!(saved.last_album, None);
+        assert_eq!(saved.recent_albums, vec![PathBuf::from("second.phalbum")]);
     }
 }

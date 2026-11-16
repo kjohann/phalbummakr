@@ -7,7 +7,6 @@ import AlbumWorkspace from "./AlbumWorkspace";
 import PhotoBrowser from "./PhotoBrowser";
 import TextSlotControls from "./TextSlotControls";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
-
 vi.mock("react-konva", () => ({
   Stage: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   Layer: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -82,6 +81,20 @@ function setExactFontSize(points: string) {
   fireEvent.change(input, { target: { value: points } });
   fireEvent.keyDown(input, { key: "Enter" });
 }
+
+it("opens a selected Album file and saves edits back to that file", async () => {
+  const { ports } = disk();
+  const album = createAlbum({ name: "Family: / 2026", pageCount: 1 });
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports}
+    document={{ path: "D:\\Photos\\renamed.phalbum", album }} />);
+  await screen.findByRole("heading", { name: "Family: / 2026" });
+  expect(screen.queryByRole("navigation", { name: "Albums" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Album settings" }));
+  fireEvent.change(screen.getByLabelText("Page 1 side"), { target: { value: "left" } });
+  await waitFor(() => expect(ports.write).toHaveBeenCalledWith(
+    "D:\\Photos", "D:\\Photos\\renamed.phalbum", expect.any(String), false,
+  ));
+});
 
 it("rotates a Text Slot and keeps its in-place editor oriented while its content grows", async () => {
   const { ports, files } = disk();
@@ -1409,7 +1422,7 @@ it("reports Album changes and warns without blocking duplicate drops on Slots an
   expect(onAlbumChange).toHaveBeenLastCalledWith(null);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
   await screen.findByRole("heading", { name: "Existing" });
-  await waitFor(() => expect(onAlbumChange.mock.lastCall?.[0]?.name).toBe("Existing"));
+  await waitFor(() => expect(onAlbumChange.mock.lastCall?.[0]?.title).toBe("Existing"));
   const photo = photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 });
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }), photo);

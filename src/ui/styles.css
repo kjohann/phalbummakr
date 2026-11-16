@@ -374,6 +374,17 @@ body {
   padding: 4px 4px 20px;
 }
 
+.new-album-form {
+  max-height: 100%;
+  margin: auto;
+  padding: 24px;
+}
+
+.new-album-form h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
 .album-form h2 {
   margin: 0;
 }
@@ -385,6 +396,7 @@ body {
 }
 
 .album-form input,
+.album-form textarea,
 .album-form select,
 .album-editor select {
   min-width: 0;

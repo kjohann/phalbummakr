@@ -29,7 +29,7 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 013 | [Slot snapping](013-slot-snapping.md)                         | 006, 009   | done   |
 | 014 | [Slot rotation](014-slot-rotation.md)                         | 006, 009   | done   |
 | 015 | [Drag-to-swap Placements](015-drag-to-swap.md)                | 006, 007   | done   |
-| 016 | [Open an Album file](016-album-file.md)                       | 004        | todo   |
+| 016 | [Open an Album file](016-album-file.md)                       | 004        | doing  |
 | 017 | [Book structure with Inside Covers](017-book-structure.md)    | 016        | todo   |
 | 018 | [Page strip](018-page-strip.md)                               | 017        | todo   |
 | 019 | [Slot toolbar and menus](019-slot-toolbar.md)                 | 018        | todo   |

@@ -13,22 +13,27 @@ interface Props {
   fontPorts?: FontPorts;
   onBusyChange?: (busy: boolean) => void;
   onAlbumChange?: (album: Album | null) => void;
+  document?: { path: string; album: Album };
 }
 
-export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange }: Props) {
+export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document }: Props) {
   const [names, setNames] = useState<string[]>([]);
-  const [current, setCurrent] = useState<{ filename: string; album: Album } | null>(null);
+  const [current, setCurrent] = useState<{ filename: string; album: Album } | null>(
+    () => document ? { filename: document.path, album: fitTextSlots(document.album) } : null,
+  );
   const [creating, setCreating] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
-  const [saveStatus, setSaveStatus] = useState<"saved" | "pending" | "saving" | "error">("saved");
+  const [saveStatus, setSaveStatus] = useState<"saved" | "pending" | "saving" | "error">(
+    () => document && current && serializeAlbum(current.album) !== serializeAlbum(document.album) ? "pending" : "saved",
+  );
   const [cropPending, setCropPending] = useState(false);
   const [retry, setRetry] = useState(0);
   const [refresh, setRefresh] = useState(0);
-  const [listing, setListing] = useState(true);
-  const savedJson = useRef<string | null>(null);
+  const [listing, setListing] = useState(!document);
+  const savedJson = useRef<string | null>(document ? serializeAlbum(document.album) : null);
   // Gesture callbacks can outlive a render, so apply them to the latest Album.
   const currentRef = useRef(current);
   const saveInFlight = useRef(false);
@@ -40,6 +45,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
   }
 
   useEffect(() => {
+    if (document) return;
     let active = true;
     setListing(true);
     ports.list(root).then((albums) => {
@@ -50,7 +56,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
       if (active) setListing(false);
     });
     return () => { active = false; };
-  }, [root, ports, refresh]);
+  }, [root, ports, refresh, document]);
 
   useEffect(() => {
     onBusyChange?.(locked);
@@ -127,11 +133,11 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
         safeZoneMm: Number(form.get("safeZoneMm")),
         dpi: Number(form.get("dpi")),
       });
-      await ports.write(root, album.name, serializeAlbum(album), true);
+      await ports.write(root, album.title, serializeAlbum(album), true);
       savedJson.current = serializeAlbum(album);
       setSaveStatus("saved");
-      setNames((previous) => [...new Set([...previous, album.name])].sort());
-      setCurrentAlbum({ filename: album.name, album });
+      setNames((previous) => [...new Set([...previous, album.title])].sort());
+      setCurrentAlbum({ filename: album.title, album });
       setDuplicateWarning(null);
       setCreating(false);
       setSettingsOpen(false);
@@ -158,7 +164,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
 
   return (
     <section className="workspace album-workspace" aria-label="Album workspace">
-      <div className="album-toolbar">
+      {!document && <><div className="album-toolbar">
         <h1>Albums</h1>
         <button type="button" className="button-quiet" disabled={locked || creating} onClick={() => {
           setError(null);
@@ -174,7 +180,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
             aria-label={`Open Album ${name}`} aria-current={current?.filename === name ? "page" : undefined}
             onClick={() => void open(name)}>{name}</button>
         ))}
-      </nav>
+      </nav></>}
       {error && <p className="error-banner" role="alert">{error}</p>}
       {duplicateWarning && (
         <div className="usage-warning" role="status">
@@ -206,7 +212,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
         </form>
       ) : current ? (
         <>
-          <div className="album-toolbar"><h2>{current.album.name}</h2><span>{current.album.pages.length} Pages</span></div>
+          <div className="album-toolbar"><h2>{current.album.title}</h2><span>{current.album.pages.length} Pages</span></div>
           <p className="album-details">A4 landscape - 297 x 210 mm - {current.album.pageFormat.dpi} DPI</p>
           <div className="album-toolbar">
             <div className="album-settings-wrapper">
@@ -217,7 +223,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
                   onSubmit={(event) => {
                     event.preventDefault();
                     const form = new FormData(event.currentTarget);
-                    changeAlbum((album) => ({ ...album, pageFormat: {
+                    changeAlbum((album) => ({ ...album, title: document ? String(form.get("title")) : album.title, pageFormat: {
                       ...album.pageFormat,
                       bleedMm: Number(form.get("bleedMm")),
                       safeZoneMm: Number(form.get("safeZoneMm")),
@@ -226,6 +232,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
                   }}>
                   <h3>Album settings</h3>
                   <fieldset disabled={busy || saveStatus === "saving" || saveStatus === "error"}>
+                    {document && <label>Title<textarea name="title" defaultValue={current.album.title} rows={2} /></label>}
                     <label>Page 1 side
                       <select value={current.album.startingSide} onChange={(event) => {
                         const startingSide = event.target.value === "left" ? "left" : "right";
