@@ -7,8 +7,8 @@ A local-first tool for designing printed photo albums from photos on disk, witho
 ### Library
 
 **Library**:
-A root folder that holds Photos, Albums and the Layout Library. It is the unit you open, move and share, and its contents on disk are the source of truth for which Photos exist.
-_Avoid_: Workspace, collection, catalog
+The folder an Album lives in. Every Photo under it can be placed in the Albums stored there, and its contents on disk are the source of truth for which Photos exist. It is never opened on its own: opening an Album brings its Library with it.
+_Avoid_: Workspace, collection, catalog, solution
 
 **Photo**:
 An image file anywhere under the Library root. It is referenced where it lives, never uploaded or imported, and every Photo can be used on any Page.
@@ -29,8 +29,8 @@ _Avoid_: Broken link, orphan
 ### Album design
 
 **Album**:
-One book being designed, such as the Christmas album for a given year. It is made up of an ordered sequence of Pages.
-_Avoid_: Book, project, photobook
+One book being designed, such as the Christmas album for a given year. It is made up of an ordered sequence of Pages, and is opened, moved and shared as a single file, like a document. Its title is free text and is independent of the file's name.
+_Avoid_: Book, project, photobook, solution
 
 **Page**:
 One printed side of a leaf in an Album, and the unit that gets designed and exported. It always has a white background.
@@ -56,8 +56,12 @@ The explicit step of changing an Album's Page Format and adapting every existing
 _Avoid_: Resize
 
 **Spread**:
-Two facing Pages viewed side by side. It is a viewing aid only and is never designed as a single unit.
+Two facing Pages viewed side by side. Pages are added and removed a Spread at a time, so an Album always has an even number of Pages, but each Page is still designed on its own. The first Spread pairs the front Inside Cover with Page 1, and the last pairs the final Page with the back Inside Cover.
 _Avoid_: Double page
+
+**Inside Cover**:
+The inside of the front or back cover, facing the first or last Page. It is shown in its Spread for context, but it is never designed or exported.
+_Avoid_: Endpaper, blank page
 
 **Layout**:
 A reusable arrangement of Slots on a single Page. Applying a Layout copies it onto the Page, and the two are unlinked from then on.
