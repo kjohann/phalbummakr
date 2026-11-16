@@ -68,14 +68,17 @@ The personal collection of Layouts reused across Albums. An Album keeps its own 
 _Avoid_: Template gallery
 
 **Slot**:
-A rectangular region in a Layout or Page that holds content. It is either a Photo Slot or a Text Slot.
+A rectangular region in a Layout or Page that holds content. It is either a Photo Slot or a Text Slot. Rotating a Slot rotates its content with it.
 _Avoid_: Frame, cell, placeholder, box
+
+**Slot rotation**:
+The orientation of a Slot and its content, changed in 90° turns.
 
 **Photo Slot**:
 A Slot that shows one Photo.
 
 **Placement**:
-A Photo put into a Photo Slot on a Page, together with how it is shown there: Crop or Fit, and rotation in 90° steps. Usage counts Placements.
+A Photo put into a Photo Slot on a Page, together with how it is shown there: Crop or Fit. Usage counts Placements.
 _Avoid_: Instance, occurrence
 
 **Effective Resolution**:

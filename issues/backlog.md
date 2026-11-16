@@ -12,9 +12,7 @@ Decided in the design session but deliberately left out of the MVP. Promote an i
 
 ## Editing
 
-- **Snapping** to Page edges, the Safe Zone and other Slots, plus an even gap between Slots.
-- **Drag-to-swap** two Placements.
-- **Rotate Placements** in 90° steps. Free rotation is something to explore later.
+- **Photo rotation within a fixed Slot** in 90° steps. Free rotation is something to explore later.
 - **Effective Resolution warning** below the Page Format's threshold (default 150 DPI).
 
 ## Album and output
