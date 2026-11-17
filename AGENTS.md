@@ -1,5 +1,6 @@
 # Changing requirements
 
+For a requested code fix or tweak, track the work before implementing it.
 Feedback on the issue currently being worked on updates that issue file in place:
 add the new acceptance criteria to it, then implement them.
 
@@ -14,6 +15,10 @@ new section to it instead of creating another. An addendum:
 - is finished like an issue, following the steps below.
 
 Never edit the acceptance criteria of a completed issue; add them to its addendum.
+
+For code fixes or tweaks not directly related to an issue that can receive an
+addendum, create and index a new numbered issue using the
+[issue template](issues/README.md#new-issues) before implementing the change.
 
 # Finishing an issue
 

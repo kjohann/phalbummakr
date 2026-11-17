@@ -8,6 +8,28 @@ Feedback on a completed issue goes in an addendum (`NNN-addendum.md`) with extra
 acceptance criteria; see [AGENTS.md](../AGENTS.md#changing-requirements). Add each
 addendum to the Addenda table.
 
+## New issues
+
+Use the next available number and the existing `NNN-short-description.md` naming
+pattern. Add the issue to the table below with its dependencies and status.
+Choose a type of `feature`, `tweak`, `bug`, or `regression`; for bugs and
+regressions, append the type in parentheses to the issue link text in the index
+so they are easy to find. Existing issues do not need to be reclassified.
+
+```markdown
+# NNN – Issue title
+
+Status: todo · Type: feature | tweak | bug | regression · Depends on: issue numbers or none
+
+## What
+
+Describe the change.
+
+## Acceptance criteria
+
+- [ ] Describe a verifiable outcome.
+```
+
 ## MVP
 
 Each issue is a thin vertical slice that leaves the app runnable.
