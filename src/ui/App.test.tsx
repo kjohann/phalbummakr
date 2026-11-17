@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createAlbum, serializeAlbum } from "../core";
 import App, { type DocumentPorts } from "./App";
 
-type MenuEntry = { id?: string; text: string; enabled?: boolean; action?: () => void; items?: MenuEntry[] };
+type MenuEntry = { id?: string; text: string; enabled?: boolean; checked?: boolean; action?: () => void; items?: MenuEntry[] };
 const native = vi.hoisted(() => ({
   enabled: false, items: [] as MenuEntry[], menus: [] as MenuEntry[], installed: vi.fn(), update: vi.fn(), released: vi.fn(),
 }));
@@ -30,6 +30,7 @@ vi.mock("@tauri-apps/api/menu", () => ({
             const item = items.find((entry) => entry.id === itemId);
             return item ? {
               setEnabled: async (enabled: boolean) => { await native.update(); item.enabled = enabled; },
+              setChecked: async (checked: boolean) => { await native.update(); item.checked = checked; },
               close: async () => { native.released(itemId); },
             } : null;
           },
@@ -58,10 +59,13 @@ vi.mock("./AlbumWorkspace", () => ({
     </>;
   },
 }));
-vi.mock("./PhotoBrowser", () => ({ default: () => null }));
+vi.mock("./PhotoBrowser", () => ({
+  default: ({ compact }: { compact?: boolean }) => <p>{compact ? "Compact Photo browser" : "Photo browser"}</p>,
+}));
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   native.enabled = false;
   native.items = [];
   native.menus = [];
@@ -84,6 +88,7 @@ it("opens Preferences from File and persists the Spread deletion setting", async
     close: vi.fn(),
     setConfirmSpreadDeletion,
     setConfirmSlotDeletion,
+    setPhotoPane: vi.fn(),
     parent: async () => "",
     chooseNew: async () => null,
     chooseOpen: async () => null,
@@ -111,7 +116,7 @@ it("routes the native Edit and Album menus to the open Album", async () => {
     settings: async () => ({ lastAlbum: path, recentAlbums: [path], confirmSpreadDeletion: true, confirmSlotDeletion: true }),
     exists: async () => true, read: async () => serializeAlbum(createAlbum({ name: "Original" })),
     write: vi.fn(), remember: vi.fn(), forget: vi.fn(), close: vi.fn(),
-    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(), setPhotoPane: vi.fn(),
     parent: async () => "D:\\Photos", chooseNew: async () => null, chooseOpen: async () => null,
   };
   render(<App ports={ports} />);
@@ -136,7 +141,7 @@ it("keeps the previous preference and shows an error when saving fails", async (
   native.enabled = true;
   const ports: DocumentPorts = {
     settings: async () => ({ lastAlbum: null, recentAlbums: [], confirmSpreadDeletion: true, confirmSlotDeletion: true }),
-    setConfirmSpreadDeletion: vi.fn().mockRejectedValue(new Error("Disk full")), setConfirmSlotDeletion: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn().mockRejectedValue(new Error("Disk full")), setConfirmSlotDeletion: vi.fn(), setPhotoPane: vi.fn(),
     exists: async () => false, read: vi.fn(), write: vi.fn(), remember: vi.fn(), forget: vi.fn(),
     close: vi.fn(), parent: async () => "", chooseNew: async () => null, chooseOpen: async () => null,
   };
@@ -161,7 +166,7 @@ it("updates File menu availability without reinstalling the native menu during e
     remember: vi.fn(),
     forget: vi.fn(),
     close: vi.fn(),
-    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(), setPhotoPane: vi.fn(),
     parent: async () => "D:\\Photos",
     chooseNew: async () => null,
     chooseOpen: async () => null,
@@ -197,7 +202,7 @@ it("reports native menu update failures and releases the retrieved item and subm
     remember: vi.fn(),
     forget: vi.fn(),
     close: vi.fn(),
-    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(), setPhotoPane: vi.fn(),
     parent: async () => "D:\\Photos",
     chooseNew: async () => null,
     chooseOpen: async () => null,
@@ -224,7 +229,7 @@ it("restores the last Album using its file's folder and stored title", async () 
     remember: vi.fn(),
     forget: vi.fn(),
     close: vi.fn(),
-    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(), setPhotoPane: vi.fn(),
     parent: async () => "D:\\Photos",
     chooseNew: async () => null,
     chooseOpen: async () => null,
@@ -248,7 +253,7 @@ it("reports an odd Page count when opening an Album without replacing the curren
     remember: vi.fn(),
     forget: vi.fn(),
     close: vi.fn(),
-    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(), setPhotoPane: vi.fn(),
     parent: async () => "D:\\Photos",
     chooseNew: async () => null,
     chooseOpen: async () => broken,
@@ -273,7 +278,7 @@ it("removes a missing recent Album when selected and reports it", async () => {
     remember: vi.fn(),
     forget: vi.fn(),
     close: vi.fn(),
-    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(), setPhotoPane: vi.fn(),
     parent: vi.fn(),
     chooseNew: async () => null,
     chooseOpen: async () => null,
@@ -297,7 +302,7 @@ it("returns to the start screen when the last Album has disappeared", async () =
     remember: vi.fn(),
     forget: vi.fn(),
     close: vi.fn(),
-    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(), setPhotoPane: vi.fn(),
     parent: vi.fn(),
     chooseNew: async () => null,
     chooseOpen: async () => null,
@@ -319,7 +324,7 @@ it("creates the chosen file with a title independent of its filename", async () 
     remember: vi.fn(),
     forget: vi.fn(),
     close: vi.fn(),
-    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(), setPhotoPane: vi.fn(),
     parent: async () => "D:\\Photos",
     chooseNew: async () => path,
     chooseOpen: async () => null,
@@ -350,7 +355,7 @@ it("preserves the current editor when a new Album is cancelled", async () => {
     remember: vi.fn(),
     forget: vi.fn(),
     close: vi.fn(),
-    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(), setPhotoPane: vi.fn(),
     parent: async () => "D:\\Photos",
     chooseNew: async () => "D:\\Photos\\new.phalbum",
     chooseOpen: async () => null,
@@ -377,7 +382,7 @@ it("prevents editing the old Album while another file is opening", async () => {
     remember: vi.fn(),
     forget: vi.fn(),
     close: vi.fn(),
-    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(), setPhotoPane: vi.fn(),
     parent: async () => "D:\\Photos",
     chooseNew: async () => null,
     chooseOpen: async () => "D:\\Photos\\new.phalbum",
@@ -402,7 +407,7 @@ it("closes the Album and returns to the start screen without forgetting recents"
     remember: vi.fn(),
     forget: vi.fn(),
     close: vi.fn(),
-    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(), setPhotoPane: vi.fn(),
     parent: async () => "D:\\Photos",
     chooseNew: async () => null,
     chooseOpen: async () => null,
@@ -415,4 +420,115 @@ it("closes the Album and returns to the start screen without forgetting recents"
   expect(screen.getByRole("button", { name: path })).toBeTruthy();
   expect(ports.close).toHaveBeenCalledOnce();
   expect(ports.forget).not.toHaveBeenCalled();
+});
+
+function photoPanePorts(photoPane?: { width: number; collapsed: boolean; compact: boolean }) {
+  const path = "D:\\Photos\\album.phalbum";
+  return {
+    settings: async () => ({ lastAlbum: path, recentAlbums: [path], confirmSpreadDeletion: true, confirmSlotDeletion: true, photoPane }),
+    exists: async () => true, read: async () => serializeAlbum(createAlbum({ name: "Original" })),
+    write: vi.fn(), remember: vi.fn(), forget: vi.fn(), close: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(), setPhotoPane: vi.fn(async () => {}),
+    parent: async () => "D:\\Photos", chooseNew: async () => null, chooseOpen: async () => null,
+  } satisfies DocumentPorts;
+}
+
+it("collapses, reopens and compacts the Photo pane from the View menu, Ctrl+B and its edge buttons, and remembers it", async () => {
+  native.enabled = true;
+  const ports = photoPanePorts({ width: 300, collapsed: false, compact: false });
+  render(<App ports={ports} />);
+  await screen.findByText("Original");
+  const item = (text: string) =>
+    native.menus.find((entry) => entry.text === "View")?.items?.find((entry) => entry.text.split("\t")[0] === text);
+  await waitFor(() => expect(item("Toggle Photos")?.enabled).toBe(true));
+  const pane = screen.getByRole("region", { name: "Photo pane" });
+  expect(pane.style.width).toBe("300px");
+  expect(screen.queryByRole("button", { name: "Show Photos" })).toBeNull();
+
+  await act(async () => item("Toggle Photos")!.action!());
+  expect(pane.hidden).toBe(true);
+  expect(ports.setPhotoPane).toHaveBeenLastCalledWith({ width: 300, collapsed: true, compact: false });
+  fireEvent.click(screen.getByRole("button", { name: "Show Photos" }));
+  expect(pane.hidden).toBe(false);
+  fireEvent.keyDown(window, { key: "b", ctrlKey: true });
+  expect(pane.hidden).toBe(true);
+  fireEvent.keyDown(window, { key: "B", ctrlKey: true });
+  expect(pane.hidden).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Hide Photos" }));
+  expect(pane.hidden).toBe(true);
+  expect(screen.getByText("Photo browser")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Show Photos" }));
+
+  expect(item("Compact Photos")?.checked).toBe(false);
+  await act(async () => item("Compact Photos")!.action!());
+  expect(screen.getByText("Compact Photo browser")).toBeTruthy();
+  await waitFor(() => expect(item("Compact Photos")?.checked).toBe(true));
+  expect(ports.setPhotoPane).toHaveBeenLastCalledWith({ width: 300, collapsed: false, compact: true });
+});
+
+it("leaves Ctrl+B to text fields, Text Slots that handle it and open dialogs", async () => {
+  native.enabled = true;
+  const ports = photoPanePorts();
+  render(<><App ports={ports} /><input aria-label="Some field" /></>);
+  await screen.findByText("Original");
+  const pane = screen.getByRole("region", { name: "Photo pane" });
+  fireEvent.keyDown(screen.getByRole("textbox", { name: "Some field" }), { key: "b", ctrlKey: true });
+  const handled = new KeyboardEvent("keydown", { key: "b", ctrlKey: true, bubbles: true, cancelable: true });
+  handled.preventDefault();
+  fireEvent(screen.getByRole("button", { name: "Edit mock Album" }), handled);
+  const item = (menu: string, text: string) =>
+    native.menus.find((entry) => entry.text === menu)?.items?.find((entry) => entry.text.split("\t")[0] === text);
+  await waitFor(() => expect(item("View", "Toggle Photos")?.enabled).toBe(true));
+  await act(async () => item("File", "Preferences…")!.action!());
+  fireEvent.keyDown(screen.getByRole("button", { name: "Close" }), { key: "b", ctrlKey: true });
+  await waitFor(() => expect(item("View", "Toggle Photos")?.enabled).toBe(false));
+  expect(pane.hidden).toBe(false);
+  expect(ports.setPhotoPane).not.toHaveBeenCalled();
+});
+
+it("resizes the Photo pane by dragging or with arrow keys within its limits and saves the width when done", async () => {
+  vi.stubGlobal("innerWidth", 1600);
+  const ports = photoPanePorts();
+  render(<App ports={ports} />);
+  await screen.findByText("Original");
+  const pane = screen.getByRole("region", { name: "Photo pane" });
+  const separator = screen.getByRole("separator", { name: "Resize Photos" });
+  expect(pane.style.width).toBe("340px");
+  fireEvent.mouseDown(separator, { button: 0, clientX: 340 });
+  fireEvent.mouseMove(window, { clientX: 400 });
+  expect(pane.style.width).toBe("400px");
+  expect(separator.getAttribute("aria-valuenow")).toBe("400");
+  expect(ports.setPhotoPane).not.toHaveBeenCalled();
+  fireEvent.mouseUp(window, { clientX: 400 });
+  expect(ports.setPhotoPane).toHaveBeenLastCalledWith({ width: 400, collapsed: false, compact: false });
+  fireEvent.mouseDown(separator, { button: 0, clientX: 400 });
+  fireEvent.mouseMove(window, { clientX: 5000 });
+  fireEvent.mouseUp(window, { clientX: 5000 });
+  expect(pane.style.width).toBe("640px");
+  fireEvent.mouseDown(separator, { button: 0, clientX: 640 });
+  fireEvent.mouseMove(window, { clientX: -100 });
+  fireEvent.mouseUp(window, { clientX: -100 });
+  expect(pane.style.width).toBe("200px");
+  fireEvent.keyDown(separator, { key: "ArrowRight" });
+  expect(pane.style.width).toBe("216px");
+  expect(ports.setPhotoPane).toHaveBeenLastCalledWith({ width: 216, collapsed: false, compact: false });
+  fireEvent.keyDown(separator, { key: "ArrowLeft" });
+  fireEvent.keyDown(separator, { key: "ArrowLeft" });
+  expect(pane.style.width).toBe("200px");
+});
+
+it("limits the Photo pane to the room a narrow window leaves, so a drag acts at once", async () => {
+  vi.stubGlobal("innerWidth", 800);
+  const ports = photoPanePorts({ width: 640, collapsed: false, compact: false });
+  render(<App ports={ports} />);
+  await screen.findByText("Original");
+  const pane = screen.getByRole("region", { name: "Photo pane" });
+  const separator = screen.getByRole("separator", { name: "Resize Photos" });
+  expect(pane.style.width).toBe("480px");
+  expect(separator.getAttribute("aria-valuemax")).toBe("480");
+  fireEvent.mouseDown(separator, { button: 0, clientX: 480 });
+  fireEvent.mouseMove(window, { clientX: 440 });
+  expect(pane.style.width).toBe("440px");
+  fireEvent.mouseUp(window, { clientX: 440 });
+  expect(ports.setPhotoPane).toHaveBeenLastCalledWith({ width: 440, collapsed: false, compact: false });
 });

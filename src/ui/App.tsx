@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { createAlbum, deserializeAlbum, serializeAlbum, type Album } from "../core";
 import AlbumWorkspace, { type AlbumCommand, type AlbumCommandName } from "./AlbumWorkspace";
 import PhotoBrowser from "./PhotoBrowser";
+import PhotoPane, { clampPaneWidth, DEFAULT_PHOTO_PANE, type PhotoPaneSettings } from "./PhotoPane";
 import ModalDialog from "./ModalDialog";
 
 interface Settings {
@@ -14,12 +15,14 @@ interface Settings {
   recentAlbums: string[];
   confirmSpreadDeletion: boolean;
   confirmSlotDeletion: boolean;
+  photoPane?: PhotoPaneSettings;
 }
 
 export interface DocumentPorts {
   settings(): Promise<Settings>;
   setConfirmSpreadDeletion(value: boolean): Promise<void>;
   setConfirmSlotDeletion(value: boolean): Promise<void>;
+  setPhotoPane(pane: PhotoPaneSettings): Promise<void>;
   exists(path: string): Promise<boolean>;
   read(path: string): Promise<string>;
   write(path: string, json: string, create: boolean): Promise<void>;
@@ -36,6 +39,7 @@ const desktopPorts: DocumentPorts = {
   settings: () => invoke("album_settings"),
   setConfirmSpreadDeletion: (value) => invoke("set_confirm_spread_deletion", { value }),
   setConfirmSlotDeletion: (value) => invoke("set_confirm_slot_deletion", { value }),
+  setPhotoPane: (pane) => invoke("set_photo_pane", { pane }),
   exists: (path) => invoke("album_exists", { path }),
   read: (path) => invoke("read_album_file", { path }),
   write: (path, json, create) => invoke("write_album_file", { path, json, create }),
@@ -61,7 +65,7 @@ interface DeletionPreferences {
   setConfirmSlotDeletion: (value: boolean) => Promise<void>;
 }
 
-function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, suspended, command, onSlotSelectedChange, preferences }: {
+function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, suspended, command, onSlotSelectedChange, preferences, photoPane, onPhotoPaneChange }: {
   document: OpenDocument;
   onBusyChange: (busy: boolean) => void;
   onTitleChange: (album: Album | null) => void;
@@ -70,6 +74,8 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
   command: AlbumCommand | undefined;
   onSlotSelectedChange: (selected: boolean) => void;
   preferences: DeletionPreferences;
+  photoPane: PhotoPaneSettings;
+  onPhotoPaneChange: (change: Partial<PhotoPaneSettings>) => void;
 }) {
   const [album, setAlbum] = useState<Album | null>(document.album);
   const reportAlbum = useCallback((next: Album | null) => {
@@ -78,7 +84,9 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
   }, [onTitleChange]);
   return (
     <div className="library-workspace" style={{ display: hidden ? "none" : undefined }}>
-      <PhotoBrowser root={document.root} album={album} />
+      <PhotoPane settings={photoPane} onChange={onPhotoPaneChange}>
+        <PhotoBrowser root={document.root} album={album} compact={photoPane.compact} />
+      </PhotoPane>
       <AlbumWorkspace root={document.root} document={document} suspended={suspended} onBusyChange={onBusyChange} onAlbumChange={reportAlbum}
         command={command} onSlotSelectedChange={onSlotSelectedChange} {...preferences} />
     </div>
@@ -96,6 +104,8 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
   const [error, setError] = useState<string | null>(null);
   const [confirmSpreadDeletion, setConfirmSpreadDeletionState] = useState(true);
   const [confirmSlotDeletion, setConfirmSlotDeletionState] = useState(true);
+  const [photoPane, setPhotoPaneState] = useState(DEFAULT_PHOTO_PANE);
+  const photoPaneRef = useRef(DEFAULT_PHOTO_PANE);
   const [command, setCommand] = useState<AlbumCommand | undefined>();
   const [slotSelected, setSlotSelected] = useState(false);
   const commandSerial = useRef(0);
@@ -121,6 +131,12 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
   const setConfirmSlotDeletion = useCallback(async (value: boolean) => {
     await ports.setConfirmSlotDeletion(value);
     setConfirmSlotDeletionState(value);
+  }, [ports]);
+  const changePhotoPane = useCallback((change: Partial<PhotoPaneSettings>) => {
+    const next = { ...photoPaneRef.current, ...change };
+    photoPaneRef.current = next;
+    setPhotoPaneState(next);
+    ports.setPhotoPane(next).catch((cause: unknown) => setError(`Could not save the Photo pane layout: ${String(cause)}`));
   }, [ports]);
 
   async function refreshRecent() {
@@ -174,6 +190,9 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
         setRecent(settings.recentAlbums);
         setConfirmSpreadDeletionState(settings.confirmSpreadDeletion);
         setConfirmSlotDeletionState(settings.confirmSlotDeletion);
+        const pane = { ...DEFAULT_PHOTO_PANE, ...settings.photoPane };
+        photoPaneRef.current = { ...pane, width: clampPaneWidth(pane.width) };
+        setPhotoPaneState(photoPaneRef.current);
         const path = settings.lastAlbum;
         if (!path) return;
         if (!(await ports.exists(path))) {
@@ -206,10 +225,17 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
     return () => { active = false; };
   }, [ports]);
 
-  const actions = useRef<{ newAlbum: () => void; openAlbum: () => void; openRecent: (path: string) => void; closeAlbum: () => void; preferences: () => void; exit: () => void; albumCommand: (name: AlbumCommandName) => void }>(
-    { newAlbum: () => {}, openAlbum: () => {}, openRecent: () => {}, closeAlbum: () => {}, preferences: () => {}, exit: () => {}, albumCommand: () => {} },
+  const actions = useRef<{ newAlbum: () => void; openAlbum: () => void; openRecent: (path: string) => void; closeAlbum: () => void; preferences: () => void; exit: () => void; albumCommand: (name: AlbumCommandName) => void; togglePhotos: () => void; compactPhotos: () => void }>(
+    { newAlbum: () => {}, openAlbum: () => {}, openRecent: () => {}, closeAlbum: () => {}, preferences: () => {}, exit: () => {}, albumCommand: () => {}, togglePhotos: () => {}, compactPhotos: () => {} },
   );
+  const photoPaneAvailable = document !== null && draft === null && !preferencesOpen;
   actions.current = {
+    togglePhotos: () => {
+      if (photoPaneAvailable) changePhotoPane({ collapsed: !photoPaneRef.current.collapsed });
+    },
+    compactPhotos: () => {
+      if (photoPaneAvailable) changePhotoPane({ compact: !photoPaneRef.current.compact });
+    },
     albumCommand: (name) => {
       if (document && !draft) setCommand({ name, serial: ++commandSerial.current });
     },
@@ -233,6 +259,20 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
       if (isTauri()) void getCurrentWindow().close().catch((cause: unknown) => setError(`Could not close window: ${String(cause)}`));
     },
   };
+
+  useEffect(() => {
+    // Handled here rather than as a native accelerator so a Text Slot keeps Ctrl+B for Bold.
+    const toggle = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.shiftKey || !(event.ctrlKey || event.metaKey)) return;
+      if (event.key.toLowerCase() !== "b") return;
+      if (event.target instanceof HTMLElement && event.target.closest("input, textarea, select, [contenteditable]")) return;
+      if (window.document.querySelector("[aria-modal='true']")) return;
+      event.preventDefault();
+      actions.current.togglePhotos();
+    };
+    window.addEventListener("keydown", toggle);
+    return () => window.removeEventListener("keydown", toggle);
+  }, []);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -275,6 +315,10 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
         },
         edit: { "delete": albumEnabled && slotSelected },
         album: { "album-settings": albumEnabled, "add-spread": albumEnabled },
+        view: { "toggle-photos": photoPaneAvailable, "compact-photos": photoPaneAvailable },
+      };
+      const checkedByMenu: Record<string, Record<string, boolean>> = {
+        view: { "compact-photos": photoPane.compact },
       };
       // Replacing a Windows menu briefly resizes the WebView.
       if (menuRef.current && menuRecent.current === recent) {
@@ -289,6 +333,11 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
               try {
                 if (!("setEnabled" in item)) throw new Error(`The ${menuId} menu item ${id} cannot be enabled.`);
                 await item.setEnabled(enabled);
+                const checked = checkedByMenu[menuId]?.[id];
+                if (checked !== undefined) {
+                  if (!("setChecked" in item)) throw new Error(`The ${menuId} menu item ${id} cannot be checked.`);
+                  await item.setChecked(checked);
+                }
               } finally {
                 await item.close();
               }
@@ -299,7 +348,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
         }
         return;
       }
-      const { file, edit, album } = enabledByMenu;
+      const { file, edit, album, view } = enabledByMenu;
       const menu = await Menu.new({ items: [{
         id: "file",
         text: "File",
@@ -325,6 +374,16 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
           { id: "album-settings", text: "Album Settings…", enabled: album["album-settings"], action: () => actions.current.albumCommand("album-settings") },
           { id: "add-spread", text: "Add Spread", enabled: album["add-spread"], action: () => actions.current.albumCommand("add-spread") },
         ],
+      }, {
+        id: "view",
+        text: "View",
+        items: [
+          // A tab shows the shortcut on Windows without a native accelerator, which would take Ctrl+B from Text Slots.
+          { id: "toggle-photos", text: navigator.userAgent.includes("Windows") ? "Toggle Photos\tCtrl+B" : "Toggle Photos",
+            enabled: view["toggle-photos"], action: () => actions.current.togglePhotos() },
+          { id: "compact-photos", text: "Compact Photos", checked: photoPane.compact,
+            enabled: view["compact-photos"], action: () => actions.current.compactPhotos() },
+        ],
       }] });
       if (!active) { await menu.close(); return; }
       try {
@@ -342,7 +401,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
       if (active) setError(`Could not update menus: ${String(cause)}`);
     });
     return () => { active = false; };
-  }, [recent, busy, restoring, document, draft, preferencesOpen, slotSelected]);
+  }, [recent, busy, restoring, document, draft, preferencesOpen, slotSelected, photoPaneAvailable, photoPane.compact]);
 
   useEffect(() => () => {
     menuQueue.current = menuQueue.current.then(async () => {
@@ -423,7 +482,8 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
       {document && <DocumentWorkspace key={document.id} document={document} onBusyChange={reportBusy}
         onTitleChange={reportTitle} hidden={draft !== null} suspended={transitioning}
         command={command} onSlotSelectedChange={setSlotSelected}
-        preferences={{ confirmSpreadDeletion, setConfirmSpreadDeletion, confirmSlotDeletion, setConfirmSlotDeletion }} />}
+        preferences={{ confirmSpreadDeletion, setConfirmSpreadDeletion, confirmSlotDeletion, setConfirmSlotDeletion }}
+        photoPane={photoPane} onPhotoPaneChange={changePhotoPane} />}
     </main>
   );
 }

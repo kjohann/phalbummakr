@@ -3,7 +3,10 @@ import { photoUsage, type Album, type Photo, type PhotoScan } from "../core";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
 import { writePhotoDrag } from "./photoDrag";
 
-const ROW_HEIGHT = 160;
+const GRID = {
+  regular: { rowHeight: 160, columnWidth: 140 },
+  compact: { rowHeight: 68, columnWidth: 76 },
+};
 const dateFormat = new Intl.DateTimeFormat(undefined, {
   year: "numeric", month: "short", day: "numeric", timeZone: "UTC",
 });
@@ -13,7 +16,7 @@ function parentFolder(path: string) {
   return separator < 0 ? "" : path.slice(0, separator);
 }
 
-function PhotoThumbnail({ root, photo, usage }: { root: string; photo: Photo; usage: number }) {
+function PhotoThumbnail({ root, photo, usage, compact }: { root: string; photo: Photo; usage: number; compact: boolean }) {
   const [source, setSource] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -39,23 +42,42 @@ function PhotoThumbnail({ root, photo, usage }: { root: string; photo: Photo; us
       }}>
       <div className="photo-preview">
         {source && <img src={source} alt={name} loading="lazy" decoding="async" draggable={false} />}
-        {!source && !error && <span className="photo-placeholder">Loading...</span>}
-        {error && <span className="photo-failure" role="alert" title={error}>Thumbnail unavailable. Rescan to retry.</span>}
+        {!source && !error && <span className="photo-placeholder">{compact ? "…" : "Loading..."}</span>}
+        {error && <span className="photo-failure" role="alert" title={error}>{compact ? "!" : "Thumbnail unavailable. Rescan to retry."}</span>}
         {usage > 0 && <span className="photo-usage" aria-label={`Used ${usage} ${usage === 1 ? "time" : "times"} in this Album`}>{usage}</span>}
       </div>
-      <figcaption>
+      {!compact && <figcaption>
         <span className="photo-name">{name}</span>
         <time dateTime={new Date(photo.captureDate).toISOString()}>{dateFormat.format(photo.captureDate)}</time>
-      </figcaption>
+      </figcaption>}
     </figure>
   );
 }
 
-function PhotoGrid({ root, photos, folders, usage, onOpenFolder }: {
+function FolderTile({ path, compact, onOpen }: { path: string; compact: boolean; onOpen: (path: string) => void }) {
+  const name = path.split("/").pop();
+  return (
+    <button type="button" className="folder-tile" title={path} aria-label={`Open folder ${name}`} onClick={() => onOpen(path)}>
+      <span className="photo-preview">
+        <svg width="48" height="40" viewBox="0 0 48 40" fill="none" aria-hidden="true">
+          <path d="M3 9V5h16l5 5h21v26H3V9Z" fill="currentColor" />
+        </svg>
+        {compact && <span className="photo-name">{name}</span>}
+      </span>
+      {!compact && <>
+        <span className="photo-name">{name}</span>
+        <span className="folder-label">Folder</span>
+      </>}
+    </button>
+  );
+}
+
+function PhotoGrid({ root, photos, folders, usage, compact, onOpenFolder }: {
   root: string;
   photos: Photo[];
   folders: string[];
   usage: Map<string, number>;
+  compact: boolean;
   onOpenFolder: (folder: string) => void;
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -75,17 +97,18 @@ function PhotoGrid({ root, photos, folders, usage, onOpenFolder }: {
     ...folders.map((path) => ({ kind: "folder" as const, path })),
     ...photos.map((photo) => ({ kind: "photo" as const, photo })),
   ];
-  const columns = Math.max(1, Math.floor(viewport.width / 140));
+  const { rowHeight, columnWidth } = compact ? GRID.compact : GRID.regular;
+  const columns = Math.max(1, Math.floor(viewport.width / columnWidth));
   const rows = Math.ceil(entries.length / columns);
-  const start = Math.max(0, Math.min(rows - 1, Math.floor(scrollTop / ROW_HEIGHT)) - 2);
-  const end = Math.min(rows, Math.ceil((scrollTop + viewport.height) / ROW_HEIGHT) + 2);
+  const start = Math.max(0, Math.min(rows - 1, Math.floor(scrollTop / rowHeight)) - 2);
+  const end = Math.min(rows, Math.ceil((scrollTop + viewport.height) / rowHeight) + 2);
   const visible = viewport.height > 0 ? entries.slice(start * columns, end * columns) : [];
 
   return (
-    <div className="photo-grid" ref={viewportRef} aria-label="Photo grid" tabIndex={0}
+    <div className={compact ? "photo-grid photo-grid-compact" : "photo-grid"} ref={viewportRef} aria-label="Photo grid" tabIndex={0}
       onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}>
       <div className="photo-grid-content" role="list" aria-label="Folders and Photos"
-        style={{ height: rows * ROW_HEIGHT }}>
+        style={{ height: rows * rowHeight }}>
         {visible.map((entry, offset) => {
           const index = start * columns + offset;
           return (
@@ -93,24 +116,13 @@ function PhotoGrid({ root, photos, folders, usage, onOpenFolder }: {
               className="photo-cell" role="listitem"
               aria-posinset={index + 1} aria-setsize={entries.length}
               style={{
-                top: Math.floor(index / columns) * ROW_HEIGHT,
+                top: Math.floor(index / columns) * rowHeight,
                 left: `${(index % columns) * 100 / columns}%`,
                 width: `${100 / columns}%`,
-                height: ROW_HEIGHT,
+                height: rowHeight,
               }}>
-              {entry.kind === "photo" ? <PhotoThumbnail root={root} photo={entry.photo} usage={usage.get(entry.photo.path) ?? 0} /> : (
-                <button type="button" className="folder-tile" title={entry.path}
-                  aria-label={`Open folder ${entry.path.split("/").pop()}`}
-                  onClick={() => onOpenFolder(entry.path)}>
-                  <span className="photo-preview">
-                    <svg width="48" height="40" viewBox="0 0 48 40" fill="none" aria-hidden="true">
-                      <path d="M3 9V5h16l5 5h21v26H3V9Z" fill="currentColor" />
-                    </svg>
-                  </span>
-                  <span className="photo-name">{entry.path.split("/").pop()}</span>
-                  <span className="folder-label">Folder</span>
-                </button>
-              )}
+              {entry.kind === "photo" ? <PhotoThumbnail root={root} photo={entry.photo} usage={usage.get(entry.photo.path) ?? 0} compact={compact} />
+                : <FolderTile path={entry.path} compact={compact} onOpen={onOpenFolder} />}
             </div>
           );
         })}
@@ -119,7 +131,7 @@ function PhotoGrid({ root, photos, folders, usage, onOpenFolder }: {
   );
 }
 
-export default function PhotoBrowser({ root, album = null }: { root: string; album?: Album | null }) {
+export default function PhotoBrowser({ root, album = null, compact = false }: { root: string; album?: Album | null; compact?: boolean }) {
   const [scan, setScan] = useState(0);
   const [unusedOnly, setUnusedOnly] = useState(false);
   const [result, setResult] = useState<(PhotoScan & {
@@ -213,7 +225,7 @@ export default function PhotoBrowser({ root, album = null }: { root: string; alb
           : unusedOnly && album ? "No unused Photos in this folder." : "No Photos in this folder."}</p>
       )}
       {result && <PhotoGrid key={`${root}:${result.generation}:${folder}:${unusedOnly}`} root={root}
-        photos={photos} folders={folders} usage={usage} onOpenFolder={openFolder} />}
+        photos={photos} folders={folders} usage={usage} compact={compact} onOpenFolder={openFolder} />}
     </aside>
   );
 }

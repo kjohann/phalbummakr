@@ -32,6 +32,11 @@ fn set_confirm_slot_deletion(app: tauri::AppHandle, value: bool) -> Result<(), S
 }
 
 #[tauri::command]
+fn set_photo_pane(app: tauri::AppHandle, pane: settings::PhotoPane) -> Result<(), String> {
+    settings::set_photo_pane(&settings_file(&app)?, pane).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn remember_album(app: tauri::AppHandle, path: String) -> Result<(), String> {
     settings::remember_album(&settings_file(&app)?, Path::new(&path))
         .map_err(|error| error.to_string())
@@ -157,6 +162,7 @@ pub fn run() {
             album_settings,
             set_confirm_spread_deletion,
             set_confirm_slot_deletion,
+            set_photo_pane,
             remember_album,
             forget_album,
             close_album,

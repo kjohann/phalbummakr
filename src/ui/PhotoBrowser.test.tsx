@@ -76,6 +76,22 @@ it("updates Usage badges and the unused filter as the current Album changes", as
   expect(screen.getAllByLabelText("Used 1 time in this Album")).toHaveLength(2);
 });
 
+it("shows compact tiles without file names but keeps Usage badges and folder names", async () => {
+  const first = photo(0);
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "scan_photos") return { photos: [first, photo(1)], folders: ["holiday"], warnings: [] };
+    return "data:image/png;base64,dGVzdA==";
+  });
+  const album = placePhoto(addPhotoSlot(createAlbum({ name: "Test", pageCount: 2 }), "page-1"), "page-1", "slot-1", first);
+  render(<PhotoBrowser root="D:\\Photos" album={album} compact />);
+  await screen.findByRole("button", { name: "Open folder holiday" });
+  await waitFor(() => expect(screen.getAllByRole("img")).toHaveLength(2));
+  expect(screen.queryByText(first.path)).toBeNull();
+  expect(screen.getByLabelText("Used 1 time in this Album").textContent).toBe("1");
+  expect(screen.getByText("holiday")).toBeTruthy();
+  expect(screen.getAllByRole("listitem").map((item) => item.style.height)).toEqual(["68px", "68px", "68px"]);
+});
+
 it("browses immediate folders and Photos, including empty folders, with breadcrumbs back to the Library", async () => {
   const photos = [
     { ...photo(0), path: "root.jpg" },

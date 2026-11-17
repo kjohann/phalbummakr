@@ -36,6 +36,16 @@ exists; otherwise, it returns to the nearest available ancestor and shows a noti
 Opening a folder resets the grid to the top. Folders and Photos are referenced
 where they live on disk; browsing never moves or copies originals.
 
+Drag the Photo pane's inner edge to resize it (200–640 px, at most 60% of the
+window; with the separator
+focused, the arrow keys resize it too). The ‹ tab on its edge collapses it and the
+› tab at the window edge opens it again. **View → Toggle Photos** (Ctrl+B) does the
+same, unless a Text Slot uses Ctrl+B for Bold, a text field has focus or a dialog
+is open. **View →
+Compact Photos** shows smaller thumbnails without file names; Usage badges stay.
+The width, collapsed state and Compact setting are stored per computer in
+`settings.json`, not in the Album.
+
 ## Albums
 
 Use **File > New Album** to choose a `.phalbum` file, then a title, Page Format and print settings. Initially the

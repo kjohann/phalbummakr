@@ -9,6 +9,7 @@ pub struct AlbumSettings {
     pub recent_albums: Vec<PathBuf>,
     pub confirm_spread_deletion: bool,
     pub confirm_slot_deletion: bool,
+    pub photo_pane: PhotoPane,
 }
 
 impl Default for AlbumSettings {
@@ -18,6 +19,25 @@ impl Default for AlbumSettings {
             recent_albums: Vec::new(),
             confirm_spread_deletion: true,
             confirm_slot_deletion: true,
+            photo_pane: PhotoPane::default(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PhotoPane {
+    pub width: f64,
+    pub collapsed: bool,
+    pub compact: bool,
+}
+
+impl Default for PhotoPane {
+    fn default() -> Self {
+        Self {
+            width: 340.0,
+            collapsed: false,
+            compact: false,
         }
     }
 }
@@ -78,6 +98,12 @@ pub fn set_confirm_slot_deletion(path: &Path, value: bool) -> io::Result<()> {
     write_album_settings(path, &settings)
 }
 
+pub fn set_photo_pane(path: &Path, pane: PhotoPane) -> io::Result<()> {
+    let mut settings = read_album_settings(path)?;
+    settings.photo_pane = pane;
+    write_album_settings(path, &settings)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,6 +133,33 @@ mod tests {
         let saved = read_album_settings(&path).unwrap();
         assert!(!saved.confirm_slot_deletion);
         assert!(saved.confirm_spread_deletion);
+    }
+
+    #[test]
+    fn photo_pane_defaults_to_open_and_persists_across_other_updates() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, r#"{"lastAlbum":null,"recentAlbums":[]}"#).unwrap();
+        let pane = read_album_settings(&path).unwrap().photo_pane;
+        assert_eq!(
+            (pane.width, pane.collapsed, pane.compact),
+            (340.0, false, false)
+        );
+        set_photo_pane(
+            &path,
+            PhotoPane {
+                width: 512.0,
+                collapsed: true,
+                compact: true,
+            },
+        )
+        .unwrap();
+        remember_album(&path, Path::new("first.phalbum")).unwrap();
+        let pane = read_album_settings(&path).unwrap().photo_pane;
+        assert_eq!(
+            (pane.width, pane.collapsed, pane.compact),
+            (512.0, true, true)
+        );
     }
 
     #[test]
