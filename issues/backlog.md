@@ -15,7 +15,6 @@ Decided in the design session but deliberately left out of the MVP. Promote an i
 - **Single-Page focus view**: show one Page at a time, larger, for focused editing.
 - **Mouse-wheel and pinch zoom** of a Photo's Crop, removed in 019 in favour of the Zoom buttons.
 - **Photo rotation within a fixed Slot** in 90° steps. Free rotation is something to explore later.
-- **Effective Resolution warning** below the Page Format's threshold (default 150 DPI).
 
 ## Album and output
 

@@ -34,6 +34,8 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 018 | [Page strip](018-page-strip.md)                               | 017        | todo   |
 | 019 | [Slot toolbar and menus](019-slot-toolbar.md)                 | 018        | todo   |
 | 020 | [Resizable Photo pane](020-photo-pane.md)                     | 016        | todo   |
+| 021 | [Move a Slot between Pages in a Spread](021-move-slot-between-pages.md) | 013, 014, 015, 017 | todo   |
+| 022 | [Effective Resolution warning](022-effective-resolution-warning.md) | 007, 012 | todo   |
 
 Work order for the layout rework: 016, 017, 018, 019, 020, then 011.
 
