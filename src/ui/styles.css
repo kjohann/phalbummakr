@@ -413,28 +413,14 @@ body {
   font-size: 12px;
 }
 
-.album-settings-wrapper {
-  position: relative;
-}
-
 .album-settings {
-  position: absolute;
-  z-index: 2;
-  top: calc(100% + 6px);
-  left: 0;
-  width: 300px;
-  max-width: calc(100vw - 60px);
-  max-height: 55vh;
-  padding: 18px;
-  border: 1px solid #b9c3b9;
-  border-radius: 6px;
-  background: #f7f8f4;
-  box-shadow: 0 8px 24px #1e292626;
+  display: grid;
+  gap: 14px;
 }
 
-.album-settings h3 {
+.album-settings h2 {
   margin: 0;
-  font-size: 14px;
+  font-size: 18px;
 }
 
 .album-settings fieldset {
@@ -459,15 +445,6 @@ body {
 .album-workspace > .album-toolbar,
 .album-workspace > .album-details {
   flex-shrink: 0;
-}
-
-.page-toolbar {
-  display: flex;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  padding-top: 12px;
 }
 
 .canvas-viewport canvas {
@@ -799,8 +776,28 @@ body {
   border: 2px solid #415d50;
 }
 
-.slot-overlay--crop-mode {
+.slot-crop-handle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #ffffff;
+  border-radius: 50%;
+  background: rgb(65 93 80 / 85%);
+  color: #ffffff;
+  font-size: 18px;
+  line-height: 1;
   cursor: grab;
+  transform: translate(-50%, -50%);
+  user-select: none;
+}
+
+.slot-crop-handle:active {
+  cursor: grabbing;
 }
 
 .slot-overlay--dragging:not(.slot-overlay--drop-target) {
@@ -954,16 +951,13 @@ body {
   pointer-events: none;
 }
 
-.text-slot-controls {
+.slot-controls,
+.slot-palette {
   position: absolute;
   z-index: 4;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 4px;
-  /* Intrinsic width keeps wrapping independent of the computed left offset. */
-  width: max-content;
-  max-width: calc(100% - 16px);
   padding: 6px;
   border: 1px solid #b9c3b9;
   border-radius: 6px;
@@ -971,6 +965,39 @@ body {
   box-shadow: 0 3px 12px #1e292626;
   color: #242a27;
   font-size: 12px;
+}
+
+.slot-controls {
+  flex-wrap: wrap;
+  /* Intrinsic width keeps wrapping independent of the computed left offset. */
+  width: max-content;
+  max-width: calc(100% - 16px);
+}
+
+.slot-controls .button-quiet {
+  min-width: 28px;
+  padding: 4px 7px;
+  font-size: 13px;
+}
+
+.slot-controls-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+}
+
+.slot-palette {
+  right: 12px;
+  bottom: 12px;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.slot-palette .button-quiet {
+  padding: 5px 9px;
+  font-size: 12px;
+  text-align: left;
 }
 
 .text-slot-controls select,

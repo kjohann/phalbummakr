@@ -5,7 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { createAlbum, deserializeAlbum, serializeAlbum, type Album } from "../core";
-import AlbumWorkspace from "./AlbumWorkspace";
+import AlbumWorkspace, { type AlbumCommand, type AlbumCommandName } from "./AlbumWorkspace";
 import PhotoBrowser from "./PhotoBrowser";
 import ModalDialog from "./ModalDialog";
 
@@ -13,11 +13,13 @@ interface Settings {
   lastAlbum: string | null;
   recentAlbums: string[];
   confirmSpreadDeletion: boolean;
+  confirmSlotDeletion: boolean;
 }
 
 export interface DocumentPorts {
   settings(): Promise<Settings>;
   setConfirmSpreadDeletion(value: boolean): Promise<void>;
+  setConfirmSlotDeletion(value: boolean): Promise<void>;
   exists(path: string): Promise<boolean>;
   read(path: string): Promise<string>;
   write(path: string, json: string, create: boolean): Promise<void>;
@@ -33,6 +35,7 @@ const filters = [{ name: "Album", extensions: ["phalbum"] }];
 const desktopPorts: DocumentPorts = {
   settings: () => invoke("album_settings"),
   setConfirmSpreadDeletion: (value) => invoke("set_confirm_spread_deletion", { value }),
+  setConfirmSlotDeletion: (value) => invoke("set_confirm_slot_deletion", { value }),
   exists: (path) => invoke("album_exists", { path }),
   read: (path) => invoke("read_album_file", { path }),
   write: (path, json, create) => invoke("write_album_file", { path, json, create }),
@@ -51,14 +54,22 @@ interface OpenDocument {
   album: Album;
 }
 
-function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, suspended, confirmSpreadDeletion, setConfirmSpreadDeletion }: {
+interface DeletionPreferences {
+  confirmSpreadDeletion: boolean;
+  setConfirmSpreadDeletion: (value: boolean) => Promise<void>;
+  confirmSlotDeletion: boolean;
+  setConfirmSlotDeletion: (value: boolean) => Promise<void>;
+}
+
+function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, suspended, command, onSlotSelectedChange, preferences }: {
   document: OpenDocument;
   onBusyChange: (busy: boolean) => void;
   onTitleChange: (album: Album | null) => void;
   hidden: boolean;
   suspended: boolean;
-  confirmSpreadDeletion: boolean;
-  setConfirmSpreadDeletion: (value: boolean) => Promise<void>;
+  command: AlbumCommand | undefined;
+  onSlotSelectedChange: (selected: boolean) => void;
+  preferences: DeletionPreferences;
 }) {
   const [album, setAlbum] = useState<Album | null>(document.album);
   const reportAlbum = useCallback((next: Album | null) => {
@@ -69,7 +80,7 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
     <div className="library-workspace" style={{ display: hidden ? "none" : undefined }}>
       <PhotoBrowser root={document.root} album={album} />
       <AlbumWorkspace root={document.root} document={document} suspended={suspended} onBusyChange={onBusyChange} onAlbumChange={reportAlbum}
-        confirmSpreadDeletion={confirmSpreadDeletion} setConfirmSpreadDeletion={setConfirmSpreadDeletion} />
+        command={command} onSlotSelectedChange={onSlotSelectedChange} {...preferences} />
     </div>
   );
 }
@@ -84,6 +95,10 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
   const [transitioning, setTransitioning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmSpreadDeletion, setConfirmSpreadDeletionState] = useState(true);
+  const [confirmSlotDeletion, setConfirmSlotDeletionState] = useState(true);
+  const [command, setCommand] = useState<AlbumCommand | undefined>();
+  const [slotSelected, setSlotSelected] = useState(false);
+  const commandSerial = useRef(0);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [preferenceSaving, setPreferenceSaving] = useState(false);
   const [preferenceError, setPreferenceError] = useState<string | null>(null);
@@ -102,6 +117,10 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
   const setConfirmSpreadDeletion = useCallback(async (value: boolean) => {
     await ports.setConfirmSpreadDeletion(value);
     setConfirmSpreadDeletionState(value);
+  }, [ports]);
+  const setConfirmSlotDeletion = useCallback(async (value: boolean) => {
+    await ports.setConfirmSlotDeletion(value);
+    setConfirmSlotDeletionState(value);
   }, [ports]);
 
   async function refreshRecent() {
@@ -154,6 +173,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
         if (!active) return;
         setRecent(settings.recentAlbums);
         setConfirmSpreadDeletionState(settings.confirmSpreadDeletion);
+        setConfirmSlotDeletionState(settings.confirmSlotDeletion);
         const path = settings.lastAlbum;
         if (!path) return;
         if (!(await ports.exists(path))) {
@@ -186,10 +206,13 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
     return () => { active = false; };
   }, [ports]);
 
-  const actions = useRef<{ newAlbum: () => void; openAlbum: () => void; openRecent: (path: string) => void; closeAlbum: () => void; preferences: () => void; exit: () => void }>(
-    { newAlbum: () => {}, openAlbum: () => {}, openRecent: () => {}, closeAlbum: () => {}, preferences: () => {}, exit: () => {} },
+  const actions = useRef<{ newAlbum: () => void; openAlbum: () => void; openRecent: (path: string) => void; closeAlbum: () => void; preferences: () => void; exit: () => void; albumCommand: (name: AlbumCommandName) => void }>(
+    { newAlbum: () => {}, openAlbum: () => {}, openRecent: () => {}, closeAlbum: () => {}, preferences: () => {}, exit: () => {}, albumCommand: () => {} },
   );
   actions.current = {
+    albumCommand: (name) => {
+      if (document && !draft) setCommand({ name, serial: ++commandSerial.current });
+    },
     newAlbum: () => void run(async () => {
       const path = await ports.chooseNew();
       if (path) setDraft(path);
@@ -240,46 +263,67 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
     let active = true;
     menuQueue.current = menuQueue.current.then(async () => {
       if (!active) return;
+      const fileEnabled = !busy && !restoring && !preferencesOpen;
+      const albumEnabled = fileEnabled && document !== null && draft === null;
+      const enabledByMenu: Record<string, Record<string, boolean>> = {
+        file: {
+          "new-album": fileEnabled,
+          "open-album": fileEnabled,
+          "open-recent": fileEnabled && recent.length > 0,
+          "close-album": fileEnabled && (document !== null || draft !== null),
+          "preferences": fileEnabled,
+        },
+        edit: { "delete": albumEnabled && slotSelected },
+        album: { "album-settings": albumEnabled, "add-spread": albumEnabled },
+      };
       // Replacing a Windows menu briefly resizes the WebView.
       if (menuRef.current && menuRecent.current === recent) {
-        const file = await menuRef.current.get("file");
-        if (!file) throw new Error("The File menu is missing.");
-        try {
-          if (!("get" in file)) throw new Error("The File menu is not a submenu.");
-          const enabledById = {
-            "new-album": !busy && !restoring && !preferencesOpen,
-            "open-album": !busy && !restoring && !preferencesOpen,
-            "open-recent": !busy && !restoring && !preferencesOpen && recent.length > 0,
-            "close-album": !busy && !restoring && !preferencesOpen && (document !== null || draft !== null),
-            "preferences": !busy && !restoring && !preferencesOpen,
-          };
-          for (const [id, enabled] of Object.entries(enabledById)) {
-            const item = await file.get(id);
-            if (!item) throw new Error(`The File menu item ${id} is missing.`);
-            try {
-              if (!("setEnabled" in item)) throw new Error(`The File menu item ${id} cannot be enabled.`);
-              await item.setEnabled(enabled);
-            } finally {
-              await item.close();
+        for (const [menuId, enabledById] of Object.entries(enabledByMenu)) {
+          const submenu = await menuRef.current.get(menuId);
+          if (!submenu) throw new Error(`The ${menuId} menu is missing.`);
+          try {
+            if (!("get" in submenu)) throw new Error(`The ${menuId} menu is not a submenu.`);
+            for (const [id, enabled] of Object.entries(enabledById)) {
+              const item = await submenu.get(id);
+              if (!item) throw new Error(`The ${menuId} menu item ${id} is missing.`);
+              try {
+                if (!("setEnabled" in item)) throw new Error(`The ${menuId} menu item ${id} cannot be enabled.`);
+                await item.setEnabled(enabled);
+              } finally {
+                await item.close();
+              }
             }
+          } finally {
+            await submenu.close();
           }
-        } finally {
-          await file.close();
         }
         return;
       }
+      const { file, edit, album } = enabledByMenu;
       const menu = await Menu.new({ items: [{
         id: "file",
         text: "File",
         items: [
-          { id: "new-album", text: "New Album…", enabled: !busy && !restoring && !preferencesOpen, action: () => actions.current.newAlbum() },
-          { id: "open-album", text: "Open Album…", enabled: !busy && !restoring && !preferencesOpen, action: () => actions.current.openAlbum() },
-          { id: "open-recent", text: "Open Recent", enabled: !busy && !restoring && !preferencesOpen && recent.length > 0, items: recent.map((path) => ({
+          { id: "new-album", text: "New Album…", enabled: file["new-album"], action: () => actions.current.newAlbum() },
+          { id: "open-album", text: "Open Album…", enabled: file["open-album"], action: () => actions.current.openAlbum() },
+          { id: "open-recent", text: "Open Recent", enabled: file["open-recent"], items: recent.map((path) => ({
             text: path.replaceAll("&", "&&"), action: () => actions.current.openRecent(path),
           })) },
-          { id: "close-album", text: "Close Album", enabled: !busy && !restoring && !preferencesOpen && (document !== null || draft !== null), action: () => actions.current.closeAlbum() },
-          { id: "preferences", text: "Preferences…", enabled: !busy && !restoring && !preferencesOpen, action: () => actions.current.preferences() },
+          { id: "close-album", text: "Close Album", enabled: file["close-album"], action: () => actions.current.closeAlbum() },
+          { id: "preferences", text: "Preferences…", enabled: file["preferences"], action: () => actions.current.preferences() },
           { text: "Exit", action: () => actions.current.exit() },
+        ],
+      }, {
+        id: "edit",
+        text: "Edit",
+        // No accelerator: on Windows it would take the Delete key from text fields.
+        items: [{ id: "delete", text: "Delete", enabled: edit["delete"], action: () => actions.current.albumCommand("delete-slot") }],
+      }, {
+        id: "album",
+        text: "Album",
+        items: [
+          { id: "album-settings", text: "Album Settings…", enabled: album["album-settings"], action: () => actions.current.albumCommand("album-settings") },
+          { id: "add-spread", text: "Add Spread", enabled: album["add-spread"], action: () => actions.current.albumCommand("add-spread") },
         ],
       }] });
       if (!active) { await menu.close(); return; }
@@ -295,16 +339,16 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
         throw cause;
       }
     }).catch((cause: unknown) => {
-      if (active) setError(`Could not update File menu: ${String(cause)}`);
+      if (active) setError(`Could not update menus: ${String(cause)}`);
     });
     return () => { active = false; };
-  }, [recent, busy, restoring, document, draft, preferencesOpen]);
+  }, [recent, busy, restoring, document, draft, preferencesOpen, slotSelected]);
 
   useEffect(() => () => {
     menuQueue.current = menuQueue.current.then(async () => {
       await menuRef.current?.close();
       menuRef.current = null;
-    }).catch((cause: unknown) => console.error("Could not release File menu:", cause));
+    }).catch((cause: unknown) => console.error("Could not release menus:", cause));
   }, []);
 
   async function create(event: FormEvent<HTMLFormElement>) {
@@ -335,14 +379,19 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
       {error && <p className="error-banner" role="alert">{error}</p>}
       {preferencesOpen && <ModalDialog label="Preferences" closeDisabled={preferenceSaving} onClose={() => setPreferencesOpen(false)}>
           <h1>Preferences</h1>
-          <label><input type="checkbox" checked={confirmSpreadDeletion} disabled={preferenceSaving}
-            onChange={(event) => {
-              const value = event.target.checked;
-              setPreferenceError(null);
-              setPreferenceSaving(true);
-              void setConfirmSpreadDeletion(value).catch((cause: unknown) => setPreferenceError(`Could not save preference: ${String(cause)}`))
-                .finally(() => setPreferenceSaving(false));
-            }} /> Confirm Spread deletion</label>
+          {([
+            ["Confirm Spread deletion", confirmSpreadDeletion, setConfirmSpreadDeletion],
+            ["Confirm Slot deletion", confirmSlotDeletion, setConfirmSlotDeletion],
+          ] as const).map(([label, checked, save]) => (
+            <label key={label}><input type="checkbox" checked={checked} disabled={preferenceSaving}
+              onChange={(event) => {
+                const value = event.target.checked;
+                setPreferenceError(null);
+                setPreferenceSaving(true);
+                void save(value).catch((cause: unknown) => setPreferenceError(`Could not save preference: ${String(cause)}`))
+                  .finally(() => setPreferenceSaving(false));
+              }} /> {label}</label>
+          ))}
           {preferenceError && <p className="error-banner" role="alert">{preferenceError}</p>}
           <button type="button" disabled={preferenceSaving} onClick={() => setPreferencesOpen(false)}>Close</button>
       </ModalDialog>}
@@ -373,7 +422,8 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
       )}
       {document && <DocumentWorkspace key={document.id} document={document} onBusyChange={reportBusy}
         onTitleChange={reportTitle} hidden={draft !== null} suspended={transitioning}
-        confirmSpreadDeletion={confirmSpreadDeletion} setConfirmSpreadDeletion={setConfirmSpreadDeletion} />}
+        command={command} onSlotSelectedChange={setSlotSelected}
+        preferences={{ confirmSpreadDeletion, setConfirmSpreadDeletion, confirmSlotDeletion, setConfirmSlotDeletion }} />}
     </main>
   );
 }

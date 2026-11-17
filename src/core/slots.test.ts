@@ -9,6 +9,19 @@ function slotOf(album: ReturnType<typeof createAlbum>, page = 0) {
   return album.pages[page].slots[0];
 }
 
+it("adds a Slot centred on a point, keeping it inside the Bleed", () => {
+  const album = createAlbum({ name: "Trip", bleedMm: 3 });
+  const photo = slotOf(addPhotoSlot(album, "page-1", { x: 0.5, y: 0.25 }));
+  expect(photo).toMatchObject({ x: 0.3, width: 0.4, height: 0.4 });
+  expect(photo.y).toBeCloseTo(0.05);
+  const corner = slotOf(addPhotoSlot(album, "page-1", { x: 1, y: 1 }));
+  expect(corner.x).toBeCloseTo(1 + 3 / 297 - 0.4);
+  expect(corner.y).toBeCloseTo(1 + 3 / 210 - 0.4);
+  const text = slotOf(addTextSlot(album, "page-1", { x: 0.2, y: 0.6 }));
+  expect(text.x).toBeCloseTo(0);
+  expect(text.y).toBeCloseTo(0.6 - text.height / 2);
+});
+
 it("swaps Placements across Pages, keeping Slot geometry and refitting Crops without distortion", () => {
   let album = createAlbum({ name: "Test", pageCount: 2 });
   album = addPhotoSlot(addPhotoSlot(album, "page-1"), "page-2");

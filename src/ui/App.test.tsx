@@ -7,7 +7,7 @@ import App, { type DocumentPorts } from "./App";
 
 type MenuEntry = { id?: string; text: string; enabled?: boolean; action?: () => void; items?: MenuEntry[] };
 const native = vi.hoisted(() => ({
-  enabled: false, items: [] as MenuEntry[], installed: vi.fn(), update: vi.fn(), released: vi.fn(),
+  enabled: false, items: [] as MenuEntry[], menus: [] as MenuEntry[], installed: vi.fn(), update: vi.fn(), released: vi.fn(),
 }));
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => native.enabled, invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/window", () => ({
@@ -19,35 +19,42 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 vi.mock("@tauri-apps/api/menu", () => ({
   Menu: { new: async (menu: { items: MenuEntry[] }) => {
-    const items = menu.items[0].items ?? [];
-    native.items = items;
+    native.menus = menu.items;
+    native.items = menu.items[0].items ?? [];
     return {
       setAsAppMenu: async () => { native.installed(); return null; },
-      get: async (id: string) => id === "file" ? {
-        get: async (itemId: string) => {
-          const item = items.find((entry) => entry.id === itemId);
-          return item ? {
-            setEnabled: async (enabled: boolean) => { await native.update(); item.enabled = enabled; },
-            close: async () => { native.released(itemId); },
-          } : null;
-        },
-        close: async () => { native.released("file"); },
-      } : null,
+      get: async (id: string) => {
+        const items = menu.items.find((entry) => entry.id === id)?.items;
+        return items ? {
+          get: async (itemId: string) => {
+            const item = items.find((entry) => entry.id === itemId);
+            return item ? {
+              setEnabled: async (enabled: boolean) => { await native.update(); item.enabled = enabled; },
+              close: async () => { native.released(itemId); },
+            } : null;
+          },
+          close: async () => { native.released(id); },
+        } : null;
+      },
       close: async () => {},
     };
   } },
 }));
 vi.mock("./AlbumWorkspace", () => ({
-  default: ({ document, suspended, onBusyChange }: {
+  default: ({ document, suspended, onBusyChange, command, onSlotSelectedChange }: {
     document: { album: { title: string } };
     suspended?: boolean;
     onBusyChange: (busy: boolean) => void;
+    command?: { name: string; serial: number };
+    onSlotSelectedChange?: (selected: boolean) => void;
   }) => {
     const [title, setTitle] = useState(document.album.title);
     return <><p>{title}</p>
+      {command && <p>Command {command.name} {command.serial}</p>}
       <button type="button" disabled={suspended} onClick={() => setTitle("Edited Album")}>Edit mock Album</button>
       <button type="button" onClick={() => onBusyChange(true)}>Begin mock edit</button>
       <button type="button" onClick={() => onBusyChange(false)}>Finish mock save</button>
+      <button type="button" onClick={() => onSlotSelectedChange?.(true)}>Select mock Slot</button>
     </>;
   },
 }));
@@ -57,6 +64,7 @@ afterEach(() => {
   cleanup();
   native.enabled = false;
   native.items = [];
+  native.menus = [];
   native.installed.mockClear();
   native.update.mockReset();
   native.released.mockClear();
@@ -65,8 +73,9 @@ afterEach(() => {
 it("opens Preferences from File and persists the Spread deletion setting", async () => {
   native.enabled = true;
   const setConfirmSpreadDeletion = vi.fn(async () => {});
+  const setConfirmSlotDeletion = vi.fn(async () => {});
   const ports: DocumentPorts = {
-    settings: async () => ({ lastAlbum: null, recentAlbums: [], confirmSpreadDeletion: false }),
+    settings: async () => ({ lastAlbum: null, recentAlbums: [], confirmSpreadDeletion: false, confirmSlotDeletion: true }),
     exists: async () => false,
     read: vi.fn(),
     write: vi.fn(),
@@ -74,6 +83,7 @@ it("opens Preferences from File and persists the Spread deletion setting", async
     forget: vi.fn(),
     close: vi.fn(),
     setConfirmSpreadDeletion,
+    setConfirmSlotDeletion,
     parent: async () => "",
     chooseNew: async () => null,
     chooseOpen: async () => null,
@@ -88,13 +98,45 @@ it("opens Preferences from File and persists the Spread deletion setting", async
   expect(document.activeElement).toBe(checkbox);
   fireEvent.click(checkbox);
   await waitFor(() => expect(setConfirmSpreadDeletion).toHaveBeenCalledWith(true));
+  await waitFor(() => expect((screen.getByLabelText("Confirm Slot deletion") as HTMLInputElement).disabled).toBe(false));
+  fireEvent.click(screen.getByLabelText("Confirm Slot deletion"));
+  await waitFor(() => expect(setConfirmSlotDeletion).toHaveBeenCalledWith(false));
+  expect((screen.getByLabelText("Confirm Slot deletion") as HTMLInputElement).checked).toBe(false);
+});
+
+it("routes the native Edit and Album menus to the open Album", async () => {
+  native.enabled = true;
+  const path = "D:\\Photos\\album.phalbum";
+  const ports: DocumentPorts = {
+    settings: async () => ({ lastAlbum: path, recentAlbums: [path], confirmSpreadDeletion: true, confirmSlotDeletion: true }),
+    exists: async () => true, read: async () => serializeAlbum(createAlbum({ name: "Original" })),
+    write: vi.fn(), remember: vi.fn(), forget: vi.fn(), close: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(),
+    parent: async () => "D:\\Photos", chooseNew: async () => null, chooseOpen: async () => null,
+  };
+  render(<App ports={ports} />);
+  await screen.findByText("Original");
+  const item = (menu: string, text: string) =>
+    native.menus.find((entry) => entry.text === menu)?.items?.find((entry) => entry.text === text);
+  await waitFor(() => expect(item("Album", "Add Spread")?.enabled).toBe(true));
+  expect(item("Edit", "Delete")?.enabled).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Select mock Slot" }));
+  await waitFor(() => expect(item("Edit", "Delete")?.enabled).toBe(true));
+  await act(async () => item("Edit", "Delete")!.action!());
+  expect(screen.getByText("Command delete-slot 1")).toBeTruthy();
+  await act(async () => item("Album", "Album Settings…")!.action!());
+  expect(screen.getByText("Command album-settings 2")).toBeTruthy();
+  await act(async () => item("Album", "Add Spread")!.action!());
+  expect(screen.getByText("Command add-spread 3")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Begin mock edit" }));
+  await waitFor(() => expect([item("Edit", "Delete")?.enabled, item("Album", "Add Spread")?.enabled]).toEqual([false, false]));
 });
 
 it("keeps the previous preference and shows an error when saving fails", async () => {
   native.enabled = true;
   const ports: DocumentPorts = {
-    settings: async () => ({ lastAlbum: null, recentAlbums: [], confirmSpreadDeletion: true }),
-    setConfirmSpreadDeletion: vi.fn().mockRejectedValue(new Error("Disk full")),
+    settings: async () => ({ lastAlbum: null, recentAlbums: [], confirmSpreadDeletion: true, confirmSlotDeletion: true }),
+    setConfirmSpreadDeletion: vi.fn().mockRejectedValue(new Error("Disk full")), setConfirmSlotDeletion: vi.fn(),
     exists: async () => false, read: vi.fn(), write: vi.fn(), remember: vi.fn(), forget: vi.fn(),
     close: vi.fn(), parent: async () => "", chooseNew: async () => null, chooseOpen: async () => null,
   };
@@ -110,7 +152,7 @@ it("keeps the previous preference and shows an error when saving fails", async (
 it("updates File menu availability without reinstalling the native menu during edits and autosaves", async () => {
   native.enabled = true;
   const path = "D:\\Photos\\album.phalbum";
-  const settings = { lastAlbum: path, recentAlbums: [path], confirmSpreadDeletion: true };
+  const settings = { lastAlbum: path, recentAlbums: [path], confirmSpreadDeletion: true, confirmSlotDeletion: true };
   const ports: DocumentPorts = {
     settings: async () => settings,
     exists: async () => true,
@@ -119,7 +161,7 @@ it("updates File menu availability without reinstalling the native menu during e
     remember: vi.fn(),
     forget: vi.fn(),
     close: vi.fn(),
-    setConfirmSpreadDeletion: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(),
     parent: async () => "D:\\Photos",
     chooseNew: async () => null,
     chooseOpen: async () => null,
@@ -146,7 +188,7 @@ it("updates File menu availability without reinstalling the native menu during e
 it("reports native menu update failures and releases the retrieved item and submenu handles", async () => {
   native.enabled = true;
   const path = "D:\\Photos\\album.phalbum";
-  const settings = { lastAlbum: path, recentAlbums: [path], confirmSpreadDeletion: true };
+  const settings = { lastAlbum: path, recentAlbums: [path], confirmSpreadDeletion: true, confirmSlotDeletion: true };
   const ports: DocumentPorts = {
     settings: async () => settings,
     exists: async () => true,
@@ -155,7 +197,7 @@ it("reports native menu update failures and releases the retrieved item and subm
     remember: vi.fn(),
     forget: vi.fn(),
     close: vi.fn(),
-    setConfirmSpreadDeletion: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(),
     parent: async () => "D:\\Photos",
     chooseNew: async () => null,
     chooseOpen: async () => null,
@@ -175,14 +217,14 @@ it("reports native menu update failures and releases the retrieved item and subm
 it("restores the last Album using its file's folder and stored title", async () => {
   const album = createAlbum({ name: "Family: / 2026" });
   const ports: DocumentPorts = {
-    settings: async () => ({ lastAlbum: "D:\\Photos\\renamed.phalbum", recentAlbums: [], confirmSpreadDeletion: true }),
+    settings: async () => ({ lastAlbum: "D:\\Photos\\renamed.phalbum", recentAlbums: [], confirmSpreadDeletion: true, confirmSlotDeletion: true }),
     exists: async () => true,
     read: async () => serializeAlbum(album),
     write: vi.fn(),
     remember: vi.fn(),
     forget: vi.fn(),
     close: vi.fn(),
-    setConfirmSpreadDeletion: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(),
     parent: async () => "D:\\Photos",
     chooseNew: async () => null,
     chooseOpen: async () => null,
@@ -198,7 +240,7 @@ it("reports an odd Page count when opening an Album without replacing the curren
   const broken = "D:\\Photos\\odd.phalbum";
   const valid = createAlbum({ name: "Original", pageCount: 4 });
   const ports: DocumentPorts = {
-    settings: async () => ({ lastAlbum: current, recentAlbums: [broken], confirmSpreadDeletion: true }),
+    settings: async () => ({ lastAlbum: current, recentAlbums: [broken], confirmSpreadDeletion: true, confirmSlotDeletion: true }),
     exists: async () => true,
     read: async (path) => path === current ? serializeAlbum(valid)
       : JSON.stringify({ ...valid, pages: valid.pages.slice(0, 3) }),
@@ -206,7 +248,7 @@ it("reports an odd Page count when opening an Album without replacing the curren
     remember: vi.fn(),
     forget: vi.fn(),
     close: vi.fn(),
-    setConfirmSpreadDeletion: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(),
     parent: async () => "D:\\Photos",
     chooseNew: async () => null,
     chooseOpen: async () => broken,
@@ -223,15 +265,15 @@ it("reports an odd Page count when opening an Album without replacing the curren
 it("removes a missing recent Album when selected and reports it", async () => {
   const missing = "D:\\Photos\\missing.phalbum";
   const ports: DocumentPorts = {
-    settings: vi.fn().mockResolvedValueOnce({ lastAlbum: null, recentAlbums: [missing], confirmSpreadDeletion: true })
-      .mockResolvedValue({ lastAlbum: null, recentAlbums: [], confirmSpreadDeletion: true }),
+    settings: vi.fn().mockResolvedValueOnce({ lastAlbum: null, recentAlbums: [missing], confirmSpreadDeletion: true, confirmSlotDeletion: true })
+      .mockResolvedValue({ lastAlbum: null, recentAlbums: [], confirmSpreadDeletion: true, confirmSlotDeletion: true }),
     exists: async () => false,
     read: vi.fn(),
     write: vi.fn(),
     remember: vi.fn(),
     forget: vi.fn(),
     close: vi.fn(),
-    setConfirmSpreadDeletion: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(),
     parent: vi.fn(),
     chooseNew: async () => null,
     chooseOpen: async () => null,
@@ -247,15 +289,15 @@ it("removes a missing recent Album when selected and reports it", async () => {
 it("returns to the start screen when the last Album has disappeared", async () => {
   const path = "D:\\Photos\\missing.phalbum";
   const ports: DocumentPorts = {
-    settings: vi.fn().mockResolvedValueOnce({ lastAlbum: path, recentAlbums: [path], confirmSpreadDeletion: true })
-      .mockResolvedValue({ lastAlbum: null, recentAlbums: [], confirmSpreadDeletion: true }),
+    settings: vi.fn().mockResolvedValueOnce({ lastAlbum: path, recentAlbums: [path], confirmSpreadDeletion: true, confirmSlotDeletion: true })
+      .mockResolvedValue({ lastAlbum: null, recentAlbums: [], confirmSpreadDeletion: true, confirmSlotDeletion: true }),
     exists: async () => false,
     read: vi.fn(),
     write: vi.fn(),
     remember: vi.fn(),
     forget: vi.fn(),
     close: vi.fn(),
-    setConfirmSpreadDeletion: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(),
     parent: vi.fn(),
     chooseNew: async () => null,
     chooseOpen: async () => null,
@@ -270,14 +312,14 @@ it("returns to the start screen when the last Album has disappeared", async () =
 it("creates the chosen file with a title independent of its filename", async () => {
   const path = "D:\\Photos\\disk-name.phalbum";
   const ports: DocumentPorts = {
-    settings: async () => ({ lastAlbum: null, recentAlbums: [], confirmSpreadDeletion: true }),
+    settings: async () => ({ lastAlbum: null, recentAlbums: [], confirmSpreadDeletion: true, confirmSlotDeletion: true }),
     exists: async () => true,
     read: vi.fn(),
     write: vi.fn(),
     remember: vi.fn(),
     forget: vi.fn(),
     close: vi.fn(),
-    setConfirmSpreadDeletion: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(),
     parent: async () => "D:\\Photos",
     chooseNew: async () => path,
     chooseOpen: async () => null,
@@ -301,14 +343,14 @@ it("creates the chosen file with a title independent of its filename", async () 
 it("preserves the current editor when a new Album is cancelled", async () => {
   native.enabled = true;
   const ports: DocumentPorts = {
-    settings: async () => ({ lastAlbum: "D:\\Photos\\old.phalbum", recentAlbums: [], confirmSpreadDeletion: true }),
+    settings: async () => ({ lastAlbum: "D:\\Photos\\old.phalbum", recentAlbums: [], confirmSpreadDeletion: true, confirmSlotDeletion: true }),
     exists: async () => true,
     read: async () => serializeAlbum(createAlbum({ name: "Original" })),
     write: vi.fn(),
     remember: vi.fn(),
     forget: vi.fn(),
     close: vi.fn(),
-    setConfirmSpreadDeletion: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(),
     parent: async () => "D:\\Photos",
     chooseNew: async () => "D:\\Photos\\new.phalbum",
     chooseOpen: async () => null,
@@ -328,14 +370,14 @@ it("prevents editing the old Album while another file is opening", async () => {
   let finishRead: (json: string) => void = () => {};
   const pending = new Promise<string>((resolve) => { finishRead = resolve; });
   const ports: DocumentPorts = {
-    settings: async () => ({ lastAlbum: "D:\\Photos\\old.phalbum", recentAlbums: [], confirmSpreadDeletion: true }),
+    settings: async () => ({ lastAlbum: "D:\\Photos\\old.phalbum", recentAlbums: [], confirmSpreadDeletion: true, confirmSlotDeletion: true }),
     exists: async () => true,
     read: async (path) => path.endsWith("old.phalbum") ? serializeAlbum(createAlbum({ name: "Original" })) : pending,
     write: vi.fn(),
     remember: vi.fn(),
     forget: vi.fn(),
     close: vi.fn(),
-    setConfirmSpreadDeletion: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(),
     parent: async () => "D:\\Photos",
     chooseNew: async () => null,
     chooseOpen: async () => "D:\\Photos\\new.phalbum",
@@ -353,14 +395,14 @@ it("closes the Album and returns to the start screen without forgetting recents"
   native.enabled = true;
   const path = "D:\\Photos\\album.phalbum";
   const ports: DocumentPorts = {
-    settings: async () => ({ lastAlbum: path, recentAlbums: [path], confirmSpreadDeletion: true }),
+    settings: async () => ({ lastAlbum: path, recentAlbums: [path], confirmSpreadDeletion: true, confirmSlotDeletion: true }),
     exists: async () => true,
     read: async () => serializeAlbum(createAlbum({ name: "Original" })),
     write: vi.fn(),
     remember: vi.fn(),
     forget: vi.fn(),
     close: vi.fn(),
-    setConfirmSpreadDeletion: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(),
     parent: async () => "D:\\Photos",
     chooseNew: async () => null,
     chooseOpen: async () => null,

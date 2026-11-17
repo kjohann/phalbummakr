@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEventHandler } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEventHandler, type ReactNode } from "react";
 import type { Rectangle, TextStyle } from "../core";
+import { useAttachedPosition } from "./SlotToolbar";
 
 const FONT_SIZES = [12, 18, 24, 36, 48, 72];
 
@@ -13,35 +14,21 @@ interface Props {
   onStyle: (style: Partial<TextStyle>) => void;
   onRetryFonts: () => void;
   onShortcut: KeyboardEventHandler<HTMLDivElement>;
+  /** Slot actions shown after the text controls. */
+  children?: ReactNode;
 }
 
-export default function TextSlotControls({ anchor, viewport, style, fonts, fontError, disabled, onStyle, onRetryFonts, onShortcut }: Props) {
+export default function TextSlotControls({ anchor, viewport, style, fonts, fontError, disabled, onStyle, onRetryFonts, onShortcut, children }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const formatRef = useRef<HTMLDetailsElement>(null);
   const optionsRef = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ width: 0, height: 0 });
+  const { left, top, size } = useAttachedPosition(ref, anchor, viewport);
   const [menuAnchor, setMenuAnchor] = useState({ x: 0, y: 0, height: 0, menuHeight: 0 });
   const [customSize, setCustomSize] = useState(!FONT_SIZES.includes(style.fontSize));
   const [draftSize, setDraftSize] = useState(String(style.fontSize));
   const [sizeError, setSizeError] = useState<string | null>(null);
 
   useEffect(() => { setDraftSize(String(style.fontSize)); }, [style.fontSize]);
-  useLayoutEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-    const { width, height } = element.getBoundingClientRect();
-    setSize((current) => current.width === width && current.height === height ? current : { width, height });
-  });
-  useLayoutEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-    const observer = new ResizeObserver(([entry]) => {
-      const box = entry.borderBoxSize?.[0];
-      setSize({ width: box?.inlineSize ?? entry.contentRect.width, height: box?.blockSize ?? entry.contentRect.height });
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
 
   function positionFormatMenu() {
     const details = formatRef.current;
@@ -62,18 +49,6 @@ export default function TextSlotControls({ anchor, viewport, style, fonts, fontE
     if (fontSize !== style.fontSize) onStyle({ fontSize });
   }
 
-  const fitsAbove = anchor.y >= size.height + 8;
-  const fitsBelow = anchor.y + anchor.height + size.height + 8 <= viewport.height - 8;
-  const fitsLeft = anchor.x >= size.width + 16;
-  const fitsRight = anchor.x + anchor.width + size.width + 16 <= viewport.width;
-  const beside = !fitsAbove && !fitsBelow && (fitsLeft || fitsRight);
-  const left = beside
-    ? fitsLeft ? anchor.x - size.width - 8 : anchor.x + anchor.width + 8
-    : Math.max(8, Math.min(anchor.x, viewport.width - size.width - 8));
-  const top = Math.max(8, Math.min(
-    beside ? anchor.y : fitsAbove ? anchor.y - size.height - 8 : anchor.y + anchor.height + 8,
-    viewport.height - size.height - 8,
-  ));
   const menuWidth = Math.min(180, Math.max(0, viewport.width - 16));
   const menuLeft = Math.max(8, Math.min(left + menuAnchor.x, viewport.width - menuWidth - 8)) - left - menuAnchor.x;
   const below = top + menuAnchor.y + menuAnchor.height + 8;
@@ -83,7 +58,7 @@ export default function TextSlotControls({ anchor, viewport, style, fonts, fontE
   )) - top - menuAnchor.y;
 
   return (
-    <div ref={ref} className="text-slot-controls" role="toolbar" aria-label="Text Slot controls"
+    <div ref={ref} className="slot-controls text-slot-controls" role="toolbar" aria-label="Text Slot controls"
       style={{ left, top }} onMouseDown={(event) => event.stopPropagation()} onKeyDown={onShortcut}>
       <select aria-label="Font family" title="Font family" value={style.fontFamily} disabled={disabled}
         onChange={(event) => onStyle({ fontFamily: event.target.value })}>
@@ -129,6 +104,7 @@ export default function TextSlotControls({ anchor, viewport, style, fonts, fontE
         }}>
         <option value="left">Left</option><option value="center">Centre</option><option value="right">Right</option>
       </select>
+      {children && <><span className="toolbar-divider" aria-hidden="true" />{children}</>}
       {sizeError && <span className="text-controls-error" role="alert">{sizeError}</span>}
       {fontError && (
         <span className="text-controls-error" role="alert">

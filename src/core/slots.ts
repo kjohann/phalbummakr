@@ -75,24 +75,32 @@ function unusedSlotId(page: Page): string {
   return `slot-${number}`;
 }
 
-export function addPhotoSlot(album: Album, pageId: string): Album {
-  return editPage(album, pageId, (page) => ({
+function centreNewSlot(album: Album, pageId: string, centre?: { x: number; y: number }): Album {
+  if (!centre) return album;
+  const slot = album.pages.find((page) => page.id === pageId)!.slots.at(-1)!;
+  return moveSlot(album, pageId, slot.id, centre.x - slot.width / 2, centre.y - slot.height / 2);
+}
+
+/** Adds an empty Photo Slot, centred on `centre` (fractions of the trim Page) when given. */
+export function addPhotoSlot(album: Album, pageId: string, centre?: { x: number; y: number }): Album {
+  return centreNewSlot(editPage(album, pageId, (page) => ({
     ...page,
     slots: [...page.slots, {
       id: unusedSlotId(page), type: "photo", x: 0.3, y: 0.3, width: 0.4, height: 0.4, placement: null,
     }],
-  }));
+  })), pageId, centre);
 }
 
-export function addTextSlot(album: Album, pageId: string): Album {
+/** Adds an empty Text Slot, centred on `centre` (fractions of the trim Page) when given. */
+export function addTextSlot(album: Album, pageId: string, centre?: { x: number; y: number }): Album {
   const height = 18 * TEXT_LINE_HEIGHT / POINTS_PER_MM / pageDimensions(album.pageFormat).heightMm;
-  return editPage(album, pageId, (page) => ({
+  return centreNewSlot(editPage(album, pageId, (page) => ({
     ...page,
     slots: [...page.slots, {
       id: unusedSlotId(page), type: "text", x: 0.3, y: 0.3, width: 0.4, height,
       text: "", style: { fontFamily: "Arial", fontSize: 18, color: "#000000", bold: false, italic: false, underline: false, align: "left" },
     }],
-  }));
+  })), pageId, centre);
 }
 
 function editSlot(album: Album, pageId: string, slotId: string, edit: (slot: Slot) => Slot): Album {

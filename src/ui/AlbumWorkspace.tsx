@@ -1,10 +1,19 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { createAlbum, deserializeAlbum, serializeAlbum, type Album, type AlbumPorts, type PhotoPreviewPorts } from "../core";
 import AlbumView from "./AlbumView";
+import ModalDialog from "./ModalDialog";
 import { tauriAlbumPorts } from "./tauriAlbumPorts";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
 import { tauriFontPorts, type FontPorts } from "./tauriFontPorts";
 import { fitTextSlots } from "./textLayout";
+
+export type AlbumCommandName = "delete-slot" | "album-settings" | "add-spread";
+
+/** A native menu command for the open Album; `serial` makes repeated commands distinct. */
+export interface AlbumCommand {
+  name: AlbumCommandName;
+  serial: number;
+}
 
 interface Props {
   root: string;
@@ -17,9 +26,13 @@ interface Props {
   suspended?: boolean;
   confirmSpreadDeletion?: boolean;
   setConfirmSpreadDeletion?: (value: boolean) => Promise<void>;
+  confirmSlotDeletion?: boolean;
+  setConfirmSlotDeletion?: (value: boolean) => Promise<void>;
+  command?: AlbumCommand;
+  onSlotSelectedChange?: (selected: boolean) => void;
 }
 
-export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document, suspended = false, confirmSpreadDeletion = true, setConfirmSpreadDeletion }: Props) {
+export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document, suspended = false, confirmSpreadDeletion = true, setConfirmSpreadDeletion, confirmSlotDeletion = true, setConfirmSlotDeletion, command, onSlotSelectedChange }: Props) {
   const [names, setNames] = useState<string[]>([]);
   const [current, setCurrent] = useState<{ filename: string; album: Album } | null>(
     () => document ? { filename: document.path, album: fitTextSlots(document.album) } : null,
@@ -42,6 +55,13 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
   const currentRef = useRef(current);
   const saveInFlight = useRef(false);
   const locked = busy || listing || saveStatus !== "saved" || cropPending || dialogOpen;
+  const handledCommand = useRef(command?.serial);
+
+  useEffect(() => {
+    if (!command || handledCommand.current === command.serial) return;
+    handledCommand.current = command.serial;
+    if (command.name === "album-settings" && currentRef.current && !suspended) setSettingsOpen(true);
+  }, [command, suspended]);
 
   function setCurrentAlbum(next: typeof current) {
     currentRef.current = next;
@@ -185,7 +205,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
             onClick={() => void open(name)}>{name}</button>
         ))}
       </nav></>}
-      {error && <p className="error-banner" role="alert">{error}</p>}
+      {error && !settingsOpen && <p className="error-banner" role="alert">{error}</p>}
       {duplicateWarning && (
         <div className="usage-warning" role="status">
           <span>{duplicateWarning} is already used in this Album.</span>
@@ -217,41 +237,44 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
         <>
           <div className="album-toolbar"><h2>{current.album.title}</h2><span>{current.album.pages.length} Pages</span></div>
           <p className="album-details">A4 landscape - 297 x 210 mm - {current.album.pageFormat.dpi} DPI</p>
-          <div className="album-toolbar">
-            <div className="album-settings-wrapper">
-              <button type="button" className="button-quiet" disabled={suspended} aria-expanded={settingsOpen}
-                aria-controls="album-settings" onClick={() => setSettingsOpen(!settingsOpen)}>Album settings</button>
-              {settingsOpen && (
-                <form id="album-settings" className="album-form album-settings" aria-label="Album settings"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    const form = new FormData(event.currentTarget);
-                    changeAlbum((album) => ({ ...album, title: document ? String(form.get("title")) : album.title, pageFormat: {
-                      ...album.pageFormat,
-                      bleedMm: Number(form.get("bleedMm")),
-                      safeZoneMm: Number(form.get("safeZoneMm")),
-                      dpi: Number(form.get("dpi")),
-                    } }));
-                  }}>
-                  <h3>Album settings</h3>
-                  <fieldset disabled={suspended || busy || saveStatus === "saving" || saveStatus === "error"}>
-                    {document && <label>Title<textarea name="title" defaultValue={current.album.title} rows={2} /></label>}
-                    <p className="album-details">Page Format: A4 landscape (297 x 210 mm)</p>
-                    <label>Bleed (mm)<input name="bleedMm" type="number" min="0" step="any"
-                      defaultValue={current.album.pageFormat.bleedMm} required /></label>
-                    <label>Safe Zone (mm)<input name="safeZoneMm" type="number" min="0" max="104.99" step="any"
-                      defaultValue={current.album.pageFormat.safeZoneMm} required /></label>
-                    <label>Export resolution (DPI)<input name="dpi" type="number" min="1" step="any"
-                      defaultValue={current.album.pageFormat.dpi} required /></label>
-                    <button type="submit" className="button-primary">Apply print settings</button>
-                  </fieldset>
-                </form>
-              )}
-            </div>
-          </div>
+          {settingsOpen && (
+            <ModalDialog label="Album settings" onClose={() => setSettingsOpen(false)}>
+              <form id="album-settings" className="album-settings" aria-label="Album settings"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const form = new FormData(event.currentTarget);
+                  changeAlbum((album) => ({ ...album, title: document ? String(form.get("title")) : album.title, pageFormat: {
+                    ...album.pageFormat,
+                    bleedMm: Number(form.get("bleedMm")),
+                    safeZoneMm: Number(form.get("safeZoneMm")),
+                    dpi: Number(form.get("dpi")),
+                  } }));
+                }}>
+                <h2>Album settings</h2>
+                {error && <p className="error-banner" role="alert">{error}</p>}
+                <fieldset disabled={suspended || busy || saveStatus === "saving" || saveStatus === "error"}>
+                  {document && <label>Title<textarea name="title" defaultValue={current.album.title} rows={2} /></label>}
+                  <p className="album-details">Page Format: A4 landscape (297 x 210 mm)</p>
+                  <label>Bleed (mm)<input name="bleedMm" type="number" min="0" step="any"
+                    defaultValue={current.album.pageFormat.bleedMm} required /></label>
+                  <label>Safe Zone (mm)<input name="safeZoneMm" type="number" min="0" max="104.99" step="any"
+                    defaultValue={current.album.pageFormat.safeZoneMm} required /></label>
+                  <label>Export resolution (DPI)<input name="dpi" type="number" min="1" step="any"
+                    defaultValue={current.album.pageFormat.dpi} required /></label>
+                </fieldset>
+                <div className="album-toolbar">
+                  <button type="submit" className="button-primary"
+                    disabled={suspended || busy || saveStatus === "saving" || saveStatus === "error"}>Apply print settings</button>
+                  <button type="button" className="button-quiet" onClick={() => setSettingsOpen(false)}>Close</button>
+                </div>
+              </form>
+            </ModalDialog>
+          )}
           <AlbumView key={current.filename} album={current.album} onChange={changeAlbum}
             root={root} photoPorts={photoPorts} fontPorts={fontPorts}
             confirmSpreadDeletion={confirmSpreadDeletion} setConfirmSpreadDeletion={setConfirmSpreadDeletion}
+            confirmSlotDeletion={confirmSlotDeletion} setConfirmSlotDeletion={setConfirmSlotDeletion}
+            command={command} onSlotSelectedChange={onSlotSelectedChange}
             onDuplicatePhoto={setDuplicateWarning}
             onCropPendingChange={setCropPending}
             onDialogChange={setDialogOpen}
