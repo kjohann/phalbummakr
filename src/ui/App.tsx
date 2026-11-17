@@ -11,10 +11,12 @@ import PhotoBrowser from "./PhotoBrowser";
 interface Settings {
   lastAlbum: string | null;
   recentAlbums: string[];
+  confirmSpreadDeletion: boolean;
 }
 
 export interface DocumentPorts {
   settings(): Promise<Settings>;
+  setConfirmSpreadDeletion(value: boolean): Promise<void>;
   exists(path: string): Promise<boolean>;
   read(path: string): Promise<string>;
   write(path: string, json: string, create: boolean): Promise<void>;
@@ -29,6 +31,7 @@ export interface DocumentPorts {
 const filters = [{ name: "Album", extensions: ["phalbum"] }];
 const desktopPorts: DocumentPorts = {
   settings: () => invoke("album_settings"),
+  setConfirmSpreadDeletion: (value) => invoke("set_confirm_spread_deletion", { value }),
   exists: (path) => invoke("album_exists", { path }),
   read: (path) => invoke("read_album_file", { path }),
   write: (path, json, create) => invoke("write_album_file", { path, json, create }),
@@ -47,12 +50,14 @@ interface OpenDocument {
   album: Album;
 }
 
-function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, suspended }: {
+function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, suspended, confirmSpreadDeletion, setConfirmSpreadDeletion }: {
   document: OpenDocument;
   onBusyChange: (busy: boolean) => void;
   onTitleChange: (album: Album | null) => void;
   hidden: boolean;
   suspended: boolean;
+  confirmSpreadDeletion: boolean;
+  setConfirmSpreadDeletion: (value: boolean) => Promise<void>;
 }) {
   const [album, setAlbum] = useState<Album | null>(document.album);
   const reportAlbum = useCallback((next: Album | null) => {
@@ -62,7 +67,8 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
   return (
     <div className="library-workspace" style={{ display: hidden ? "none" : undefined }}>
       <PhotoBrowser root={document.root} album={album} />
-      <AlbumWorkspace root={document.root} document={document} suspended={suspended} onBusyChange={onBusyChange} onAlbumChange={reportAlbum} />
+      <AlbumWorkspace root={document.root} document={document} suspended={suspended} onBusyChange={onBusyChange} onAlbumChange={reportAlbum}
+        confirmSpreadDeletion={confirmSpreadDeletion} setConfirmSpreadDeletion={setConfirmSpreadDeletion} />
     </div>
   );
 }
@@ -76,6 +82,10 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
   const [busy, setBusy] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmSpreadDeletion, setConfirmSpreadDeletionState] = useState(true);
+  const [preferencesOpen, setPreferencesOpen] = useState(false);
+  const [preferenceSaving, setPreferenceSaving] = useState(false);
+  const [preferenceError, setPreferenceError] = useState<string | null>(null);
   const busyRef = useRef(false);
   const operationRef = useRef(false);
   const documentId = useRef(0);
@@ -88,6 +98,10 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
     setBusy(value || operationRef.current);
   }, []);
   const reportTitle = useCallback((album: Album | null) => setTitle(album?.title ?? null), []);
+  const setConfirmSpreadDeletion = useCallback(async (value: boolean) => {
+    await ports.setConfirmSpreadDeletion(value);
+    setConfirmSpreadDeletionState(value);
+  }, [ports]);
 
   async function refreshRecent() {
     setRecent((await ports.settings()).recentAlbums);
@@ -138,6 +152,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
         const settings = await ports.settings();
         if (!active) return;
         setRecent(settings.recentAlbums);
+        setConfirmSpreadDeletionState(settings.confirmSpreadDeletion);
         const path = settings.lastAlbum;
         if (!path) return;
         if (!(await ports.exists(path))) {
@@ -170,8 +185,8 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
     return () => { active = false; };
   }, [ports]);
 
-  const actions = useRef<{ newAlbum: () => void; openAlbum: () => void; openRecent: (path: string) => void; closeAlbum: () => void; exit: () => void }>(
-    { newAlbum: () => {}, openAlbum: () => {}, openRecent: () => {}, closeAlbum: () => {}, exit: () => {} },
+  const actions = useRef<{ newAlbum: () => void; openAlbum: () => void; openRecent: (path: string) => void; closeAlbum: () => void; preferences: () => void; exit: () => void }>(
+    { newAlbum: () => {}, openAlbum: () => {}, openRecent: () => {}, closeAlbum: () => {}, preferences: () => {}, exit: () => {} },
   );
   actions.current = {
     newAlbum: () => void run(async () => {
@@ -189,6 +204,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
       setTitle(null);
       setDraft(null);
     }, "Could not close Album"),
+    preferences: () => { setPreferenceError(null); setPreferencesOpen(true); },
     exit: () => {
       if (isTauri()) void getCurrentWindow().close().catch((cause: unknown) => setError(`Could not close window: ${String(cause)}`));
     },
@@ -230,10 +246,11 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
         try {
           if (!("get" in file)) throw new Error("The File menu is not a submenu.");
           const enabledById = {
-            "new-album": !busy && !restoring,
-            "open-album": !busy && !restoring,
-            "open-recent": !busy && !restoring && recent.length > 0,
-            "close-album": !busy && !restoring && (document !== null || draft !== null),
+            "new-album": !busy && !restoring && !preferencesOpen,
+            "open-album": !busy && !restoring && !preferencesOpen,
+            "open-recent": !busy && !restoring && !preferencesOpen && recent.length > 0,
+            "close-album": !busy && !restoring && !preferencesOpen && (document !== null || draft !== null),
+            "preferences": !restoring && !preferencesOpen,
           };
           for (const [id, enabled] of Object.entries(enabledById)) {
             const item = await file.get(id);
@@ -254,12 +271,13 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
         id: "file",
         text: "File",
         items: [
-          { id: "new-album", text: "New Album…", enabled: !busy && !restoring, action: () => actions.current.newAlbum() },
-          { id: "open-album", text: "Open Album…", enabled: !busy && !restoring, action: () => actions.current.openAlbum() },
-          { id: "open-recent", text: "Open Recent", enabled: !busy && !restoring && recent.length > 0, items: recent.map((path) => ({
+          { id: "new-album", text: "New Album…", enabled: !busy && !restoring && !preferencesOpen, action: () => actions.current.newAlbum() },
+          { id: "open-album", text: "Open Album…", enabled: !busy && !restoring && !preferencesOpen, action: () => actions.current.openAlbum() },
+          { id: "open-recent", text: "Open Recent", enabled: !busy && !restoring && !preferencesOpen && recent.length > 0, items: recent.map((path) => ({
             text: path.replaceAll("&", "&&"), action: () => actions.current.openRecent(path),
           })) },
-          { id: "close-album", text: "Close Album", enabled: !busy && !restoring && (document !== null || draft !== null), action: () => actions.current.closeAlbum() },
+          { id: "close-album", text: "Close Album", enabled: !busy && !restoring && !preferencesOpen && (document !== null || draft !== null), action: () => actions.current.closeAlbum() },
+          { id: "preferences", text: "Preferences…", enabled: !restoring && !preferencesOpen, action: () => actions.current.preferences() },
           { text: "Exit", action: () => actions.current.exit() },
         ],
       }] });
@@ -279,7 +297,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
       if (active) setError(`Could not update File menu: ${String(cause)}`);
     });
     return () => { active = false; };
-  }, [recent, busy, restoring, document, draft]);
+  }, [recent, busy, restoring, document, draft, preferencesOpen]);
 
   useEffect(() => () => {
     menuQueue.current = menuQueue.current.then(async () => {
@@ -314,6 +332,21 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
   return (
     <main className="app-shell">
       {error && <p className="error-banner" role="alert">{error}</p>}
+      {preferencesOpen && <div className="dialog-backdrop">
+        <div className="album-form" role="dialog" aria-modal="true" aria-label="Preferences">
+          <h1>Preferences</h1>
+          <label><input type="checkbox" checked={confirmSpreadDeletion} disabled={preferenceSaving}
+            onChange={(event) => {
+              const value = event.target.checked;
+              setPreferenceError(null);
+              setPreferenceSaving(true);
+              void setConfirmSpreadDeletion(value).catch((cause: unknown) => setPreferenceError(`Could not save preference: ${String(cause)}`))
+                .finally(() => setPreferenceSaving(false));
+            }} /> Confirm Spread deletion</label>
+          {preferenceError && <p className="error-banner" role="alert">{preferenceError}</p>}
+          <button type="button" disabled={preferenceSaving} onClick={() => setPreferencesOpen(false)}>Close</button>
+        </div>
+      </div>}
       {draft ? (
         <form className="album-form new-album-form" role="dialog" aria-modal="true" onSubmit={(event) => void create(event)} aria-label="Album settings">
           <h1>Album settings</h1>
@@ -340,7 +373,8 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
         </section>
       )}
       {document && <DocumentWorkspace key={document.id} document={document} onBusyChange={reportBusy}
-        onTitleChange={reportTitle} hidden={draft !== null} suspended={transitioning} />}
+        onTitleChange={reportTitle} hidden={draft !== null} suspended={transitioning}
+        confirmSpreadDeletion={confirmSpreadDeletion} setConfirmSpreadDeletion={setConfirmSpreadDeletion} />}
     </main>
   );
 }

@@ -1,6 +1,6 @@
 # 018 – Page strip
 
-Status: todo · Depends on: 017
+Status: doing · Depends on: 017
 
 ## What
 

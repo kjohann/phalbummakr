@@ -60,15 +60,17 @@ is on the right facing the front **Inside cover**; the final Page is on the left
 facing the back Inside Cover. Remaining Pages pair in order. Inside Covers cannot
 be selected, hold Slots, receive Photos or be exported, and are not saved in the Album.
 
-**Add Spread** inserts two empty Pages after the selected Spread (or before the
-last Spread). **Duplicate Page** inserts a Spread there with the copy on the same
-side and an empty sibling. **Delete Spread** removes both Pages after confirmation;
-**Clear Page** clears the first or last Page after confirmation without removing it.
-Drag a Page thumbnail onto another to move it to
-that position, or use **Earlier** / **Later** with the keyboard. Page numbers and
-Spreads update from the new order, while Page identities remain stable. The
-selected thumbnail scrolls into view. The editor keeps the trim edge at A4
-proportions, with Bleed outside it and a dashed Safe Zone inside it.
+Hover between Spreads and choose **+** to insert two empty Pages, or hover a
+middle Spread and choose **×** to delete it. Right-click a Page for insertion,
+deletion and duplication options, or right-click empty strip space to add a
+Spread before the last one. Duplicating copies the Page onto the same side of a
+new Spread, except that a copy of the last Page is placed on the left before it.
+Deleting a Spread with content asks for confirmation unless disabled with
+**Never ask again** or **File > Preferences**. The first and last Spreads cannot
+be deleted. Drag a Page thumbnail onto another to move it to that position.
+Page numbers and Spreads update from the new order, while Page identities remain
+stable. The selected thumbnail scrolls into view. The editor keeps the trim edge
+at A4 proportions, with Bleed outside it and a dashed Safe Zone inside it.
 
 **Album settings** contains the title and print settings. Use **Apply print settings** for the title, Bleed,
 Safe Zone and DPI changes. The Page Format remains A4 landscape. All applied edits

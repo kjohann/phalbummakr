@@ -4,7 +4,7 @@ import {
   addPage, addPhotoSlot, addTextSlot, albumSpreads, deletePage, deleteSlot, duplicatePage, movePage, moveSlot, pageDimensions,
   fitPhotoRect, panCrop, placePhoto, placePhotoOnPage, placementDisplayCrop, photoUsage, resizeSlot, rotateSlot, setPlacementCrop,
   setPlacementFit, setSlotText, setTextStyle, swapPlacements, zoomCrop, POINTS_PER_MM, TEXT_LINE_HEIGHT,
-  type Album, type Crop, type PageFormat, type PhotoPreviewPorts, type Rectangle, type Slot, type SlotAddress, type TextSlot, type TextStyle,
+  type Album, type Crop, type Page, type PageFormat, type PhotoPreviewPorts, type Rectangle, type Slot, type SlotAddress, type TextSlot, type TextStyle,
 } from "../core";
 import { hasPhotoDrag, readPhotoDrag } from "./photoDrag";
 import { snapSlot, type SnapGuide } from "./slotSnapping";
@@ -28,6 +28,8 @@ interface Props {
   fontPorts: FontPorts;
   onDuplicatePhoto: (path: string) => void;
   onCropPendingChange: (pending: boolean) => void;
+  confirmSpreadDeletion: boolean;
+  setConfirmSpreadDeletion?: (value: boolean) => Promise<void>;
 }
 
 /** An in-progress mouse drag of a Slot, in screen pixels. */
@@ -84,7 +86,7 @@ function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, trimHeig
   };
 }
 
-export default function AlbumView({ album: savedAlbum, onChange, disabled, textDisabled, root, photoPorts, fontPorts, onDuplicatePhoto, onCropPendingChange }: Props) {
+export default function AlbumView({ album: savedAlbum, onChange, disabled, textDisabled, root, photoPorts, fontPorts, onDuplicatePhoto, onCropPendingChange, confirmSpreadDeletion, setConfirmSpreadDeletion }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLElement>(null);
   const selectedSlotOverlayRef = useRef<HTMLDivElement>(null);
@@ -106,6 +108,12 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
   const [cropMode, setCropMode] = useState(false);
   const [photoDragActive, setPhotoDragActive] = useState(false);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; index: number } | null>(null);
+  const [neverAsk, setNeverAsk] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [stripMenu, setStripMenu] = useState<{ x: number; y: number; pageId: string | null } | null>(null);
+  const [pageDropId, setPageDropId] = useState<string | null>(null);
   const [thumbnailBySlot, setThumbnailBySlot] = useState<Record<string, string>>({});
   const [previewStates, setPreviewStates] = useState<Record<string, {
     path: string; status: "loading" | "ready" | "error"; attempt: number;
@@ -133,8 +141,6 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
   const spreadIndex = spreads.findIndex((spread) => spread.left?.id === selectedPage.id || spread.right?.id === selectedPage.id);
   const spread = spreads[spreadIndex];
   const pageNumbers = new Map(album.pages.map((page, index) => [page.id, index + 1]));
-  const insertionIndex = Math.min(spreadIndex * 2 + 1, album.pages.length - 1);
-  const endPage = spread.left === null || spread.right === null;
 
   useEffect(() => {
     stripRef.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -161,6 +167,58 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
       return updated;
     });
   }
+
+  function requestDeleteSpread(index: number) {
+    const item = spreads[index];
+    if (!item.left || !item.right || disabled) return;
+    if (confirmSpreadDeletion && (item.left.slots.length > 0 || item.right.slots.length > 0)) {
+      setNeverAsk(false);
+      setDeleteError(null);
+      setDeleteTarget({ id: item.left.id, index: index * 2 - 1 });
+    } else {
+      removeSpread(item.left.id, index * 2 - 1);
+    }
+  }
+
+  function removeSpread(id: string, index: number) {
+    changeAlbum((current) => {
+      const currentIndex = current.pages.findIndex((page) => page.id === id);
+      if (currentIndex <= 0 || currentIndex >= current.pages.length - 1 || currentIndex % 2 !== 1) {
+        throw new Error("Spread is no longer available for deletion.");
+      }
+      const updated = deletePage(current, id);
+      if (!updated.pages.some((page) => page.id === selectedId)) {
+        selectPage(updated.pages[Math.min(index, updated.pages.length - 1)].id);
+      }
+      return updated;
+    });
+  }
+
+  async function confirmDeleteSpread() {
+    if (!deleteTarget || deleting) return;
+    setDeleting(true);
+    try {
+      if (neverAsk) {
+        if (!setConfirmSpreadDeletion) throw new Error("Preferences are unavailable.");
+        await setConfirmSpreadDeletion(false);
+      }
+      removeSpread(deleteTarget.id, deleteTarget.index);
+      setDeleteTarget(null);
+    } catch (cause) {
+      setDeleteError(`Could not save preference: ${String(cause)}`);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!stripMenu) return;
+    const close = () => setStripMenu(null);
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", escape);
+    return () => { window.removeEventListener("click", close); window.removeEventListener("keydown", escape); };
+  }, [stripMenu]);
 
   useEffect(() => () => {
     stopSlotDrag.current?.();
@@ -442,28 +500,6 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
             {album.pages.map((page, index) => <option key={page.id} value={page.id}>{index + 1}</option>)}
           </select>
         </label>
-        <button type="button" className="button-quiet" disabled={disabled || album.pages.length >= 10000}
-          onClick={() => editPages((current) => addPage(current, selectedPage.id), insertionIndex)}>Add Spread</button>
-        <button type="button" className="button-quiet" disabled={disabled || album.pages.length >= 10000}
-          onClick={() => editPages((current) => duplicatePage(current, selectedPage.id),
-            insertionIndex + (spread.right?.id === selectedPage.id ? 1 : 0))}>Duplicate Page</button>
-        <button type="button" className="button-quiet" disabled={disabled || (endPage && selectedPage.slots.length === 0)}
-          onClick={() => {
-            const first = endPage ? visiblePageIndex : spreadIndex * 2 - 1;
-            const message = endPage
-              ? `Clear Page ${visiblePageIndex + 1} and its content?`
-              : `Delete Pages ${first + 1} and ${first + 2} and their content?`;
-            if (window.confirm(message)) editPages((current) => deletePage(current, selectedPage.id), first);
-          }}>{endPage ? "Clear Page" : "Delete Spread"}</button>
-        <button type="button" className="button-quiet" aria-label="Move Page earlier" disabled={disabled || visiblePageIndex === 0}
-          onClick={() => editPages((current) => movePage(current, selectedPage.id, visiblePageIndex - 1), visiblePageIndex - 1)}>
-          Earlier
-        </button>
-        <button type="button" className="button-quiet" aria-label="Move Page later" disabled={disabled || visiblePageIndex === album.pages.length - 1}
-          onClick={() => editPages((current) => movePage(current, selectedPage.id, visiblePageIndex + 1), visiblePageIndex + 1)}>
-          Later
-        </button>
-        <span className="toolbar-divider" aria-hidden="true" />
         <button type="button" className="button-quiet" disabled={disabled} onClick={() => {
           const pageId = selectedPage.id;
           const added = addPhotoSlot(album, pageId).pages.find((page) => page.id === pageId)!.slots.at(-1)!;
@@ -813,19 +849,38 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
           <span>Hold Alt for free placement</span>
         </span>
       </div>
-      <nav className="spread-strip" aria-label="Spreads" ref={stripRef} onDragOver={(event) => {
+      <nav className="spread-strip" aria-label="Spreads" ref={stripRef} onContextMenu={(event) => {
+        event.preventDefault();
+        if (!disabled) setStripMenu({ x: event.clientX, y: event.clientY, pageId: null });
+      }} onDragOver={(event) => {
         if (disabled || !draggedId.current) return;
         const bounds = event.currentTarget.getBoundingClientRect();
         if (event.clientX < bounds.left + 32) event.currentTarget.scrollLeft -= 16;
         else if (event.clientX > bounds.right - 32) event.currentTarget.scrollLeft += 16;
       }}>
         {spreads.map((item, index) => (
+          <Fragment key={index}>
+          {index > 0 && <div className="spread-gap">
+            <button type="button" aria-label={`Insert Spread before Spread ${index + 1}`}
+              disabled={disabled || album.pages.length >= 10000}
+              onClick={() => editPages((current) => addPage(current, album.pages[index * 2 - 2].id), index * 2 - 1)}>+</button>
+          </div>}
           <div className="spread-thumbnail" key={index} role="group" aria-label={`Spread ${index + 1}`}>
+            {index > 0 && index < spreads.length - 1 && <button type="button" className="spread-delete"
+              aria-label={`Delete Spread ${index + 1}`} disabled={disabled}
+              onClick={() => requestDeleteSpread(index)}>×</button>}
             {[item.left, item.right].map((page, side) => page ? (
-              <button type="button" key={page.id} className="page-thumbnail"
+              <div className="page-thumbnail-wrapper" key={page.id}>
+              <PagePreview page={page} format={album.pageFormat} root={root} photoPorts={photoPorts} />
+              <button type="button" key={page.id} className={`page-thumbnail${pageDropId === page.id ? " page-drop-target" : ""}`}
                 style={{ aspectRatio: `${dimensions.widthMm} / ${dimensions.heightMm}` }}
                 aria-label={`Select Page ${pageNumbers.get(page.id)}`} aria-pressed={page.id === selectedPage.id}
                 draggable={!disabled}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (!disabled) setStripMenu({ x: event.clientX, y: event.clientY, pageId: page.id });
+                }}
                 onDragStart={(event) => {
                   if (disabled) { event.preventDefault(); return; }
                   draggedId.current = page.id;
@@ -837,27 +892,107 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
                   if (disabled || !draggedId.current) return;
                   event.preventDefault();
                   event.dataTransfer.dropEffect = "move";
+                  setPageDropId(page.id);
                 }}
                 onDrop={(event) => {
                   if (disabled || !draggedId.current) return;
                   event.preventDefault();
                   const id = draggedId.current;
                   draggedId.current = null;
+                  setPageDropId(null);
                   changeAlbum((current) => movePage(current, id, current.pages.findIndex((target) => target.id === page.id)));
                 }}
-                onDragEnd={() => { draggedId.current = null; }}
-                onClick={() => selectPage(page.id)}>{pageNumbers.get(page.id)}</button>
+                onDragEnd={() => { draggedId.current = null; setPageDropId(null); }}
+                onClick={() => selectPage(page.id)}><span className="thumbnail-number">{pageNumbers.get(page.id)}</span></button>
+              </div>
             ) : (
-              <span key={`blocked-${side}`} className="page-thumbnail page-thumbnail-blocked">
+              <span key={`blocked-${side}`} className="page-thumbnail page-thumbnail-blocked"
+                onDragOver={() => setPageDropId(null)} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}>
                 Inside cover
               </span>
             ))}
           </div>
+          </Fragment>
         ))}
       </nav>
+      {stripMenu && (() => {
+        const pageIndex = album.pages.findIndex((page) => page.id === stripMenu.pageId);
+        const targetSpreadIndex = pageIndex < 0 ? -1 : Math.floor((pageIndex + 1) / 2);
+        const full = album.pages.length >= 10000;
+        const close = () => setStripMenu(null);
+        return <div role="menu" className="strip-menu" style={{ left: Math.min(stripMenu.x, window.innerWidth - 220), top: Math.min(stripMenu.y, window.innerHeight - 160) }}>
+          {pageIndex < 0 ? <button role="menuitem" type="button" disabled={full}
+            onClick={() => { editPages((current) => addPage(current, album.pages.at(-1)!.id), album.pages.length - 1); close(); }}>Add Spread</button> : <>
+            <button role="menuitem" type="button" disabled={full || targetSpreadIndex === 0}
+              onClick={() => { editPages((current) => addPage(current, album.pages[targetSpreadIndex * 2 - 2].id), targetSpreadIndex * 2 - 1); close(); }}>Insert Spread Before</button>
+            <button role="menuitem" type="button" disabled={full || targetSpreadIndex === spreads.length - 1}
+              onClick={() => { editPages((current) => addPage(current, stripMenu.pageId!), targetSpreadIndex * 2 + 1); close(); }}>Insert Spread After</button>
+            <button role="menuitem" type="button" disabled={targetSpreadIndex === 0 || targetSpreadIndex === spreads.length - 1}
+              onClick={() => { requestDeleteSpread(targetSpreadIndex); close(); }}>Delete Spread</button>
+            <button role="menuitem" type="button" disabled={full}
+              onClick={() => {
+                const insertion = Math.min(targetSpreadIndex * 2 + 1, album.pages.length - 1);
+                const copyIndex = insertion + (pageIndex % 2 === 0 && pageIndex !== album.pages.length - 1 ? 1 : 0);
+                editPages((current) => duplicatePage(current, stripMenu.pageId!), copyIndex);
+                close();
+              }}>Duplicate Page onto New Spread</button>
+          </>}
+        </div>;
+      })()}
+      {deleteTarget && <div className="dialog-backdrop">
+        <div className="album-form" role="dialog" aria-modal="true" aria-label="Discard Spread and its content?">
+          <h2>Discard Spread and its content?</h2>
+          <label><input type="checkbox" checked={neverAsk} onChange={(event) => setNeverAsk(event.target.checked)} /> Never ask again</label>
+          {deleteError && <p role="alert">{deleteError}</p>}
+          <div className="album-toolbar">
+            <button type="button" disabled={deleting} onClick={() => void confirmDeleteSpread()}>Discard Spread</button>
+            <button type="button" disabled={deleting} onClick={() => setDeleteTarget(null)}>Cancel</button>
+          </div>
+        </div>
+      </div>}
     </section>
   );
 }
+
+function PagePreview({ page, format, root, photoPorts }: {
+  page: Page; format: PageFormat; root: string; photoPorts: PhotoPreviewPorts;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(typeof IntersectionObserver === "undefined");
+  useEffect(() => {
+    if (!ref.current || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting));
+    observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, []);
+  const dimensions = pageDimensions(format);
+  const scale = 76 / dimensions.widthMm;
+  const width = dimensions.widthMm * scale;
+  const height = dimensions.heightMm * scale;
+  return <div ref={ref} className="page-preview" aria-hidden="true">
+    {visible && <Stage width={width} height={height}>
+      <Layer clipX={0} clipY={0} clipWidth={width} clipHeight={height}>
+        {page.slots.map((slot) => {
+          const rect = { x: slot.x * width, y: slot.y * height, width: slot.width * width, height: slot.height * height };
+          const sideways = slot.rotation === 90 || slot.rotation === 270;
+          const local = { x: 0, y: 0, width: sideways ? rect.height : rect.width, height: sideways ? rect.width : rect.height };
+          return <Group key={slot.id} x={rect.x + rect.width / 2} y={rect.y + rect.height / 2}
+            offsetX={local.width / 2} offsetY={local.height / 2} rotation={slot.rotation ?? 0}>
+            {slot.type === "text"
+              ? <TextContent slot={slot} id={slot.id} rect={local} scale={scale} format={format} hidden={false} onOverflow={ignoreOverflow} />
+              : slot.placement
+                ? <PlacementImage {...local} crop={placementDisplayCrop(slot.placement)} fit={slot.placement.fit}
+                  root={root} path={slot.placement.photoPath} photoPorts={photoPorts} attempt={0} slotId={slot.id} onStatus={ignorePreviewStatus} />
+                : <Rect {...local} fill="#e8ebe6" />}
+          </Group>;
+        })}
+      </Layer>
+    </Stage>}
+  </div>;
+}
+
+function ignoreOverflow() {}
+function ignorePreviewStatus() {}
 
 function TextContent({ slot, id, rect, scale, format, hidden, onOverflow }: {
   slot: TextSlot; id: string; rect: Rectangle;

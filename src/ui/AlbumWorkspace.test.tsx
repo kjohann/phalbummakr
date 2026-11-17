@@ -2,7 +2,7 @@
 import { useState, type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { addTextSlot, createAlbum, deserializeAlbum, photoUsage, serializeAlbum, type Album, type AlbumPorts } from "../core";
+import { addTextSlot, createAlbum, deserializeAlbum, photoUsage, serializeAlbum, setSlotText, type Album, type AlbumPorts } from "../core";
 import AlbumWorkspace from "./AlbumWorkspace";
 import PhotoBrowser from "./PhotoBrowser";
 import TextSlotControls from "./TextSlotControls";
@@ -11,7 +11,7 @@ vi.mock("react-konva", () => ({
   Stage: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   Layer: ({ children }: { children: ReactNode }) => <>{children}</>,
   Rect: () => null,
-  Text: () => null,
+  Text: ({ text }: { text: string }) => <span>{text}</span>,
   Group: ({ children, rotation }: { children: ReactNode; rotation?: number }) =>
     <div data-slot-rotation={rotation}>{children}</div>,
   Image: ({ image, opacity }: { image: HTMLImageElement; opacity?: number }) =>
@@ -88,6 +88,105 @@ function setExactFontSize(points: string) {
   fireEvent.keyDown(input, { key: "Enter" });
 }
 
+it("inserts an empty Spread between existing Spreads from the strip", () => {
+  const { ports } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports}
+    document={{ path: "Existing", album: createAlbum({ name: "Existing", pageCount: 4 }) }} />);
+  const strip = within(screen.getByRole("navigation", { name: "Spreads" }));
+  fireEvent.click(strip.getByRole("button", { name: "Insert Spread before Spread 2" }));
+  expect(screen.getByText("PAGE 2 OF 6")).toBeTruthy();
+  expect(strip.getAllByRole("group", { name: /Spread \d/ })).toHaveLength(4);
+});
+
+it("renders Page content in the strip thumbnail", () => {
+  const { ports } = disk();
+  const album = setSlotText(addTextSlot(createAlbum({ name: "Existing" }), "page-2"), "page-2", "slot-1", "A caption");
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} document={{ path: "Existing", album }} />);
+  expect(within(screen.getByRole("navigation", { name: "Spreads" })).getByText("A caption")).toBeTruthy();
+});
+
+it("deletes an empty middle Spread without asking and protects end Spreads", () => {
+  const { ports } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports}
+    document={{ path: "Existing", album: createAlbum({ name: "Existing", pageCount: 4 }) }} />);
+  const strip = within(screen.getByRole("navigation", { name: "Spreads" }));
+  expect(strip.queryByRole("button", { name: "Delete Spread 1" })).toBeNull();
+  expect(strip.queryByRole("button", { name: "Delete Spread 3" })).toBeNull();
+  fireEvent.click(strip.getByRole("button", { name: "Delete Spread 2" }));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.getByText("2 Pages")).toBeTruthy();
+});
+
+it("keeps the selected Page when deleting another Spread", () => {
+  const { ports } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports}
+    document={{ path: "Existing", album: createAlbum({ name: "Existing", pageCount: 6 }) }} />);
+  const strip = within(screen.getByRole("navigation", { name: "Spreads" }));
+  fireEvent.click(strip.getByRole("button", { name: "Select Page 6" }));
+  fireEvent.click(strip.getByRole("button", { name: "Delete Spread 2" }));
+  expect(screen.getByText("PAGE 4 OF 4")).toBeTruthy();
+});
+
+it("asks before discarding a Spread with content and can disable future prompts", async () => {
+  const { ports } = disk();
+  const setConfirmSpreadDeletion = vi.fn(async () => {});
+  const album = addTextSlot(createAlbum({ name: "Existing", pageCount: 4 }), "page-3");
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} document={{ path: "Existing", album }}
+    setConfirmSpreadDeletion={setConfirmSpreadDeletion} />);
+  fireEvent.click(screen.getByRole("button", { name: "Delete Spread 2" }));
+  const dialog = within(screen.getByRole("dialog", { name: "Discard Spread and its content?" }));
+  fireEvent.click(dialog.getByLabelText("Never ask again"));
+  fireEvent.click(dialog.getByRole("button", { name: "Discard Spread" }));
+  await waitFor(() => expect(setConfirmSpreadDeletion).toHaveBeenCalledWith(false));
+  await waitFor(() => expect(screen.getByText("2 Pages")).toBeTruthy());
+});
+
+it("offers context actions appropriate to a Page or empty strip", () => {
+  const { ports } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports}
+    document={{ path: "Existing", album: createAlbum({ name: "Existing", pageCount: 4 }) }} />);
+  const strip = screen.getByRole("navigation", { name: "Spreads" });
+  fireEvent.contextMenu(within(strip).getByRole("button", { name: "Select Page 1" }));
+  const menu = within(screen.getByRole("menu"));
+  expect((menu.getByRole("menuitem", { name: "Insert Spread Before" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((menu.getByRole("menuitem", { name: "Delete Spread" }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(menu.getByRole("menuitem", { name: "Duplicate Page onto New Spread" }));
+  expect(screen.getByText("PAGE 3 OF 6")).toBeTruthy();
+  fireEvent.contextMenu(strip);
+  fireEvent.click(screen.getByRole("menuitem", { name: "Add Spread" }));
+  expect(screen.getByText("8 Pages")).toBeTruthy();
+});
+
+it("inserts around a middle Spread and disables invalid end-Spread actions", () => {
+  const { ports } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports}
+    document={{ path: "Existing", album: createAlbum({ name: "Existing", pageCount: 6 }) }} />);
+  const strip = within(screen.getByRole("navigation", { name: "Spreads" }));
+  fireEvent.contextMenu(strip.getByRole("button", { name: "Select Page 4" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Insert Spread Before" }));
+  expect(screen.getByText("PAGE 4 OF 8")).toBeTruthy();
+  fireEvent.contextMenu(strip.getByRole("button", { name: "Select Page 8" }));
+  expect((screen.getByRole("menuitem", { name: "Insert Spread After" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("menuitem", { name: "Delete Spread" }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole("menuitem", { name: "Duplicate Page onto New Spread" }));
+  expect(screen.getByText("PAGE 8 OF 10")).toBeTruthy();
+});
+
+it("indicates the Page drop target and rejects drops on Inside Covers", () => {
+  const { ports } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports}
+    document={{ path: "Existing", album: createAlbum({ name: "Existing", pageCount: 4 }) }} />);
+  const strip = within(screen.getByRole("navigation", { name: "Spreads" }));
+  const transfer = { setData: vi.fn(), effectAllowed: "none", dropEffect: "none" };
+  fireEvent.dragStart(strip.getByRole("button", { name: "Select Page 1" }), { dataTransfer: transfer });
+  fireEvent.dragOver(strip.getByRole("button", { name: "Select Page 4" }), { dataTransfer: transfer });
+  expect(strip.getByRole("button", { name: "Select Page 4" }).classList.contains("page-drop-target")).toBe(true);
+  fireEvent.dragOver(strip.getAllByText("Inside cover")[1], { dataTransfer: transfer });
+  expect(strip.getByRole("button", { name: "Select Page 4" }).classList.contains("page-drop-target")).toBe(false);
+  fireEvent.drop(strip.getAllByText("Inside cover")[1], { dataTransfer: transfer });
+  expect(screen.getByText("PAGE 1 OF 4")).toBeTruthy();
+});
+
 it("shows non-interactive Inside Covers on both end Spreads", () => {
   const { ports } = disk();
   render(<AlbumWorkspace root="D:\\Photos" ports={ports}
@@ -108,24 +207,19 @@ it("shows non-interactive Inside Covers on both end Spreads", () => {
   expect(ports.write).not.toHaveBeenCalled();
 });
 
-it("confirms deletion of sibling Pages and clears end Pages without removing them", () => {
+it("cancels a destructive Spread deletion and honors the disabled preference", () => {
   const { ports } = disk();
-  const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValue(true);
   let album = createAlbum({ name: "Existing", pageCount: 4 });
   album = addTextSlot(addTextSlot(album, "page-1"), "page-2");
-  render(<AlbumWorkspace root="D:\\Photos" ports={ports} document={{ path: "Existing", album }} />);
-  const strip = within(screen.getByRole("navigation", { name: "Spreads" }));
-  fireEvent.click(strip.getByRole("button", { name: "Select Page 2" }));
-  fireEvent.click(screen.getByRole("button", { name: "Delete Spread" }));
-  expect(confirm).toHaveBeenLastCalledWith(expect.stringMatching(/2.*3/));
-  expect(screen.getByText("PAGE 2 OF 4")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Delete Spread" }));
-  expect(screen.getByText("PAGE 2 OF 2")).toBeTruthy();
-  fireEvent.click(strip.getByRole("button", { name: "Select Page 1" }));
-  fireEvent.click(screen.getByRole("button", { name: "Clear Page" }));
-  expect(confirm).toHaveBeenLastCalledWith(expect.stringMatching(/Page 1/));
-  expect(screen.getByText("PAGE 1 OF 2")).toBeTruthy();
-  expect(screen.queryByRole("textbox", { name: "Edit Page 1 Text Slot 1" })).toBeNull();
+  const document = { path: "Existing", album };
+  const { rerender } = render(<AlbumWorkspace root="D:\\Photos" ports={ports} document={document} />);
+  fireEvent.click(screen.getByRole("button", { name: "Delete Spread 2" }));
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(screen.getByText("4 Pages")).toBeTruthy();
+  rerender(<AlbumWorkspace root="D:\\Photos" ports={ports} document={document} confirmSpreadDeletion={false} />);
+  fireEvent.click(screen.getByRole("button", { name: "Delete Spread 2" }));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.getByText("2 Pages")).toBeTruthy();
 });
 
 it("autosaves an Album document without rendering save-status feedback", async () => {
@@ -140,7 +234,7 @@ it("autosaves an Album document without rendering save-status feedback", async (
   expect(screen.queryByRole("status")).toBeNull();
 
   vi.useFakeTimers();
-  fireEvent.click(screen.getByRole("button", { name: "Add Spread" }));
+  fireEvent.click(screen.getByRole("button", { name: "Insert Spread before Spread 2" }));
   expect(onBusyChange).toHaveBeenLastCalledWith(true);
   expect(screen.queryByRole("status")).toBeNull();
   await act(() => vi.advanceTimersByTimeAsync(500));
@@ -175,7 +269,7 @@ it("disables Album edits during a file transition", async () => {
   const { rerender } = render(<AlbumWorkspace root="D:\\Photos" document={document} ports={ports} />);
   fireEvent.click(await screen.findByRole("button", { name: "Album settings" }));
   rerender(<AlbumWorkspace root="D:\\Photos" document={document} ports={ports} suspended />);
-  expect((screen.getByRole("button", { name: "Add Spread" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "Insert Spread before Spread 2" }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getByLabelText("Title").matches(":disabled")).toBe(true);
 });
 
@@ -594,9 +688,10 @@ it("adds and duplicates Spreads, selects the result, and reopens saved Pages", a
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
   await screen.findByRole("heading", { name: "Existing" });
   vi.useFakeTimers();
-  fireEvent.click(screen.getByRole("button", { name: "Add Spread" }));
+  fireEvent.click(screen.getByRole("button", { name: "Insert Spread before Spread 2" }));
   expect(screen.getByText("PAGE 2 OF 4")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Duplicate Page" }));
+  fireEvent.contextMenu(within(screen.getByRole("navigation", { name: "Spreads" })).getByRole("button", { name: "Select Page 2" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Duplicate Page onto New Spread" }));
   expect(screen.getByText("PAGE 4 OF 6")).toBeTruthy();
   await act(() => vi.advanceTimersByTimeAsync(500));
   vi.useRealTimers();
@@ -609,14 +704,17 @@ it("duplicates the first and last Pages onto their respective sides of new Sprea
   const { ports } = disk();
   render(<AlbumWorkspace root="D:\\Photos" ports={ports}
     document={{ path: "Existing", album: createAlbum({ name: "Existing" }) }} />);
-  fireEvent.click(screen.getByRole("button", { name: "Duplicate Page" }));
+  const strip = within(screen.getByRole("navigation", { name: "Spreads" }));
+  fireEvent.contextMenu(strip.getByRole("button", { name: "Select Page 1" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Duplicate Page onto New Spread" }));
   expect(screen.getByText("PAGE 3 OF 4")).toBeTruthy();
   fireEvent.change(screen.getByLabelText("Page"), { target: { value: "page-2" } });
-  fireEvent.click(screen.getByRole("button", { name: "Duplicate Page" }));
+  fireEvent.contextMenu(strip.getByRole("button", { name: "Select Page 4" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Duplicate Page onto New Spread" }));
   expect(screen.getByText("PAGE 4 OF 6")).toBeTruthy();
 });
 
-it("drag-reorders Pages, keeps the moved Page selected, supports keyboard-friendly moves, and persists the order", async () => {
+it("drag-reorders Pages, keeps the moved Page selected, and persists the order", async () => {
   const { ports, files } = disk();
   files.set("Existing", serializeAlbum(createAlbum({ name: "Existing", pageCount: 4 })));
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} />);
@@ -632,11 +730,6 @@ it("drag-reorders Pages, keeps the moved Page selected, supports keyboard-friend
   fireEvent.drop(last, { dataTransfer });
   fireEvent.dragEnd(first, { dataTransfer });
   expect(screen.getByText("PAGE 4 OF 4")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Move Page earlier" }));
-  expect(screen.getByText("PAGE 3 OF 4")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Move Page later" }));
-  expect(screen.getByText("PAGE 4 OF 4")).toBeTruthy();
-  expect((screen.getByRole("button", { name: "Move Page later" }) as HTMLButtonElement).disabled).toBe(true);
   await act(() => vi.advanceTimersByTimeAsync(500));
   vi.useRealTimers();
   const reopened = deserializeAlbum(await ports.read("D:\\Photos", "Existing"));
@@ -709,9 +802,7 @@ it("keeps unsaved changes after a failed save, prevents leaving, and retries exp
   await act(() => vi.advanceTimersByTimeAsync(500));
   expect(screen.getByRole("alert").textContent).toContain("Disk full");
   expect(screen.queryByText("Not saved")).toBeNull();
-  for (const name of ["Add Spread", "Duplicate Page", "Clear Page", "Move Page later"]) {
-    expect((screen.getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(true);
-  }
+  expect((screen.getByRole("button", { name: "Insert Spread before Spread 2" }) as HTMLButtonElement).disabled).toBe(true);
   expect(within(screen.getByRole("navigation", { name: "Spreads" }))
     .getByRole("button", { name: "Select Page 1" }).draggable).toBe(false);
   expect(deserializeAlbum(files.get("Existing")!).pageFormat.bleedMm).toBe(3);
@@ -1673,7 +1764,7 @@ it("reports a failed preview and retries it on demand", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   await waitFor(() => expect(screen.getByRole("img", { name: "Placement" }).getAttribute("src"))
     .toBe("data:image/jpeg;base64,retried-preview"));
-  expect(photoPorts.preview).toHaveBeenCalledTimes(2);
+  expect(photoPorts.preview).toHaveBeenLastCalledWith("D:\\Photos", "tree.jpg");
   expect(screen.queryByText("Couldn't load Photo")).toBeNull();
 });
 

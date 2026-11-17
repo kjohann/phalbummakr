@@ -2,11 +2,22 @@ use serde::{Deserialize, Serialize};
 use std::io;
 use std::path::{Path, PathBuf};
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct AlbumSettings {
     pub last_album: Option<PathBuf>,
     pub recent_albums: Vec<PathBuf>,
+    pub confirm_spread_deletion: bool,
+}
+
+impl Default for AlbumSettings {
+    fn default() -> Self {
+        Self {
+            last_album: None,
+            recent_albums: Vec::new(),
+            confirm_spread_deletion: true,
+        }
+    }
 }
 
 pub fn read_album_settings(path: &Path) -> io::Result<AlbumSettings> {
@@ -53,9 +64,29 @@ pub fn clear_last_album(path: &Path) -> io::Result<()> {
     write_album_settings(path, &settings)
 }
 
+pub fn set_confirm_spread_deletion(path: &Path, value: bool) -> io::Result<()> {
+    let mut settings = read_album_settings(path)?;
+    settings.confirm_spread_deletion = value;
+    write_album_settings(path, &settings)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spread_deletion_preference_defaults_to_enabled_and_survives_album_updates() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        assert!(read_album_settings(&path).unwrap().confirm_spread_deletion);
+        std::fs::write(&path, r#"{"lastAlbum":null,"recentAlbums":[]}"#).unwrap();
+        assert!(read_album_settings(&path).unwrap().confirm_spread_deletion);
+        set_confirm_spread_deletion(&path, false).unwrap();
+        remember_album(&path, Path::new("first.phalbum")).unwrap();
+        assert!(!read_album_settings(&path).unwrap().confirm_spread_deletion);
+        set_confirm_spread_deletion(&path, true).unwrap();
+        assert!(read_album_settings(&path).unwrap().confirm_spread_deletion);
+    }
 
     #[test]
     fn remembers_recent_albums_in_order_and_forgets_missing_choices() {

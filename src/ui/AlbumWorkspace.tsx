@@ -15,9 +15,11 @@ interface Props {
   onAlbumChange?: (album: Album | null) => void;
   document?: { path: string; album: Album };
   suspended?: boolean;
+  confirmSpreadDeletion?: boolean;
+  setConfirmSpreadDeletion?: (value: boolean) => Promise<void>;
 }
 
-export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document, suspended = false }: Props) {
+export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document, suspended = false, confirmSpreadDeletion = true, setConfirmSpreadDeletion }: Props) {
   const [names, setNames] = useState<string[]>([]);
   const [current, setCurrent] = useState<{ filename: string; album: Album } | null>(
     () => document ? { filename: document.path, album: fitTextSlots(document.album) } : null,
@@ -248,6 +250,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
           </div>
           <AlbumView key={current.filename} album={current.album} onChange={changeAlbum}
             root={root} photoPorts={photoPorts} fontPorts={fontPorts}
+            confirmSpreadDeletion={confirmSpreadDeletion} setConfirmSpreadDeletion={setConfirmSpreadDeletion}
             onDuplicatePhoto={setDuplicateWarning}
             onCropPendingChange={setCropPending}
             textDisabled={suspended || busy || saveStatus === "error"}

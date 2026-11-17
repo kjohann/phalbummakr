@@ -20,6 +20,12 @@ fn album_settings(app: tauri::AppHandle) -> Result<settings::AlbumSettings, Stri
 }
 
 #[tauri::command]
+fn set_confirm_spread_deletion(app: tauri::AppHandle, value: bool) -> Result<(), String> {
+    settings::set_confirm_spread_deletion(&settings_file(&app)?, value)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn remember_album(app: tauri::AppHandle, path: String) -> Result<(), String> {
     settings::remember_album(&settings_file(&app)?, Path::new(&path))
         .map_err(|error| error.to_string())
@@ -121,6 +127,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             album_settings,
+            set_confirm_spread_deletion,
             remember_album,
             forget_album,
             close_album,
