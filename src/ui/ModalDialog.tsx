@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 export default function ModalDialog({ label, children, onClose, closeDisabled = false }: {
   label: string;
@@ -43,9 +44,10 @@ export default function ModalDialog({ label, children, onClose, closeDisabled = 
     };
   }, []);
 
-  return <div className="dialog-backdrop">
+  // Portalled so a dialog opened from a hidden mode is still shown.
+  return createPortal(<div className="dialog-backdrop">
     <div className="album-form" role="dialog" aria-modal="true" aria-label={label} tabIndex={-1} ref={dialogRef}>
       {children}
     </div>
-  </div>;
+  </div>, document.body);
 }

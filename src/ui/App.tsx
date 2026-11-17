@@ -6,6 +6,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { createAlbum, deserializeAlbum, serializeAlbum, type Album } from "../core";
 import AlbumWorkspace, { type AlbumCommand, type AlbumCommandName } from "./AlbumWorkspace";
+import CommandBar, { type BarCommand, type Mode } from "./CommandBar";
 import PhotoBrowser from "./PhotoBrowser";
 import PhotoPane, { clampPaneWidth, DEFAULT_PHOTO_PANE, type PhotoPaneSettings } from "./PhotoPane";
 import ModalDialog from "./ModalDialog";
@@ -65,14 +66,16 @@ interface DeletionPreferences {
   setConfirmSlotDeletion: (value: boolean) => Promise<void>;
 }
 
-function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, suspended, command, onSlotSelectedChange, preferences, photoPane, onPhotoPaneChange }: {
+function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, suspended, mode, command, onSlotSelectedChange, onEditableChange, preferences, photoPane, onPhotoPaneChange }: {
   document: OpenDocument;
   onBusyChange: (busy: boolean) => void;
   onTitleChange: (album: Album | null) => void;
   hidden: boolean;
   suspended: boolean;
+  mode: Mode;
   command: AlbumCommand | undefined;
   onSlotSelectedChange: (selected: boolean) => void;
+  onEditableChange: (editable: boolean) => void;
   preferences: DeletionPreferences;
   photoPane: PhotoPaneSettings;
   onPhotoPaneChange: (change: Partial<PhotoPaneSettings>) => void;
@@ -87,8 +90,18 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
       <PhotoPane settings={photoPane} onChange={onPhotoPaneChange}>
         <PhotoBrowser root={document.root} album={album} compact={photoPane.compact} />
       </PhotoPane>
-      <AlbumWorkspace root={document.root} document={document} suspended={suspended} onBusyChange={onBusyChange} onAlbumChange={reportAlbum}
-        command={command} onSlotSelectedChange={onSlotSelectedChange} {...preferences} />
+      {/* Hidden rather than unmounted, so Album mode keeps its Spread and Slot selection. */}
+      <div className="mode-view" hidden={mode !== "album"}>
+        <AlbumWorkspace root={document.root} document={document} suspended={suspended} active={mode === "album"}
+          onBusyChange={onBusyChange} onAlbumChange={reportAlbum} command={command}
+          onSlotSelectedChange={onSlotSelectedChange} onEditableChange={onEditableChange} {...preferences} />
+      </div>
+      {mode === "layouts" && <section className="workspace mode-placeholder" aria-label="Layouts">
+        <h2>Layouts</h2><p>Creating and editing Layouts arrives with issue 010.</p>
+      </section>}
+      {mode === "sort" && <section className="workspace mode-placeholder" aria-label="Sort">
+        <h2>Sort</h2><p>Sorting Photos into Folders arrives with issue 028.</p>
+      </section>}
     </div>
   );
 }
@@ -108,6 +121,8 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
   const photoPaneRef = useRef(DEFAULT_PHOTO_PANE);
   const [command, setCommand] = useState<AlbumCommand | undefined>();
   const [slotSelected, setSlotSelected] = useState(false);
+  const [albumEditable, setAlbumEditable] = useState(false);
+  const [modeState, setModeState] = useState<{ documentId: number | undefined; mode: Mode }>({ documentId: undefined, mode: "album" });
   const commandSerial = useRef(0);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [preferenceSaving, setPreferenceSaving] = useState(false);
@@ -229,6 +244,10 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
     { newAlbum: () => {}, openAlbum: () => {}, openRecent: () => {}, closeAlbum: () => {}, preferences: () => {}, exit: () => {}, albumCommand: () => {}, togglePhotos: () => {}, compactPhotos: () => {} },
   );
   const photoPaneAvailable = document !== null && draft === null && !preferencesOpen;
+  const fileEnabled = !busy && !restoring && !preferencesOpen;
+  // Keyed by document, so every newly opened Album starts in Album mode.
+  const mode = modeState.documentId === document?.id ? modeState.mode : "album";
+  const setMode = (next: Mode) => setModeState({ documentId: document?.id, mode: next });
   actions.current = {
     togglePhotos: () => {
       if (photoPaneAvailable) changePhotoPane({ collapsed: !photoPaneRef.current.collapsed });
@@ -303,8 +322,6 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
     let active = true;
     menuQueue.current = menuQueue.current.then(async () => {
       if (!active) return;
-      const fileEnabled = !busy && !restoring && !preferencesOpen;
-      const albumEnabled = fileEnabled && document !== null && draft === null;
       const enabledByMenu: Record<string, Record<string, boolean>> = {
         file: {
           "new-album": fileEnabled,
@@ -313,12 +330,6 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
           "close-album": fileEnabled && (document !== null || draft !== null),
           "preferences": fileEnabled,
         },
-        edit: { "delete": albumEnabled && slotSelected },
-        album: { "album-settings": albumEnabled, "add-spread": albumEnabled },
-        view: { "toggle-photos": photoPaneAvailable, "compact-photos": photoPaneAvailable },
-      };
-      const checkedByMenu: Record<string, Record<string, boolean>> = {
-        view: { "compact-photos": photoPane.compact },
       };
       // Replacing a Windows menu briefly resizes the WebView.
       if (menuRef.current && menuRecent.current === recent) {
@@ -333,11 +344,6 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
               try {
                 if (!("setEnabled" in item)) throw new Error(`The ${menuId} menu item ${id} cannot be enabled.`);
                 await item.setEnabled(enabled);
-                const checked = checkedByMenu[menuId]?.[id];
-                if (checked !== undefined) {
-                  if (!("setChecked" in item)) throw new Error(`The ${menuId} menu item ${id} cannot be checked.`);
-                  await item.setChecked(checked);
-                }
               } finally {
                 await item.close();
               }
@@ -348,7 +354,8 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
         }
         return;
       }
-      const { file, edit, album, view } = enabledByMenu;
+      const { file } = enabledByMenu;
+      // Edit, Album and View commands live in the command bar.
       const menu = await Menu.new({ items: [{
         id: "file",
         text: "File",
@@ -361,28 +368,6 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
           { id: "close-album", text: "Close Album", enabled: file["close-album"], action: () => actions.current.closeAlbum() },
           { id: "preferences", text: "Preferences…", enabled: file["preferences"], action: () => actions.current.preferences() },
           { text: "Exit", action: () => actions.current.exit() },
-        ],
-      }, {
-        id: "edit",
-        text: "Edit",
-        // No accelerator: on Windows it would take the Delete key from text fields.
-        items: [{ id: "delete", text: "Delete", enabled: edit["delete"], action: () => actions.current.albumCommand("delete-slot") }],
-      }, {
-        id: "album",
-        text: "Album",
-        items: [
-          { id: "album-settings", text: "Album Settings…", enabled: album["album-settings"], action: () => actions.current.albumCommand("album-settings") },
-          { id: "add-spread", text: "Add Spread", enabled: album["add-spread"], action: () => actions.current.albumCommand("add-spread") },
-        ],
-      }, {
-        id: "view",
-        text: "View",
-        items: [
-          // A tab shows the shortcut on Windows without a native accelerator, which would take Ctrl+B from Text Slots.
-          { id: "toggle-photos", text: navigator.userAgent.includes("Windows") ? "Toggle Photos\tCtrl+B" : "Toggle Photos",
-            enabled: view["toggle-photos"], action: () => actions.current.togglePhotos() },
-          { id: "compact-photos", text: "Compact Photos", checked: photoPane.compact,
-            enabled: view["compact-photos"], action: () => actions.current.compactPhotos() },
         ],
       }] });
       if (!active) { await menu.close(); return; }
@@ -401,7 +386,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
       if (active) setError(`Could not update menus: ${String(cause)}`);
     });
     return () => { active = false; };
-  }, [recent, busy, restoring, document, draft, preferencesOpen, slotSelected, photoPaneAvailable, photoPane.compact]);
+  }, [recent, fileEnabled, document, draft]);
 
   useEffect(() => () => {
     menuQueue.current = menuQueue.current.then(async () => {
@@ -433,8 +418,32 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
     }, "Could not create Album");
   }
 
+  const albumOpen = document !== null && draft === null;
+  // Unlike File commands, these stay enabled while an autosave is pending, so the bar doesn't flicker after each edit.
+  const albumCommandsEnabled = albumOpen && albumEditable && !transitioning && !restoring && !preferencesOpen;
+  const albumCommand = (name: AlbumCommandName, label: string, extra: Partial<BarCommand> = {}): BarCommand =>
+    ({ id: name, label, disabled: !albumCommandsEnabled, run: () => actions.current.albumCommand(name), ...extra });
+  const contextCommands: BarCommand[] = albumOpen && mode === "album" ? [
+    ...(slotSelected
+      ? [albumCommand("delete-slot", "Delete", { shortcut: "Delete" })]
+      : [albumCommand("add-photo-slot", "Add Photo Slot"), albumCommand("add-text-slot", "Add Text Slot")]),
+    albumCommand("add-spread", "Add Spread", { overflow: 1 }),
+  ] : [];
+  const documentCommands: BarCommand[] = albumOpen ? [
+    { id: "toggle-photos", label: "Toggle Photos", pressed: !photoPane.collapsed, shortcut: "Control+B", overflow: 2,
+      disabled: !photoPaneAvailable, run: () => actions.current.togglePhotos() },
+    { id: "compact-photos", label: "Compact Photos", pressed: photoPane.compact, overflow: 4,
+      disabled: !photoPaneAvailable, run: () => actions.current.compactPhotos() },
+    albumCommand("album-settings", "Album Settings…", { overflow: 3 }),
+  ] : [
+    { id: "new-album", label: "New Album…", disabled: !fileEnabled, run: () => actions.current.newAlbum() },
+    { id: "open-album", label: "Open Album…", disabled: !fileEnabled, run: () => actions.current.openAlbum() },
+  ];
+
   return (
     <main className="app-shell">
+      <CommandBar mode={albumOpen ? { current: mode, onChange: setMode, disabled: preferencesOpen } : undefined}
+        context={contextCommands} document={documentCommands} />
       {error && <p className="error-banner" role="alert">{error}</p>}
       {preferencesOpen && <ModalDialog label="Preferences" closeDisabled={preferenceSaving} onClose={() => setPreferencesOpen(false)}>
           <h1>Preferences</h1>
@@ -480,8 +489,8 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
         </section>
       )}
       {document && <DocumentWorkspace key={document.id} document={document} onBusyChange={reportBusy}
-        onTitleChange={reportTitle} hidden={draft !== null} suspended={transitioning}
-        command={command} onSlotSelectedChange={setSlotSelected}
+        onTitleChange={reportTitle} hidden={draft !== null} suspended={transitioning} mode={mode}
+        command={command} onSlotSelectedChange={setSlotSelected} onEditableChange={setAlbumEditable}
         preferences={{ confirmSpreadDeletion, setConfirmSpreadDeletion, confirmSlotDeletion, setConfirmSlotDeletion }}
         photoPane={photoPane} onPhotoPaneChange={changePhotoPane} />}
     </main>

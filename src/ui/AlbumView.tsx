@@ -38,6 +38,7 @@ interface Props {
   command?: AlbumCommand;
   onSlotSelectedChange?: (selected: boolean) => void;
   onDialogChange: (open: boolean) => void;
+  active?: boolean;
 }
 
 /** An in-progress mouse drag of a Slot, in screen pixels. */
@@ -94,7 +95,7 @@ function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, trimHeig
   };
 }
 
-export default function AlbumView({ album: savedAlbum, onChange, disabled, textDisabled, root, photoPorts, fontPorts, onDuplicatePhoto, onCropPendingChange, confirmSpreadDeletion, setConfirmSpreadDeletion, confirmSlotDeletion, setConfirmSlotDeletion, command, onSlotSelectedChange, onDialogChange }: Props) {
+export default function AlbumView({ album: savedAlbum, onChange, disabled, textDisabled, root, photoPorts, fontPorts, onDuplicatePhoto, onCropPendingChange, confirmSpreadDeletion, setConfirmSpreadDeletion, confirmSlotDeletion, setConfirmSlotDeletion, command, onSlotSelectedChange, onDialogChange, active = true }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLElement>(null);
   const draggedId = useRef<string | null>(null);
@@ -523,11 +524,13 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
     handledCommand.current = command.serial;
     if (command.name === "delete-slot") requestDeleteSlot();
     else if (command.name === "add-spread") addSpreadAtEnd();
+    else if (command.name === "add-photo-slot") addSlot("photo", selectedPage.id);
+    else if (command.name === "add-text-slot") addSlot("text", selectedPage.id);
   });
 
   useEffect(() => {
     const deleteSelected = (event: KeyboardEvent) => {
-      if (event.key !== "Delete" || event.defaultPrevented || !selectedSlot) return;
+      if (!active || event.key !== "Delete" || event.defaultPrevented || !selectedSlot) return;
       const target = event.target;
       if (target instanceof HTMLElement && (target.isContentEditable || target.closest("input, textarea, select"))) return;
       // Dialogs, including the New Album form, own the keyboard.
@@ -913,12 +916,6 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
             onZoom={(factor) => zoomPlacementBy(selectedPage.id, selectedSlot.id, factor)}
             onRotate={(turn) => rotateSelectedSlot(turn)} onDelete={() => requestDeleteSlot()} />
         )}
-        <div className="slot-palette" role="toolbar" aria-label="Add Slots">
-          <button type="button" className="button-quiet" disabled={disabled}
-            onClick={() => addSlot("photo", selectedPage.id)}>Add Photo Slot</button>
-          <button type="button" className="button-quiet" disabled={disabled}
-            onClick={() => addSlot("text", selectedPage.id)}>Add Text Slot</button>
-        </div>
       </div>
       <div className="workspace-footer">
         <span>PAGE {visiblePageIndex + 1} OF {album.pages.length}</span>

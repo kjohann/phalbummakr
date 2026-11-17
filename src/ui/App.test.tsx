@@ -1,19 +1,19 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useState } from "react";
-import { afterEach, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useEffect, useState } from "react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createAlbum, serializeAlbum } from "../core";
 import App, { type DocumentPorts } from "./App";
 
 type MenuEntry = { id?: string; text: string; enabled?: boolean; checked?: boolean; action?: () => void; items?: MenuEntry[] };
 const native = vi.hoisted(() => ({
-  enabled: false, items: [] as MenuEntry[], menus: [] as MenuEntry[], installed: vi.fn(), update: vi.fn(), released: vi.fn(),
+  enabled: false, items: [] as MenuEntry[], menus: [] as MenuEntry[],     installed: vi.fn(), update: vi.fn(), released: vi.fn(), title: vi.fn(), inactiveMounts: 0,
 }));
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => native.enabled, invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
     onCloseRequested: async () => () => {},
-    setTitle: async () => {},
+    setTitle: async (title: string) => { native.title(title); },
     close: async () => {},
   }),
 }));
@@ -42,26 +42,36 @@ vi.mock("@tauri-apps/api/menu", () => ({
   } },
 }));
 vi.mock("./AlbumWorkspace", () => ({
-  default: ({ document, suspended, onBusyChange, command, onSlotSelectedChange }: {
+  default: ({ document, suspended, active = true, onBusyChange, command, onSlotSelectedChange, onEditableChange }: {
     document: { album: { title: string } };
     suspended?: boolean;
+    active?: boolean;
     onBusyChange: (busy: boolean) => void;
     command?: { name: string; serial: number };
     onSlotSelectedChange?: (selected: boolean) => void;
+    onEditableChange?: (editable: boolean) => void;
   }) => {
     const [title, setTitle] = useState(document.album.title);
+    useState(() => { if (!active) native.inactiveMounts++; });
+    useEffect(() => onEditableChange?.(true), [onEditableChange]);
     return <><p>{title}</p>
       {command && <p>Command {command.name} {command.serial}</p>}
       <button type="button" disabled={suspended} onClick={() => setTitle("Edited Album")}>Edit mock Album</button>
       <button type="button" onClick={() => onBusyChange(true)}>Begin mock edit</button>
       <button type="button" onClick={() => onBusyChange(false)}>Finish mock save</button>
       <button type="button" onClick={() => onSlotSelectedChange?.(true)}>Select mock Slot</button>
+      <button type="button" onClick={() => onEditableChange?.(false)}>Block mock edits</button>
+      {!active && <p>Album workspace inactive</p>}
     </>;
   },
 }));
 vi.mock("./PhotoBrowser", () => ({
   default: ({ compact }: { compact?: boolean }) => <p>{compact ? "Compact Photo browser" : "Photo browser"}</p>,
 }));
+
+beforeEach(() => {
+  vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+});
 
 afterEach(() => {
   cleanup();
@@ -72,6 +82,8 @@ afterEach(() => {
   native.installed.mockClear();
   native.update.mockReset();
   native.released.mockClear();
+  native.title.mockClear();
+  native.inactiveMounts = 0;
 });
 
 it("opens Preferences from File and persists the Spread deletion setting", async () => {
@@ -99,7 +111,7 @@ it("opens Preferences from File and persists the Spread deletion setting", async
   const checkbox = screen.getByLabelText("Confirm Spread deletion") as HTMLInputElement;
   expect(checkbox.checked).toBe(false);
   expect(document.activeElement).toBe(checkbox);
-  screen.getByRole("button", { name: "New Album…" }).focus();
+  within(screen.getByRole("region", { name: "Open an Album" })).getByRole("button", { name: "New Album…" }).focus();
   expect(document.activeElement).toBe(checkbox);
   fireEvent.click(checkbox);
   await waitFor(() => expect(setConfirmSpreadDeletion).toHaveBeenCalledWith(true));
@@ -109,32 +121,109 @@ it("opens Preferences from File and persists the Spread deletion setting", async
   expect((screen.getByLabelText("Confirm Slot deletion") as HTMLInputElement).checked).toBe(false);
 });
 
-it("routes the native Edit and Album menus to the open Album", async () => {
-  native.enabled = true;
+function openAlbumPorts(): DocumentPorts {
   const path = "D:\\Photos\\album.phalbum";
-  const ports: DocumentPorts = {
+  return {
     settings: async () => ({ lastAlbum: path, recentAlbums: [path], confirmSpreadDeletion: true, confirmSlotDeletion: true }),
     exists: async () => true, read: async () => serializeAlbum(createAlbum({ name: "Original" })),
     write: vi.fn(), remember: vi.fn(), forget: vi.fn(), close: vi.fn(),
-    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(), setPhotoPane: vi.fn(),
+    setConfirmSpreadDeletion: vi.fn(), setConfirmSlotDeletion: vi.fn(), setPhotoPane: vi.fn(async () => {}),
     parent: async () => "D:\\Photos", chooseNew: async () => null, chooseOpen: async () => null,
   };
+}
+
+const bar = () => within(screen.getByRole("toolbar", { name: "Commands" }));
+const barButton = (name: string) => bar().getByRole("button", { name }) as HTMLButtonElement;
+
+it("shows only New Album and Open Album in the command bar while no Album is open", async () => {
+  const chooseNew = vi.fn(async () => null);
+  const ports: DocumentPorts = { ...openAlbumPorts(), chooseNew,
+    settings: async () => ({ lastAlbum: null, recentAlbums: [], confirmSpreadDeletion: true, confirmSlotDeletion: true }) };
   render(<App ports={ports} />);
+  await waitFor(() => expect(barButton("New Album…").disabled).toBe(false));
+  expect(bar().getAllByRole("button").map((button) => button.textContent)).toEqual(["New Album…", "Open Album…"]);
+  expect(bar().queryByRole("group", { name: "Mode" })).toBeNull();
+  fireEvent.click(barButton("New Album…"));
+  await waitFor(() => expect(chooseNew).toHaveBeenCalledOnce());
+});
+
+it("routes command bar commands to the open Album, keeping only the native File menu", async () => {
+  native.enabled = true;
+  render(<App ports={openAlbumPorts()} />);
   await screen.findByText("Original");
-  const item = (menu: string, text: string) =>
-    native.menus.find((entry) => entry.text === menu)?.items?.find((entry) => entry.text === text);
-  await waitFor(() => expect(item("Album", "Add Spread")?.enabled).toBe(true));
-  expect(item("Edit", "Delete")?.enabled).toBe(false);
+  await waitFor(() => expect(barButton("Add Spread").disabled).toBe(false));
+  expect(native.menus.map((menu) => menu.text)).toEqual(["File"]);
+  expect(bar().queryByRole("button", { name: "Delete" })).toBeNull();
+  fireEvent.click(barButton("Add Photo Slot"));
+  expect(screen.getByText("Command add-photo-slot 1")).toBeTruthy();
+  fireEvent.click(barButton("Add Text Slot"));
+  expect(screen.getByText("Command add-text-slot 2")).toBeTruthy();
+  fireEvent.click(barButton("Album Settings…"));
+  expect(screen.getByText("Command album-settings 3")).toBeTruthy();
+  fireEvent.click(barButton("Add Spread"));
+  expect(screen.getByText("Command add-spread 4")).toBeTruthy();
+
   fireEvent.click(screen.getByRole("button", { name: "Select mock Slot" }));
-  await waitFor(() => expect(item("Edit", "Delete")?.enabled).toBe(true));
-  await act(async () => item("Edit", "Delete")!.action!());
-  expect(screen.getByText("Command delete-slot 1")).toBeTruthy();
-  await act(async () => item("Album", "Album Settings…")!.action!());
-  expect(screen.getByText("Command album-settings 2")).toBeTruthy();
-  await act(async () => item("Album", "Add Spread")!.action!());
-  expect(screen.getByText("Command add-spread 3")).toBeTruthy();
+  expect(bar().queryByRole("button", { name: "Add Photo Slot" })).toBeNull();
+  expect(barButton("Delete").getAttribute("aria-keyshortcuts")).toBe("Delete");
+  fireEvent.click(barButton("Delete"));
+  expect(screen.getByText("Command delete-slot 5")).toBeTruthy();
+});
+
+it("keeps Album commands enabled while an autosave is pending but not while edits are blocked", async () => {
+  render(<App ports={openAlbumPorts()} />);
+  await screen.findByText("Original");
+  fireEvent.click(screen.getByRole("button", { name: "Select mock Slot" }));
+  await waitFor(() => expect(barButton("Delete").disabled).toBe(false));
   fireEvent.click(screen.getByRole("button", { name: "Begin mock edit" }));
-  await waitFor(() => expect([item("Edit", "Delete")?.enabled, item("Album", "Add Spread")?.enabled]).toEqual([false, false]));
+  expect(["Delete", "Add Spread", "Album Settings…"].map((name) => barButton(name).disabled)).toEqual([false, false, false]);
+  fireEvent.click(screen.getByRole("button", { name: "Block mock edits" }));
+  expect(["Delete", "Add Spread", "Album Settings…"].map((name) => barButton(name).disabled)).toEqual([true, true, true]);
+  expect(barButton("Toggle Photos").disabled).toBe(false);
+});
+
+it("switches between Album, Layouts and Sort modes, keeping the Album's state", async () => {
+  render(<App ports={openAlbumPorts()} />);
+  await screen.findByText("Original");
+  const modes = within(bar().getByRole("group", { name: "Mode" }));
+  expect(modes.getAllByRole("button").map((button) => [button.textContent, button.getAttribute("aria-pressed")]))
+    .toEqual([["Album", "true"], ["Layouts", "false"], ["Sort", "false"]]);
+  fireEvent.click(screen.getByRole("button", { name: "Edit mock Album" }));
+
+  fireEvent.click(modes.getByRole("button", { name: "Layouts" }));
+  expect(screen.getByRole("region", { name: "Layouts" }).textContent).toContain("010");
+  expect(screen.getByText("Edited Album").closest("[hidden]")).not.toBeNull();
+  expect(screen.getByText("Album workspace inactive")).toBeTruthy();
+  expect(bar().queryByRole("button", { name: "Add Photo Slot" })).toBeNull();
+  expect(barButton("Album Settings…")).toBeTruthy();
+
+  fireEvent.click(modes.getByRole("button", { name: "Sort" }));
+  expect(screen.getByRole("region", { name: "Sort" }).textContent).toContain("028");
+  fireEvent.click(modes.getByRole("button", { name: "Album" }));
+  expect(screen.queryByRole("region", { name: "Sort" })).toBeNull();
+  expect(screen.getByText("Edited Album").closest("[hidden]")).toBeNull();
+  expect(screen.queryByText("Album workspace inactive")).toBeNull();
+  expect(barButton("Add Photo Slot")).toBeTruthy();
+});
+
+it("opens every Album in Album mode, whichever mode the previous Album was left in", async () => {
+  native.enabled = true;
+  render(<App ports={openAlbumPorts()} />);
+  await screen.findByText("Original");
+  fireEvent.click(within(bar().getByRole("group", { name: "Mode" })).getByRole("button", { name: "Sort" }));
+  await waitFor(() => expect(native.items.find((entry) => entry.text === "Close Album")?.enabled).toBe(true));
+  await act(async () => native.items.find((entry) => entry.text === "Close Album")!.action!());
+  fireEvent.click(await screen.findByRole("button", { name: "D:\\Photos\\album.phalbum" }));
+  await screen.findByText("Original");
+  expect(barButton("Album").getAttribute("aria-pressed")).toBe("true");
+  expect(native.inactiveMounts).toBe(0);
+});
+
+it("shows the Album title in the window title", async () => {
+  native.enabled = true;
+  render(<App ports={openAlbumPorts()} />);
+  await screen.findByText("Original");
+  await waitFor(() => expect(native.title).toHaveBeenLastCalledWith("Original — phalbummakr"));
 });
 
 it("keeps the previous preference and shows an error when saving fails", async () => {
@@ -433,20 +522,20 @@ function photoPanePorts(photoPane?: { width: number; collapsed: boolean; compact
   } satisfies DocumentPorts;
 }
 
-it("collapses, reopens and compacts the Photo pane from the View menu, Ctrl+B and its edge buttons, and remembers it", async () => {
-  native.enabled = true;
+it("collapses, reopens and compacts the Photo pane from the command bar, Ctrl+B and its edge buttons, and remembers it", async () => {
   const ports = photoPanePorts({ width: 300, collapsed: false, compact: false });
   render(<App ports={ports} />);
   await screen.findByText("Original");
-  const item = (text: string) =>
-    native.menus.find((entry) => entry.text === "View")?.items?.find((entry) => entry.text.split("\t")[0] === text);
-  await waitFor(() => expect(item("Toggle Photos")?.enabled).toBe(true));
+  await waitFor(() => expect(barButton("Toggle Photos").disabled).toBe(false));
+  expect(barButton("Toggle Photos").getAttribute("aria-keyshortcuts")).toBe("Control+B");
+  expect(barButton("Toggle Photos").getAttribute("aria-pressed")).toBe("true");
   const pane = screen.getByRole("region", { name: "Photo pane" });
   expect(pane.style.width).toBe("300px");
   expect(screen.queryByRole("button", { name: "Show Photos" })).toBeNull();
 
-  await act(async () => item("Toggle Photos")!.action!());
+  fireEvent.click(barButton("Toggle Photos"));
   expect(pane.hidden).toBe(true);
+  expect(barButton("Toggle Photos").getAttribute("aria-pressed")).toBe("false");
   expect(ports.setPhotoPane).toHaveBeenLastCalledWith({ width: 300, collapsed: true, compact: false });
   fireEvent.click(screen.getByRole("button", { name: "Show Photos" }));
   expect(pane.hidden).toBe(false);
@@ -459,10 +548,10 @@ it("collapses, reopens and compacts the Photo pane from the View menu, Ctrl+B an
   expect(screen.getByText("Photo browser")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Show Photos" }));
 
-  expect(item("Compact Photos")?.checked).toBe(false);
-  await act(async () => item("Compact Photos")!.action!());
+  expect(barButton("Compact Photos").getAttribute("aria-pressed")).toBe("false");
+  fireEvent.click(barButton("Compact Photos"));
   expect(screen.getByText("Compact Photo browser")).toBeTruthy();
-  await waitFor(() => expect(item("Compact Photos")?.checked).toBe(true));
+  expect(barButton("Compact Photos").getAttribute("aria-pressed")).toBe("true");
   expect(ports.setPhotoPane).toHaveBeenLastCalledWith({ width: 300, collapsed: false, compact: true });
 });
 
@@ -477,11 +566,11 @@ it("leaves Ctrl+B to text fields, Text Slots that handle it and open dialogs", a
   handled.preventDefault();
   fireEvent(screen.getByRole("button", { name: "Edit mock Album" }), handled);
   const item = (menu: string, text: string) =>
-    native.menus.find((entry) => entry.text === menu)?.items?.find((entry) => entry.text.split("\t")[0] === text);
-  await waitFor(() => expect(item("View", "Toggle Photos")?.enabled).toBe(true));
+    native.menus.find((entry) => entry.text === menu)?.items?.find((entry) => entry.text === text);
+  await waitFor(() => expect(barButton("Toggle Photos").disabled).toBe(false));
   await act(async () => item("File", "Preferences…")!.action!());
   fireEvent.keyDown(screen.getByRole("button", { name: "Close" }), { key: "b", ctrlKey: true });
-  await waitFor(() => expect(item("View", "Toggle Photos")?.enabled).toBe(false));
+  expect(barButton("Toggle Photos").disabled).toBe(true);
   expect(pane.hidden).toBe(false);
   expect(ports.setPhotoPane).not.toHaveBeenCalled();
 });

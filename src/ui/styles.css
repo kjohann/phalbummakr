@@ -532,6 +532,149 @@ body {
 
 .album-workspace {
   overflow: auto;
+  padding-top: 14px;
+}
+
+/* One row, no taller than the Album title bar it replaced. */
+.command-bar {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  height: 38px;
+  flex: 0 0 38px;
+  align-items: center;
+  gap: 16px;
+  padding: 0 12px;
+  border-bottom: 1px solid #d9dcd5;
+  background: #f7f8f4;
+  white-space: nowrap;
+}
+
+.command-bar--measure {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: max-content;
+  visibility: hidden;
+  pointer-events: none;
+  border-bottom: 0;
+}
+
+.command-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.command-context {
+  flex: 1;
+}
+
+.command,
+.command-menu button {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: #2f4a3e;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.command:hover:not(:disabled),
+.command-menu button:hover:not(:disabled),
+.command-menu button:focus-visible {
+  background: #e7ebe3;
+}
+
+.command:disabled,
+.command-menu button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.command[aria-pressed="true"] {
+  border-color: #c9d2c7;
+  background: #e2e8df;
+}
+
+.command-modes {
+  padding: 2px;
+  border: 1px solid #d9dcd5;
+  border-radius: 6px;
+  background: #eef0ea;
+}
+
+.command-modes .command {
+  height: 24px;
+}
+
+.command-modes .command[aria-pressed="true"] {
+  border-color: #b9c3b9;
+  background: #fff;
+}
+
+.command-more {
+  position: relative;
+}
+
+.command-more-measure {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.command-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  display: grid;
+  min-width: 200px;
+  padding: 4px;
+  border: 1px solid #c5ccc1;
+  border-radius: 6px;
+  background: white;
+  box-shadow: 0 3px 12px #1e292626;
+}
+
+.command-menu button {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding-left: 6px;
+  text-align: left;
+}
+
+.command-shortcut {
+  color: #7d847d;
+  font-weight: 400;
+}
+
+.mode-view {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+}
+
+.mode-view[hidden] {
+  display: none;
+}
+
+.mode-placeholder {
+  align-items: center;
+  justify-content: center;
+  color: #6f7771;
+  text-align: center;
+}
+
+.mode-placeholder h2 {
+  margin: 0;
+  color: #242a27;
+  font-size: 20px;
 }
 
 .album-workspace > .album-toolbar,
@@ -1043,8 +1186,7 @@ body {
   pointer-events: none;
 }
 
-.slot-controls,
-.slot-palette {
+.slot-controls {
   position: absolute;
   z-index: 4;
   display: flex;
@@ -1077,19 +1219,6 @@ body {
   align-items: center;
   gap: 4px;
   padding: 0 4px;
-}
-
-.slot-palette {
-  right: 12px;
-  bottom: 12px;
-  flex-direction: column;
-  align-items: stretch;
-}
-
-.slot-palette .button-quiet {
-  padding: 5px 9px;
-  font-size: 12px;
-  text-align: left;
 }
 
 .text-slot-controls select,

@@ -3,7 +3,7 @@ import { useState, type ComponentProps, type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { addPhotoSlot, addTextSlot, createAlbum, deserializeAlbum, photoUsage, placePhoto, serializeAlbum, setSlotText, type Album, type AlbumPorts } from "../core";
-import AlbumWorkspace, { type AlbumCommand } from "./AlbumWorkspace";
+import Workspace, { type AlbumCommand, type AlbumCommandName } from "./AlbumWorkspace";
 import PhotoBrowser from "./PhotoBrowser";
 import TextSlotControls from "./TextSlotControls";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
@@ -57,6 +57,22 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
+
+/** Stands in for the command bar, which sends commands to the workspace. */
+function AlbumWorkspace(props: ComponentProps<typeof Workspace>) {
+  const [command, setCommand] = useState<AlbumCommand>();
+  const send = (name: AlbumCommandName) => setCommand((current) => ({ name, serial: (current?.serial ?? 0) + 1 }));
+  return <>
+    <button type="button" onClick={() => send("add-photo-slot")}>Add Photo Slot</button>
+    <button type="button" onClick={() => send("add-text-slot")}>Add Text Slot</button>
+    {(["delete-slot", "album-settings", "add-spread"] as const).map((name) => (
+      <button key={name} type="button" onClick={() => send(name)}>Bar {name}</button>
+    ))}
+    <Workspace {...props} command={command} />
+  </>;
+}
+
+const MenuHarness = AlbumWorkspace;
 
 function disk() {
   const files = new Map<string, string>([["Existing", serializeAlbum(createAlbum({ name: "Existing", pageCount: 2 }))]]);
@@ -127,7 +143,7 @@ it("deletes an empty middle Spread without asking and protects end Spreads", () 
   expect(strip.queryByRole("button", { name: "Delete Spread 3" })).toBeNull();
   fireEvent.click(strip.getByRole("button", { name: "Delete Spread 2" }));
   expect(screen.queryByRole("dialog")).toBeNull();
-  expect(screen.getByText("2 Pages")).toBeTruthy();
+  expect(screen.getByText(/ OF 2$/)).toBeTruthy();
 });
 
 it("keeps the selected Page when deleting another Spread", () => {
@@ -154,7 +170,7 @@ it("asks before discarding a Spread with content and can disable future prompts"
   fireEvent.click(dialog.getByLabelText("Never ask again"));
   fireEvent.click(dialog.getByRole("button", { name: "Discard Spread" }));
   await waitFor(() => expect(setConfirmSpreadDeletion).toHaveBeenCalledWith(false));
-  await waitFor(() => expect(screen.getByText("2 Pages")).toBeTruthy());
+  await waitFor(() => expect(screen.getByText(/ OF 2$/)).toBeTruthy());
 });
 
 it("offers context actions appropriate to a Page or empty strip", () => {
@@ -170,7 +186,7 @@ it("offers context actions appropriate to a Page or empty strip", () => {
   expect(screen.getByText("PAGE 3 OF 6")).toBeTruthy();
   fireEvent.contextMenu(strip);
   fireEvent.click(screen.getByRole("menuitem", { name: "Add Spread" }));
-  expect(screen.getByText("8 Pages")).toBeTruthy();
+  expect(screen.getByText(/ OF 8$/)).toBeTruthy();
 });
 
 it("inserts around a middle Spread and disables invalid end-Spread actions", () => {
@@ -246,11 +262,11 @@ it("cancels a destructive Spread deletion and honors the disabled preference", (
   const { rerender } = render(<AlbumWorkspace root="D:\\Photos" ports={ports} document={document} />);
   fireEvent.click(screen.getByRole("button", { name: "Delete Spread 2" }));
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-  expect(screen.getByText("4 Pages")).toBeTruthy();
+  expect(screen.getByText(/ OF 4$/)).toBeTruthy();
   rerender(<AlbumWorkspace root="D:\\Photos" ports={ports} document={document} confirmSpreadDeletion={false} />);
   fireEvent.click(screen.getByRole("button", { name: "Delete Spread 2" }));
   expect(screen.queryByRole("dialog")).toBeNull();
-  expect(screen.getByText("2 Pages")).toBeTruthy();
+  expect(screen.getByText(/ OF 2$/)).toBeTruthy();
 });
 
 it("autosaves an Album document without rendering save-status feedback", async () => {
@@ -283,9 +299,9 @@ it("opens a selected Album file and saves edits back to that file", async () => 
   const album = createAlbum({ name: "Family: / 2026", pageCount: 2 });
   render(<MenuHarness root={"D:\\Photos"} ports={ports}
     document={{ path: "D:\\Photos\\renamed.phalbum", album }} />);
-  await screen.findByRole("heading", { name: "Family: / 2026" });
+  await screen.findByRole("region", { name: "Album Pages" });
   expect(screen.queryByRole("navigation", { name: "Albums" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Menu album-settings" }));
+  fireEvent.click(screen.getByRole("button", { name: "Bar album-settings" }));
   fireEvent.change(screen.getByLabelText("Title"), { target: { value: "New: title / 2026" } });
   fireEvent.click(screen.getByRole("button", { name: "Apply print settings" }));
   await waitFor(() => expect(ports.write).toHaveBeenCalledWith(
@@ -298,7 +314,7 @@ it("disables Album edits during a file transition", async () => {
   const { ports } = disk();
   const document = { path: "D:\\Photos\\album.phalbum", album: createAlbum({ name: "Original", pageCount: 2 }) };
   const { rerender } = render(<MenuHarness root="D:\\Photos" document={document} ports={ports} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Menu album-settings" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Bar album-settings" }));
   rerender(<MenuHarness root="D:\\Photos" document={document} ports={ports} suspended />);
   expect((screen.getByRole("button", { name: "Insert Spread before Spread 2" }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getByLabelText("Title").matches(":disabled")).toBe(true);
@@ -691,9 +707,9 @@ it("keeps print settings in Album settings, validates them, and persists changes
   const { ports } = disk();
   render(<MenuHarness root={"D:\\Photos"} ports={ports} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
-  await screen.findByRole("heading", { name: "Existing" });
+  await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
   expect(screen.queryByLabelText("Page 1 side")).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Menu album-settings" }));
+  fireEvent.click(screen.getByRole("button", { name: "Bar album-settings" }));
   expect(screen.queryByLabelText("Page 1 side")).toBeNull();
   fireEvent.change(screen.getByLabelText("Bleed (mm)"), { target: { value: "4" } });
   fireEvent.change(screen.getByLabelText("Safe Zone (mm)"), { target: { value: "7" } });
@@ -702,7 +718,7 @@ it("keeps print settings in Album settings, validates them, and persists changes
   await waitForAutosave();
   fireEvent.click(screen.getByRole("button", { name: "Open Album Existing" }));
   await waitFor(() => expect(screen.queryByLabelText("Bleed (mm)")).toBeNull());
-  fireEvent.click(screen.getByRole("button", { name: "Menu album-settings" }));
+  fireEvent.click(screen.getByRole("button", { name: "Bar album-settings" }));
   expect(screen.queryByLabelText("Page 1 side")).toBeNull();
   expect((screen.getByLabelText("Bleed (mm)") as HTMLInputElement).value).toBe("4");
   expect((screen.getByLabelText("Safe Zone (mm)") as HTMLInputElement).value).toBe("7");
@@ -717,7 +733,7 @@ it("adds and duplicates Spreads, selects the result, and reopens saved Pages", a
   const { ports } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
-  await screen.findByRole("heading", { name: "Existing" });
+  await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
   vi.useFakeTimers();
   fireEvent.click(screen.getByRole("button", { name: "Insert Spread before Spread 2" }));
   expect(screen.getByText("PAGE 2 OF 4")).toBeTruthy();
@@ -727,7 +743,7 @@ it("adds and duplicates Spreads, selects the result, and reopens saved Pages", a
   await act(() => vi.advanceTimersByTimeAsync(500));
   vi.useRealTimers();
   fireEvent.click(screen.getByRole("button", { name: "Open Album Existing" }));
-  await waitFor(() => expect(screen.getByText("6 Pages")).toBeTruthy());
+  await waitFor(() => expect(screen.getByText(/ OF 6$/)).toBeTruthy());
   expect(screen.getByText("PAGE 4 OF 6")).toBeTruthy();
 });
 
@@ -750,7 +766,7 @@ it("drag-reorders Pages, keeps the moved Page selected, and persists the order",
   files.set("Existing", serializeAlbum(createAlbum({ name: "Existing", pageCount: 4 })));
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
-  await screen.findByRole("heading", { name: "Existing" });
+  await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
   vi.useFakeTimers();
   const strip = within(screen.getByRole("navigation", { name: "Spreads" }));
   const first = strip.getByRole("button", { name: "Select Page 1" });
@@ -775,8 +791,8 @@ it("lists and opens existing Albums, then creates an A4 landscape Album without 
   const { ports, files } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
-  await screen.findByRole("heading", { name: "Existing" });
-  expect(screen.getByText("2 Pages")).toBeTruthy();
+  await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
+  expect(screen.getByText(/ OF 2$/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "New Album" }));
   expect(screen.getByLabelText("Page Format").textContent).toBe("A4 - landscape (297 x 210 mm)");
   expect(screen.queryByLabelText(/width|height/i)).toBeNull();
@@ -784,7 +800,7 @@ it("lists and opens existing Albums, then creates an A4 landscape Album without 
   expect(screen.queryByLabelText("Page 1 side")).toBeNull();
   fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Christmas" } });
   fireEvent.click(screen.getByRole("button", { name: "Create Album" }));
-  await screen.findByRole("heading", { name: "Christmas" });
+  await screen.findByRole("button", { name: "Open Album Christmas", current: "page" });
   const album = deserializeAlbum(files.get("Christmas")!);
   expect(album.pages).toHaveLength(2);
   expect(album.pageFormat.size).toBe("A4");
@@ -796,8 +812,8 @@ it("debounces changes, blocks navigation until saved, and reopens the persisted 
   const onBusyChange = vi.fn();
   render(<MenuHarness root={"D:\\Photos"} ports={ports} onBusyChange={onBusyChange} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
-  await screen.findByRole("heading", { name: "Existing" });
-  fireEvent.click(screen.getByRole("button", { name: "Menu album-settings" }));
+  await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
+  fireEvent.click(screen.getByRole("button", { name: "Bar album-settings" }));
   vi.useFakeTimers();
   fireEvent.change(screen.getByLabelText("Bleed (mm)"), { target: { value: "4" } });
   fireEvent.submit(screen.getByRole("form", { name: "Album settings" }));
@@ -815,7 +831,7 @@ it("debounces changes, blocks navigation until saved, and reopens the persisted 
   vi.useRealTimers();
   fireEvent.click(screen.getByRole("button", { name: "Open Album Existing" }));
   await waitFor(() => expect(screen.queryByLabelText("Bleed (mm)")).toBeNull());
-  fireEvent.click(screen.getByRole("button", { name: "Menu album-settings" }));
+  fireEvent.click(screen.getByRole("button", { name: "Bar album-settings" }));
   await waitFor(() => expect((screen.getByLabelText("Bleed (mm)") as HTMLInputElement).value).toBe("6"));
 });
 
@@ -825,8 +841,8 @@ it("keeps unsaved changes after a failed save, prevents leaving, and retries exp
   ports.write = vi.fn().mockRejectedValueOnce(new Error("Disk full")).mockImplementation(write);
   render(<MenuHarness root={"D:\\Photos"} ports={ports} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
-  await screen.findByRole("heading", { name: "Existing" });
-  fireEvent.click(screen.getByRole("button", { name: "Menu album-settings" }));
+  await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
+  fireEvent.click(screen.getByRole("button", { name: "Bar album-settings" }));
   vi.useFakeTimers();
   fireEvent.change(screen.getByLabelText("Bleed (mm)"), { target: { value: "4" } });
   fireEvent.submit(screen.getByRole("form", { name: "Album settings" }));
@@ -853,10 +869,10 @@ it("keeps the previous Album available when opening malformed JSON fails and doe
   files.set("Broken", "{");
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
-  await screen.findByRole("heading", { name: "Existing" });
+  await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
   fireEvent.click(screen.getByRole("button", { name: "Open Album Broken" }));
   await screen.findByRole("alert");
-  expect(screen.getByRole("heading", { name: "Existing" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Open Album Existing", current: "page" })).toBeTruthy();
   expect(ports.write).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "New Album" }));
   fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Existing" } });
@@ -1033,39 +1049,77 @@ it("selects a right-clicked Slot and offers its toolbar actions", async () => {
   expect(screen.getByRole("dialog", { name: "Delete Slot?" })).toBeTruthy();
 });
 
-/** Stands in for the native Edit and Album menus. */
-function MenuHarness(props: ComponentProps<typeof AlbumWorkspace>) {
-  const [command, setCommand] = useState<AlbumCommand>();
-  return <>
-    {(["delete-slot", "album-settings", "add-spread"] as const).map((name) => (
-      <button key={name} type="button" onClick={() => setCommand((current) => ({ name, serial: (current?.serial ?? 0) + 1 }))}>
-        Menu {name}</button>
-    ))}
-    <AlbumWorkspace {...props} command={command} />
-  </>;
-}
 
-it("runs native menu commands on the open Album and reports Slot selection", async () => {
+it("runs command bar commands on the open Album and reports Slot selection", async () => {
   const { ports } = disk();
   const onSlotSelectedChange = vi.fn();
   render(<MenuHarness root="D:\\Photos" ports={ports} onSlotSelectedChange={onSlotSelectedChange} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
-  await screen.findByRole("heading", { name: "Existing" });
+  await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
   expect(screen.queryByRole("button", { name: "Album settings" })).toBeNull();
   expect(onSlotSelectedChange).toHaveBeenLastCalledWith(false);
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   expect(onSlotSelectedChange).toHaveBeenLastCalledWith(true);
-  fireEvent.click(screen.getByRole("button", { name: "Menu delete-slot" }));
+  fireEvent.click(screen.getByRole("button", { name: "Bar delete-slot" }));
   fireEvent.click(within(screen.getByRole("dialog", { name: "Delete Slot?" })).getByRole("button", { name: "Delete" }));
   await waitFor(() => expect(screen.queryByRole("button", { name: "Page 1 Photo Slot 1" })).toBeNull());
   expect(onSlotSelectedChange).toHaveBeenLastCalledWith(false);
   await waitForAutosave();
-  fireEvent.click(screen.getByRole("button", { name: "Menu add-spread" }));
-  expect(screen.getByText("4 Pages")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Menu album-settings" }));
+  fireEvent.click(screen.getByRole("button", { name: "Bar add-spread" }));
+  expect(screen.getByText(/ OF 4$/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Bar album-settings" }));
   const settings = within(screen.getByRole("dialog", { name: "Album settings" }));
   fireEvent.click(settings.getByRole("button", { name: "Close" }));
   expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+it("adds Photo and Text Slots to the selected Page from the command bar", () => {
+  const { ports } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports}
+    document={{ path: "Existing", album: createAlbum({ name: "Existing", pageCount: 4 }) }} />);
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Spreads" })).getByRole("button", { name: "Select Page 3" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add Text Slot" }));
+  expect(screen.getByRole("button", { name: "Page 3 Photo Slot 1" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Page 3 Text Slot 2" })).toBeTruthy();
+});
+
+it("leaves the Delete key alone while another mode is shown, but still opens Album settings", async () => {
+  const { ports } = disk();
+  const props = { root: "D:\\Photos", ports, document: { path: "Existing", album: createAlbum({ name: "Existing" }) } };
+  const { rerender } = render(<div><AlbumWorkspace {...props} /></div>);
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  rerender(<div hidden><AlbumWorkspace {...props} active={false} /></div>);
+  fireEvent.keyDown(window, { key: "Delete" });
+  expect(screen.queryByRole("dialog", { name: "Delete Slot?" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Bar album-settings", hidden: true }));
+  expect(screen.getByRole("dialog", { name: "Album settings" }).closest("[hidden]")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  rerender(<div><AlbumWorkspace {...props} active /></div>);
+  fireEvent.keyDown(window, { key: "Delete" });
+  expect(screen.getByRole("dialog", { name: "Delete Slot?" })).toBeTruthy();
+});
+
+it("reports Album commands as available while an autosave is pending, but not while it is written or failed", async () => {
+  const { ports } = disk();
+  let finishWrite: () => void = () => {};
+  let failWrite: (cause: Error) => void = () => {};
+  ports.write = vi.fn(() => new Promise<void>((resolve, reject) => { finishWrite = resolve; failWrite = reject; }));
+  const onEditableChange = vi.fn();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} onEditableChange={onEditableChange}
+    document={{ path: "Existing", album: createAlbum({ name: "Existing" }) }} />);
+  expect(onEditableChange).toHaveBeenLastCalledWith(true);
+  vi.useFakeTimers();
+  fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
+  expect(onEditableChange).toHaveBeenLastCalledWith(true);
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  expect(onEditableChange).toHaveBeenLastCalledWith(false);
+  await act(async () => finishWrite());
+  expect(onEditableChange).toHaveBeenLastCalledWith(true);
+  fireEvent.click(screen.getByRole("button", { name: "Add Text Slot" }));
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  await act(async () => failWrite(new Error("Disk full")));
+  expect(onEditableChange).toHaveBeenLastCalledWith(false);
 });
 
 it("snaps a Photo Slot to a nearby Page edge, shows a guide, and saves the position", async () => {
@@ -1267,7 +1321,7 @@ it("adds, moves, resizes and deletes Photo Slots on the selected Page and persis
   const { ports, files } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} confirmSlotDeletion={false} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
-  await screen.findByRole("heading", { name: "Existing" });
+  await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
   expect(screen.queryByRole("button", { name: "Delete Slot" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
@@ -1496,7 +1550,7 @@ it("keeps the sibling Photo browser in sync with edits and Album switches", asyn
   render(<Workspace />);
   await screen.findByText("tree.jpg");
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
-  await screen.findByRole("heading", { name: "Existing" });
+  await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }), photoDrop(photo));
   expect(screen.getByLabelText("Used 1 time in this Album")).toBeTruthy();
@@ -1504,7 +1558,7 @@ it("keeps the sibling Photo browser in sync with edits and Album switches", asyn
   expect(screen.queryByText("tree.jpg")).toBeNull();
   await waitForAutosave();
   fireEvent.click(screen.getByRole("button", { name: "Open Album Other" }));
-  await screen.findByRole("heading", { name: "Other" });
+  await screen.findByRole("button", { name: "Open Album Other", current: "page" });
   expect(await screen.findByText("tree.jpg")).toBeTruthy();
   expect(screen.queryByLabelText("Used 1 time in this Album")).toBeNull();
 });
@@ -1513,7 +1567,7 @@ it("does not start an earlier save during a Crop pan", async () => {
   const { ports, files } = disk();
   render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
-  await screen.findByRole("heading", { name: "Existing" });
+  await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
   fireEvent.drop(slot, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
@@ -1543,7 +1597,7 @@ it("finishes a Crop pan when the window loses focus", async () => {
   files.set("Other", serializeAlbum(createAlbum({ name: "Other", pageCount: 2 })));
   render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
-  await screen.findByRole("heading", { name: "Existing" });
+  await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
   fireEvent.drop(slot, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
@@ -1568,7 +1622,7 @@ it("serializes saves when a Slot drag ends during an earlier Crop save", async (
   files.set("Other", serializeAlbum(createAlbum({ name: "Other", pageCount: 2 })));
   render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
-  await screen.findByRole("heading", { name: "Existing" });
+  await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
   fireEvent.drop(slot, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
@@ -1608,7 +1662,7 @@ it("reports Album changes and warns without blocking duplicate drops on Slots an
   render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} onAlbumChange={onAlbumChange} />);
   expect(onAlbumChange).toHaveBeenLastCalledWith(null);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
-  await screen.findByRole("heading", { name: "Existing" });
+  await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
   await waitFor(() => expect(onAlbumChange.mock.lastCall?.[0]?.title).toBe("Existing"));
   const photo = photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 });
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
@@ -1638,7 +1692,7 @@ it("highlights every visible Photo Slot and labels the current drop target", asy
   const { ports } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
-  await screen.findByRole("heading", { name: "Existing" });
+  await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
 
@@ -1670,7 +1724,7 @@ it("creates and selects a Photo Slot when a Photo is dropped on a blank Page", a
   const { ports, files } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
-  await screen.findByRole("heading", { name: "Existing" });
+  await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
   const editor = screen.getByRole("group", { name: "Spread editor" });
   const page = within(editor).getByRole("button", { name: "Select Page 1" });
   vi.spyOn(page, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 50, 606, 432));
@@ -1696,7 +1750,7 @@ it("ignores Photo drops on blocked Pages, the Spread strip, and the area around 
   const { ports } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
-  await screen.findByRole("heading", { name: "Existing" });
+  await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
   const photo = photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 });
   const editor = screen.getByRole("group", { name: "Spread editor" });
   fireEvent.drop(within(editor).getByText("Inside cover"), photo);
@@ -1725,7 +1779,7 @@ it("draws the dragged thumbnail with loading feedback until the full preview is 
   const { ports } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={photoPorts} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
-  await screen.findByRole("heading", { name: "Existing" });
+  await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }), photoDrop(
     { path: "tree.jpg", width: 6000, height: 4000, orientation: 1 },
@@ -1764,7 +1818,7 @@ it("reports a failed preview and retries it on demand", async () => {
   const { ports } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={photoPorts} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
-  await screen.findByRole("heading", { name: "Existing" });
+  await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }), photoDrop(
     { path: "tree.jpg", width: 6000, height: 4000, orientation: 1 },
@@ -1791,7 +1845,7 @@ it("places a dropped Photo in a Photo Slot, replaces it on a second drop, and dr
   const photoPorts = previews();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={photoPorts} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
-  await screen.findByRole("heading", { name: "Existing" });
+  await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
   const tree = photoDrop({ path: "2024/tree.jpg", width: 6000, height: 4000, orientation: 1 });
@@ -1820,7 +1874,7 @@ it("keeps Crop local during a pan gesture, commits at release, and persists Fit"
   const { ports, files } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
-  await screen.findByRole("heading", { name: "Existing" });
+  await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
   fireEvent.drop(slot, photoDrop({ path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }));
