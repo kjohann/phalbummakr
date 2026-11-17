@@ -2,6 +2,8 @@
 
 Status: done · Type: feature · Depends on: 016, 019, 020
 
+Addendum: [023 addendum - Photo pane controls inside the pane](023-addendum.md)
+
 ## What
 
 Replace the Album title bar and most of the native menu with a compact, context-aware command bar above the work area, and add a switch between the Album, Layouts and Sort modes.

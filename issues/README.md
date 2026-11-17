@@ -87,6 +87,7 @@ Work order for modes: 023, then 024, the 016 addendum and 011; 025 → 026 → 0
 | [015 addendum - Swap-only interaction and compact handle](015-addendum.md) | 015 | done |
 | [016 addendum - Quiet saving and a native Save command](016-addendum.md) | 016 | todo |
 | [016 addendum - Stable native menu during autosave](016-addendum.md#section-2---stable-native-menu-during-autosave) | 016 | done |
+| [023 addendum - Photo pane controls inside the pane](023-addendum.md) | 023 | todo |
 
 ## After the MVP
 
