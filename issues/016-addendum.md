@@ -12,8 +12,10 @@ File menu belongs to completed issue 016, not issue 017.
 
 - [x] Remove the workspace's Saved, Saving... and Not saved indicator and its
   reserved space. Keep autosave, save-error messages and Retry save.
-- [ ] Add a **Save** item to the native File menu that saves the current Album
-  to its existing file. Autosave remains enabled.
+- [ ] Add a **Save** button to the right-hand group of the command bar
+  ([023](023-command-bar.md)) and a **Save** item to the native File menu. Both
+  save the current Album to its existing file. Autosave remains
+  enabled.
 - [ ] Save is unavailable when no Album is open.
 - [ ] Manual Save gives no visual saving or saved feedback: no indicator,
   success notification or confirmation dialog. Failures remain explicitly

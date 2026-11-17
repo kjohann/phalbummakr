@@ -14,9 +14,13 @@ _Avoid_: Workspace, collection, catalog, solution
 An image file anywhere under the Library root. It is referenced where it lives, never uploaded or imported, and every Photo can be used on any Page.
 _Avoid_: Image, picture, asset, media
 
-**Tag**:
-A user-defined label, such as "grandparents", attached to Photos for rough sorting before and during design.
-_Avoid_: Category, label, keyword
+**Folder**:
+A directory under the Library root that the user sorts Photos into, such as "grandparents". Folders on disk are the only way Photos are organised.
+_Avoid_: Tag, category, label, keyword, collection
+
+**Sorting**:
+Moving Photos between Folders in the Library. Moving a placed Photo keeps every Album that uses it pointing at the Photo's new location.
+_Avoid_: Culling, filing, importing
 
 **Usage**:
 The number of times a Photo has been placed in an Album.
@@ -71,7 +75,7 @@ A reusable arrangement of Slots on a single Page. Applying a Layout copies it on
 _Avoid_: Template, design, arrangement
 
 **Layout Library**:
-The personal collection of Layouts reused across Albums. An Album keeps its own copy of every Layout it uses.
+The Library's collection of Layouts, shared by every Album stored there. An Album keeps its own copy of every Layout it uses.
 _Avoid_: Template gallery
 
 **Slot**:

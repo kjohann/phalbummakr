@@ -4,8 +4,8 @@ Decided in the design session but deliberately left out of the MVP. Promote an i
 
 ## Library and Photos
 
-- **Tags**: Library-wide, many per Photo, stored in `.phalbummakr/` and never written into Photos. Filter the grid by Tag.
-- **Filter by folder** in the Photo grid.
+- **Albums in subfolders**: an Album file in a subfolder has its own nested Library. Sorting and Folder renames only update Albums directly in the Library root, so such Albums can break.
+- **Repair after outside changes**: Folders or Photos renamed or moved outside the app break Placements. Offer a repair or relink function that finds them again.
 - **Missing Photos**: mark Placements whose file is gone and relink them by hand, with a match suggested from file name and capture date.
 - **Usage in other Albums**, shown in the Photo's details (nice to have).
 - **HEIC support**, only if the app is published.

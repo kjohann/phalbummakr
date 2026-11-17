@@ -4,8 +4,9 @@ Local issue tracker until the repo is published. Each issue is one file. Vocabul
 
 Status: `todo` · `doing` · `done`. Update the status here and in the issue file.
 
-Feedback on a completed issue goes in an addendum (`NNN-addendum.md`) with extra
-acceptance criteria; see [AGENTS.md](../AGENTS.md#changing-requirements). Add each
+Feedback given right after an issue is implemented goes in an addendum
+(`NNN-addendum.md`) with extra acceptance criteria. Larger follow-up work gets a
+new numbered issue. See [AGENTS.md](../AGENTS.md#changing-requirements). Add each
 addendum to the Addenda table.
 
 ## New issues
@@ -45,8 +46,8 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 007 | [Crop and Fit](007-crop-and-fit.md)                          | 006        | done   |
 | 008 | [Usage badges and duplicate warning](008-usage.md)           | 006        | done   |
 | 009 | [Text Slots](009-text-slots.md)                              | 005        | done   |
-| 010 | [Layouts and the Layout Library](010-layouts.md)             | 006, 009, 013, 014 | todo   |
-| 011 | [Undo and redo](011-undo-redo.md)                            | 006, 018, 019 | todo   |
+| 010 | [Layouts, the Layout Library and Layout mode](010-layouts.md) | 006, 009, 013, 014, 023, 024 | todo   |
+| 011 | [Undo and redo](011-undo-redo.md)                            | 006, 018, 019, 023 | todo   |
 | 012 | [Page Export](012-page-export.md)                            | 007, 009, 017 | todo   |
 | 013 | [Slot snapping](013-slot-snapping.md)                         | 006, 009   | done   |
 | 014 | [Slot rotation](014-slot-rotation.md)                         | 006, 009   | done   |
@@ -58,8 +59,17 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 020 | [Resizable Photo pane](020-photo-pane.md)                     | 016        | done   |
 | 021 | [Move a Slot between Pages in a Spread](021-move-slot-between-pages.md) | 013, 014, 015, 017 | todo   |
 | 022 | [Effective Resolution warning](022-effective-resolution-warning.md) | 007, 012 | todo   |
+| 023 | [Command bar and mode switch](023-command-bar.md)              | 016, 019, 020 | todo   |
+| 024 | [Slot tools in the command bar](024-slot-tools-in-command-bar.md) | 023     | todo   |
+| 025 | [Folder tree in the Photo pane](025-folder-tree.md)            | 023        | todo   |
+| 026 | [Sorting core: send Photos to a Folder](026-sorting-core.md)   | 025        | todo   |
+| 027 | [Create and rename Folders](027-create-and-rename-folders.md)  | 026        | todo   |
+| 028 | [Sort mode](028-sort-mode.md)                                  | 023, 026   | todo   |
+| 029 | [Applying Layouts in Album mode](029-apply-layouts.md)         | 010, 025   | todo   |
 
 Work order for the layout rework: 016, 017, 018, 019, 020, then 011.
+
+Work order for modes: 023, then 024, the 016 addendum and 011; 025 → 026 → 027/028; 010 → 029.
 
 ## Addenda
 

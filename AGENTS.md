@@ -4,9 +4,15 @@ For a requested code fix or tweak, track the work before implementing it.
 Feedback on the issue currently being worked on updates that issue file in place:
 add the new acceptance criteria to it, then implement them.
 
-Feedback on an earlier issue goes in an **addendum** (`issues/NNN-addendum.md`,
-e.g. `004-addendum.md`). Use one addendum per issue. If one already exists, add a
-new section to it instead of creating another. An addendum:
+Issues and addenda that are still `todo` may be edited in place.
+
+An **addendum** (`issues/NNN-addendum.md`, e.g. `004-addendum.md`) is only for
+immediate feedback right after an issue is implemented: something small that is
+a bit off, such as a button in the wrong colour. It is usually fixed straight
+away, but the user may choose to defer it. Larger follow-up work, or changes to
+the design of a completed issue, goes in a new numbered issue that links to the
+issue it changes. Use one addendum per issue. If one already exists, add a new
+section to it instead of creating another. An addendum:
 
 - links back to the original issue, and the original issue links to it;
 - lists the additional acceptance criteria as checkboxes;
@@ -14,11 +20,12 @@ new section to it instead of creating another. An addendum:
   [issues index](issues/README.md);
 - is finished like an issue, following the steps below.
 
-Never edit the acceptance criteria of a completed issue; add them to its addendum.
+Never edit the acceptance criteria of a completed issue; add them to its addendum
+or to a new issue.
 
-For code fixes or tweaks not directly related to an issue that can receive an
-addendum, create and index a new numbered issue using the
-[issue template](issues/README.md#new-issues) before implementing the change.
+For code fixes or tweaks not covered by an addendum, create and index a new
+numbered issue using the [issue template](issues/README.md#new-issues) before
+implementing the change.
 
 # Finishing an issue
 
