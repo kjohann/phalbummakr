@@ -33,6 +33,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
     () => document && current && serializeAlbum(current.album) !== serializeAlbum(document.album) ? "pending" : "saved",
   );
   const [cropPending, setCropPending] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [retry, setRetry] = useState(0);
   const [refresh, setRefresh] = useState(0);
   const [listing, setListing] = useState(!document);
@@ -40,7 +41,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
   // Gesture callbacks can outlive a render, so apply them to the latest Album.
   const currentRef = useRef(current);
   const saveInFlight = useRef(false);
-  const locked = busy || listing || saveStatus !== "saved" || cropPending;
+  const locked = busy || listing || saveStatus !== "saved" || cropPending || dialogOpen;
 
   function setCurrentAlbum(next: typeof current) {
     currentRef.current = next;
@@ -253,6 +254,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
             confirmSpreadDeletion={confirmSpreadDeletion} setConfirmSpreadDeletion={setConfirmSpreadDeletion}
             onDuplicatePhoto={setDuplicateWarning}
             onCropPendingChange={setCropPending}
+            onDialogChange={setDialogOpen}
             textDisabled={suspended || busy || saveStatus === "error"}
             disabled={suspended || busy || saveStatus === "saving" || saveStatus === "error"} />
         </>

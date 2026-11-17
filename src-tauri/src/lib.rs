@@ -121,6 +121,28 @@ async fn photo_preview(
     .map_err(|error| error.to_string())?
 }
 
+#[tauri::command]
+async fn photo_page_thumbnail(
+    app: tauri::AppHandle,
+    root: String,
+    path: String,
+) -> Result<String, String> {
+    let cache = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("thumbnails");
+    tauri::async_runtime::spawn_blocking(move || {
+        let bytes = photos::page_thumbnail(Path::new(&root), &cache, &path)?;
+        Ok(format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        ))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -136,6 +158,7 @@ pub fn run() {
             write_album_file,
             scan_photos,
             photo_thumbnail,
+            photo_page_thumbnail,
             photo_preview,
             list_system_fonts,
         ])

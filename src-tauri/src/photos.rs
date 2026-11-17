@@ -301,6 +301,13 @@ pub fn thumbnail(
     )
 }
 
+pub fn page_thumbnail(root: &Path, cache: &Path, relative: &str) -> Result<Vec<u8>, String> {
+    let (canonical_root, path) = resolve_photo(root, relative)?;
+    let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
+    let key = revision(&canonical_root, relative, &metadata)?;
+    thumbnail(&canonical_root, cache, relative, &key)
+}
+
 const PREVIEW_LONG_EDGE: u32 = 1024;
 
 /// An upright JPEG of a Photo for the editor, at most 1024 px on the long edge.
@@ -443,6 +450,16 @@ mod tests {
         let bytes = thumbnail(dir.path(), cache.path(), &updated.path, &updated.revision).unwrap();
         let decoded = image::load_from_memory(&bytes).unwrap();
         assert_eq!((decoded.width(), decoded.height()), (256, 128));
+    }
+
+    #[test]
+    fn page_thumbnail_uses_current_photo_revision() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        write_exif_photo(&dir.path().join("photo.jpg"), 6);
+        let bytes = page_thumbnail(dir.path(), cache.path(), "photo.jpg").unwrap();
+        let decoded = image::load_from_memory(&bytes).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (20, 40));
     }
 
     #[test]

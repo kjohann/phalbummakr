@@ -83,6 +83,9 @@ it("opens Preferences from File and persists the Spread deletion setting", async
   await act(async () => native.items.find((entry) => entry.text === "Preferences…")!.action!());
   const checkbox = screen.getByLabelText("Confirm Spread deletion") as HTMLInputElement;
   expect(checkbox.checked).toBe(false);
+  expect(document.activeElement).toBe(checkbox);
+  screen.getByRole("button", { name: "New Album…" }).focus();
+  expect(document.activeElement).toBe(checkbox);
   fireEvent.click(checkbox);
   await waitFor(() => expect(setConfirmSpreadDeletion).toHaveBeenCalledWith(true));
 });

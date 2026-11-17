@@ -67,7 +67,8 @@ Spread before the last one. Duplicating copies the Page onto the same side of a
 new Spread, except that a copy of the last Page is placed on the left before it.
 Deleting a Spread with content asks for confirmation unless disabled with
 **Never ask again** or **File > Preferences**. The first and last Spreads cannot
-be deleted. Drag a Page thumbnail onto another to move it to that position.
+be deleted. Drag a Page thumbnail onto another to move it to that position, or
+focus it and use Alt+Left/Right to move it one position.
 Page numbers and Spreads update from the new order, while Page identities remain
 stable. The selected thumbnail scrolls into view. The editor keeps the trim edge
 at A4 proportions, with Bleed outside it and a dashed Safe Zone inside it.

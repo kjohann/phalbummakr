@@ -11,6 +11,7 @@ import { snapSlot, type SnapGuide } from "./slotSnapping";
 import type { FontPorts } from "./tauriFontPorts";
 import { fitTextSlots, measureTextSlot, textFontStyle } from "./textLayout";
 import TextSlotControls from "./TextSlotControls";
+import ModalDialog from "./ModalDialog";
 
 const PLACEMENT_DRAG_TYPE = "application/x-phalbummakr-placement";
 
@@ -30,6 +31,7 @@ interface Props {
   onCropPendingChange: (pending: boolean) => void;
   confirmSpreadDeletion: boolean;
   setConfirmSpreadDeletion?: (value: boolean) => Promise<void>;
+  onDialogChange: (open: boolean) => void;
 }
 
 /** An in-progress mouse drag of a Slot, in screen pixels. */
@@ -86,11 +88,12 @@ function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, trimHeig
   };
 }
 
-export default function AlbumView({ album: savedAlbum, onChange, disabled, textDisabled, root, photoPorts, fontPorts, onDuplicatePhoto, onCropPendingChange, confirmSpreadDeletion, setConfirmSpreadDeletion }: Props) {
+export default function AlbumView({ album: savedAlbum, onChange, disabled, textDisabled, root, photoPorts, fontPorts, onDuplicatePhoto, onCropPendingChange, confirmSpreadDeletion, setConfirmSpreadDeletion, onDialogChange }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLElement>(null);
   const selectedSlotOverlayRef = useRef<HTMLDivElement>(null);
   const draggedId = useRef<string | null>(null);
+  const focusPageId = useRef<string | null>(null);
   const draggedPlacement = useRef<SlotAddress | null>(null);
   const stopSlotDrag = useRef<(() => void) | null>(null);
   const cropZoomTimer = useRef<number | null>(null);
@@ -114,6 +117,10 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
   const [deleting, setDeleting] = useState(false);
   const [stripMenu, setStripMenu] = useState<{ x: number; y: number; pageId: string | null } | null>(null);
   const [pageDropId, setPageDropId] = useState<string | null>(null);
+  useEffect(() => {
+    onDialogChange(deleteTarget !== null);
+    return () => onDialogChange(false);
+  }, [deleteTarget, onDialogChange]);
   const [thumbnailBySlot, setThumbnailBySlot] = useState<Record<string, string>>({});
   const [previewStates, setPreviewStates] = useState<Record<string, {
     path: string; status: "loading" | "ready" | "error"; attempt: number;
@@ -145,6 +152,14 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
   useEffect(() => {
     stripRef.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [selectedPage.id, visiblePageIndex]);
+
+  useEffect(() => {
+    if (!focusPageId.current) return;
+    const target = Array.from(stripRef.current?.querySelectorAll<HTMLButtonElement>("[data-page-id]") ?? [])
+      .find((button) => button.dataset.pageId === focusPageId.current);
+    target?.focus();
+    focusPageId.current = null;
+  }, [savedAlbum]);
 
   useEffect(() => {
     const element = viewportRef.current;
@@ -854,9 +869,12 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
         if (!disabled) setStripMenu({ x: event.clientX, y: event.clientY, pageId: null });
       }} onDragOver={(event) => {
         if (disabled || !draggedId.current) return;
+        if (!(event.target instanceof Element) || !event.target.closest(".page-thumbnail[draggable='true']")) setPageDropId(null);
         const bounds = event.currentTarget.getBoundingClientRect();
         if (event.clientX < bounds.left + 32) event.currentTarget.scrollLeft -= 16;
         else if (event.clientX > bounds.right - 32) event.currentTarget.scrollLeft += 16;
+      }} onDragLeave={(event) => {
+        if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setPageDropId(null);
       }}>
         {spreads.map((item, index) => (
           <Fragment key={index}>
@@ -875,7 +893,17 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
               <button type="button" key={page.id} className={`page-thumbnail${pageDropId === page.id ? " page-drop-target" : ""}`}
                 style={{ aspectRatio: `${dimensions.widthMm} / ${dimensions.heightMm}` }}
                 aria-label={`Select Page ${pageNumbers.get(page.id)}`} aria-pressed={page.id === selectedPage.id}
+                data-page-id={page.id} title="Alt+Left or Alt+Right moves this Page"
                 draggable={!disabled}
+                onKeyDown={(event) => {
+                  if (disabled || !event.altKey || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
+                  event.preventDefault();
+                  const position = album.pages.findIndex((entry) => entry.id === page.id);
+                  const next = position + (event.key === "ArrowLeft" ? -1 : 1);
+                  if (next < 0 || next >= album.pages.length) return;
+                  focusPageId.current = page.id;
+                  editPages((current) => movePage(current, page.id, next), next);
+                }}
                 onContextMenu={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
@@ -939,8 +967,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
           </>}
         </div>;
       })()}
-      {deleteTarget && <div className="dialog-backdrop">
-        <div className="album-form" role="dialog" aria-modal="true" aria-label="Discard Spread and its content?">
+      {deleteTarget && <ModalDialog label="Discard Spread and its content?" closeDisabled={deleting} onClose={() => setDeleteTarget(null)}>
           <h2>Discard Spread and its content?</h2>
           <label><input type="checkbox" checked={neverAsk} onChange={(event) => setNeverAsk(event.target.checked)} /> Never ask again</label>
           {deleteError && <p role="alert">{deleteError}</p>}
@@ -948,8 +975,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
             <button type="button" disabled={deleting} onClick={() => void confirmDeleteSpread()}>Discard Spread</button>
             <button type="button" disabled={deleting} onClick={() => setDeleteTarget(null)}>Cancel</button>
           </div>
-        </div>
-      </div>}
+      </ModalDialog>}
     </section>
   );
 }
@@ -970,7 +996,15 @@ function PagePreview({ page, format, root, photoPorts }: {
   const width = dimensions.widthMm * scale;
   const height = dimensions.heightMm * scale;
   return <div ref={ref} className="page-preview" aria-hidden="true">
-    {visible && <Stage width={width} height={height}>
+    {visible && <VisiblePagePreview page={page} format={format} root={root} photoPorts={photoPorts}
+      width={width} height={height} scale={scale} />}
+  </div>;
+}
+
+function VisiblePagePreview({ page, format, root, photoPorts, width, height, scale }: {
+  page: Page; format: PageFormat; root: string; photoPorts: PhotoPreviewPorts; width: number; height: number; scale: number;
+}) {
+  return <Stage width={width} height={height}>
       <Layer clipX={0} clipY={0} clipWidth={width} clipHeight={height}>
         {page.slots.map((slot) => {
           const rect = { x: slot.x * width, y: slot.y * height, width: slot.width * width, height: slot.height * height };
@@ -982,13 +1016,13 @@ function PagePreview({ page, format, root, photoPorts }: {
               ? <TextContent slot={slot} id={slot.id} rect={local} scale={scale} format={format} hidden={false} onOverflow={ignoreOverflow} />
               : slot.placement
                 ? <PlacementImage {...local} crop={placementDisplayCrop(slot.placement)} fit={slot.placement.fit}
-                  root={root} path={slot.placement.photoPath} photoPorts={photoPorts} attempt={0} slotId={slot.id} onStatus={ignorePreviewStatus} />
+                  root={root} path={slot.placement.photoPath} photoPorts={photoPorts} thumbnailRequest={photoPorts.pageThumbnail}
+                  attempt={0} slotId={slot.id} onStatus={ignorePreviewStatus} />
                 : <Rect {...local} fill="#e8ebe6" />}
           </Group>;
         })}
       </Layer>
-    </Stage>}
-  </div>;
+    </Stage>;
 }
 
 function ignoreOverflow() {}
@@ -1030,9 +1064,10 @@ function LayerPage({ x, y, width, height, bleed, safeZone, children }: {
 }
 
 /** Draws a Placement from its cached preview; originals are only used by Page Export. */
-function PlacementImage({ x, y, width, height, crop, fit, root, path, photoPorts, thumbnail, attempt, slotId, onStatus }: {
+function PlacementImage({ x, y, width, height, crop, fit, root, path, photoPorts, thumbnailRequest, thumbnail, attempt, slotId, onStatus }: {
   x: number; y: number; width: number; height: number; crop: Crop; fit: boolean;
-  root: string; path: string; photoPorts: PhotoPreviewPorts;
+  root: string; path: string; photoPorts: Pick<PhotoPreviewPorts, "preview">;
+  thumbnailRequest?: PhotoPreviewPorts["pageThumbnail"];
   thumbnail?: string; attempt: number; slotId: string;
   onStatus: (slotId: string, path: string, status: "loading" | "ready" | "error") => void;
 }) {
@@ -1040,8 +1075,10 @@ function PlacementImage({ x, y, width, height, crop, fit, root, path, photoPorts
   const [thumbnailImage, setThumbnailImage] = useState<{ url: string; image: HTMLImageElement } | null>(null);
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     onStatus(slotId, path, "loading");
-    photoPorts.preview(root, path).then((url) => {
+    const request = thumbnailRequest ? thumbnailRequest(root, path, controller.signal) : photoPorts.preview(root, path);
+    request.then((url) => {
       const image = new Image();
       image.onload = () => {
         if (!active) return;
@@ -1055,14 +1092,14 @@ function PlacementImage({ x, y, width, height, crop, fit, root, path, photoPorts
       };
       image.src = url;
     }).catch((cause: unknown) => {
-      console.error(`Could not load the preview of ${path}`, cause);
       if (active) {
+        console.error(`Could not load the preview of ${path}`, cause);
         setPreview({ path, attempt, image: null });
         onStatus(slotId, path, "error");
       }
     });
-    return () => { active = false; };
-  }, [root, path, photoPorts, attempt, slotId, onStatus]);
+    return () => { active = false; controller.abort(); };
+  }, [root, path, photoPorts, thumbnailRequest, attempt, slotId, onStatus]);
 
   useEffect(() => {
     if (!thumbnail) {

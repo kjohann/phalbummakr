@@ -19,4 +19,5 @@ export interface PhotoScan {
 export interface PhotoPreviewPorts {
   /** An image URL for the cached editor preview of a Photo, never the original file. */
   preview(root: string, path: string): Promise<string>;
+  pageThumbnail(root: string, path: string, signal: AbortSignal): Promise<string>;
 }

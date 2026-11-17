@@ -55,28 +55,30 @@ function drain() {
   }
 }
 
+function queuedThumbnail(root: string, path: string, signal: AbortSignal, revision?: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    pending.push(async () => {
+      if (signal.aborted) {
+        reject(new DOMException("Thumbnail request cancelled", "AbortError"));
+        return;
+      }
+      try {
+        const command = revision === undefined ? "photo_page_thumbnail" : "photo_thumbnail";
+        resolve(await invoke<string>(command, { root, path, ...(revision === undefined ? {} : { revision }) }));
+      } catch (error) {
+        reject(error);
+      }
+    });
+    drain();
+  });
+}
+
 export const tauriPhotoPorts = {
   scan: (root: string) => invoke<PhotoScan>("scan_photos", { root }),
   preview: (root: string, path: string) => previewRequest(root, path),
   prewarmPreview: (root: string, photo: Photo) => previewRequest(root, photo.path, photo.revision),
+  pageThumbnail: (root: string, path: string, signal: AbortSignal) => queuedThumbnail(root, path, signal),
   thumbnail(root: string, photo: Photo, signal: AbortSignal): Promise<string> {
-    return new Promise((resolve, reject) => {
-      pending.push(async () => {
-        if (signal.aborted) {
-          reject(new DOMException("Thumbnail request cancelled", "AbortError"));
-          return;
-        }
-        try {
-          resolve(await invoke<string>("photo_thumbnail", {
-            root,
-            path: photo.path,
-            revision: photo.revision,
-          }));
-        } catch (error) {
-          reject(error);
-        }
-      });
-      drain();
-    });
+    return queuedThumbnail(root, photo.path, signal, photo.revision);
   },
 };

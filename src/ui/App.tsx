@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { createAlbum, deserializeAlbum, serializeAlbum, type Album } from "../core";
 import AlbumWorkspace from "./AlbumWorkspace";
 import PhotoBrowser from "./PhotoBrowser";
+import ModalDialog from "./ModalDialog";
 
 interface Settings {
   lastAlbum: string | null;
@@ -250,7 +251,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
             "open-album": !busy && !restoring && !preferencesOpen,
             "open-recent": !busy && !restoring && !preferencesOpen && recent.length > 0,
             "close-album": !busy && !restoring && !preferencesOpen && (document !== null || draft !== null),
-            "preferences": !restoring && !preferencesOpen,
+            "preferences": !busy && !restoring && !preferencesOpen,
           };
           for (const [id, enabled] of Object.entries(enabledById)) {
             const item = await file.get(id);
@@ -277,7 +278,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
             text: path.replaceAll("&", "&&"), action: () => actions.current.openRecent(path),
           })) },
           { id: "close-album", text: "Close Album", enabled: !busy && !restoring && !preferencesOpen && (document !== null || draft !== null), action: () => actions.current.closeAlbum() },
-          { id: "preferences", text: "Preferences…", enabled: !restoring && !preferencesOpen, action: () => actions.current.preferences() },
+          { id: "preferences", text: "Preferences…", enabled: !busy && !restoring && !preferencesOpen, action: () => actions.current.preferences() },
           { text: "Exit", action: () => actions.current.exit() },
         ],
       }] });
@@ -332,8 +333,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
   return (
     <main className="app-shell">
       {error && <p className="error-banner" role="alert">{error}</p>}
-      {preferencesOpen && <div className="dialog-backdrop">
-        <div className="album-form" role="dialog" aria-modal="true" aria-label="Preferences">
+      {preferencesOpen && <ModalDialog label="Preferences" closeDisabled={preferenceSaving} onClose={() => setPreferencesOpen(false)}>
           <h1>Preferences</h1>
           <label><input type="checkbox" checked={confirmSpreadDeletion} disabled={preferenceSaving}
             onChange={(event) => {
@@ -345,8 +345,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
             }} /> Confirm Spread deletion</label>
           {preferenceError && <p className="error-banner" role="alert">{preferenceError}</p>}
           <button type="button" disabled={preferenceSaving} onClick={() => setPreferencesOpen(false)}>Close</button>
-        </div>
-      </div>}
+      </ModalDialog>}
       {draft ? (
         <form className="album-form new-album-form" role="dialog" aria-modal="true" onSubmit={(event) => void create(event)} aria-label="Album settings">
           <h1>Album settings</h1>

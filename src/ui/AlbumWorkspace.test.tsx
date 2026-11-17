@@ -2,7 +2,7 @@
 import { useState, type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { addTextSlot, createAlbum, deserializeAlbum, photoUsage, serializeAlbum, setSlotText, type Album, type AlbumPorts } from "../core";
+import { addPhotoSlot, addTextSlot, createAlbum, deserializeAlbum, photoUsage, placePhoto, serializeAlbum, setSlotText, type Album, type AlbumPorts } from "../core";
 import AlbumWorkspace from "./AlbumWorkspace";
 import PhotoBrowser from "./PhotoBrowser";
 import TextSlotControls from "./TextSlotControls";
@@ -105,6 +105,19 @@ it("renders Page content in the strip thumbnail", () => {
   expect(within(screen.getByRole("navigation", { name: "Spreads" })).getByText("A caption")).toBeTruthy();
 });
 
+it("uses a small Photo rendition for Page thumbnails", async () => {
+  const { ports } = disk();
+  const album = placePhoto(addPhotoSlot(createAlbum({ name: "Existing" }), "page-2"), "page-2", "slot-1",
+    { path: "tree.jpg", width: 100, height: 100, orientation: 1 });
+  const photoPorts = {
+    preview: vi.fn(async () => "preview"),
+    pageThumbnail: vi.fn(async () => "thumbnail"),
+  };
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={photoPorts} document={{ path: "Existing", album }} />);
+  await waitFor(() => expect(photoPorts.pageThumbnail).toHaveBeenCalledWith("D:\\Photos", "tree.jpg", expect.any(AbortSignal)));
+  expect(photoPorts.preview).not.toHaveBeenCalled();
+});
+
 it("deletes an empty middle Spread without asking and protects end Spreads", () => {
   const { ports } = disk();
   render(<AlbumWorkspace root="D:\\Photos" ports={ports}
@@ -135,6 +148,9 @@ it("asks before discarding a Spread with content and can disable future prompts"
     setConfirmSpreadDeletion={setConfirmSpreadDeletion} />);
   fireEvent.click(screen.getByRole("button", { name: "Delete Spread 2" }));
   const dialog = within(screen.getByRole("dialog", { name: "Discard Spread and its content?" }));
+  expect(dialog.getByLabelText("Never ask again")).toBe(document.activeElement);
+  screen.getByRole("button", { name: "Add Photo Slot" }).focus();
+  expect(dialog.getByLabelText("Never ask again")).toBe(document.activeElement);
   fireEvent.click(dialog.getByLabelText("Never ask again"));
   fireEvent.click(dialog.getByRole("button", { name: "Discard Spread" }));
   await waitFor(() => expect(setConfirmSpreadDeletion).toHaveBeenCalledWith(false));
@@ -181,10 +197,25 @@ it("indicates the Page drop target and rejects drops on Inside Covers", () => {
   fireEvent.dragStart(strip.getByRole("button", { name: "Select Page 1" }), { dataTransfer: transfer });
   fireEvent.dragOver(strip.getByRole("button", { name: "Select Page 4" }), { dataTransfer: transfer });
   expect(strip.getByRole("button", { name: "Select Page 4" }).classList.contains("page-drop-target")).toBe(true);
+  fireEvent.dragOver(strip.getByRole("button", { name: "Insert Spread before Spread 2" }), { dataTransfer: transfer });
+  expect(strip.getByRole("button", { name: "Select Page 4" }).classList.contains("page-drop-target")).toBe(false);
+  fireEvent.dragOver(strip.getByRole("button", { name: "Select Page 4" }), { dataTransfer: transfer });
   fireEvent.dragOver(strip.getAllByText("Inside cover")[1], { dataTransfer: transfer });
   expect(strip.getByRole("button", { name: "Select Page 4" }).classList.contains("page-drop-target")).toBe(false);
   fireEvent.drop(strip.getAllByText("Inside cover")[1], { dataTransfer: transfer });
   expect(screen.getByText("PAGE 1 OF 4")).toBeTruthy();
+});
+
+it("reorders a Page from the keyboard and keeps it selected and focused", () => {
+  const { ports } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports}
+    document={{ path: "Existing", album: createAlbum({ name: "Existing", pageCount: 4 }) }} />);
+  const strip = within(screen.getByRole("navigation", { name: "Spreads" }));
+  const first = strip.getByRole("button", { name: "Select Page 1" });
+  first.focus();
+  fireEvent.keyDown(first, { altKey: true, key: "ArrowRight" });
+  expect(screen.getByText("PAGE 2 OF 4")).toBeTruthy();
+  expect(document.activeElement).toBe(strip.getByRole("button", { name: "Select Page 2" }));
 });
 
 it("shows non-interactive Inside Covers on both end Spreads", () => {
@@ -847,7 +878,10 @@ it("shows listing failures and allows the user to retry", async () => {
 });
 
 function previews() {
-  return { preview: vi.fn(async (_root: string, path: string) => `data:image/jpeg;base64,${btoa(path)}`) };
+  return {
+    preview: vi.fn(async (_root: string, path: string) => `data:image/jpeg;base64,${btoa(path)}`),
+    pageThumbnail: vi.fn(async (_root: string, path: string) => `data:image/png;base64,${btoa(path)}`),
+  };
 }
 
 function drag(element: Element, dx: number, dy: number) {

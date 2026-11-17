@@ -53,7 +53,7 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 015 | [Drag-to-swap Placements](015-drag-to-swap.md)                | 006, 007   | done   |
 | 016 | [Open an Album file](016-album-file.md)                       | 004        | done   |
 | 017 | [Book structure with Inside Covers](017-book-structure.md)    | 016        | done   |
-| 018 | [Page strip](018-page-strip.md)                               | 017        | doing  |
+| 018 | [Page strip](018-page-strip.md)                               | 017        | done   |
 | 019 | [Slot toolbar and menus](019-slot-toolbar.md)                 | 018        | todo   |
 | 020 | [Resizable Photo pane](020-photo-pane.md)                     | 016        | todo   |
 | 021 | [Move a Slot between Pages in a Spread](021-move-slot-between-pages.md) | 013, 014, 015, 017 | todo   |
