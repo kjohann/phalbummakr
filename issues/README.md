@@ -46,7 +46,7 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 007 | [Crop and Fit](007-crop-and-fit.md)                          | 006        | done   |
 | 008 | [Usage badges and duplicate warning](008-usage.md)           | 006        | done   |
 | 009 | [Text Slots](009-text-slots.md)                              | 005        | done   |
-| 010 | [Layouts, the Layout Library and Layout mode](010-layouts.md) | 006, 009, 013, 014, 023, 024 | todo   |
+| 010 | [Layouts, the Layout Library and Layout mode](010-layouts.md) | 006, 009, 013, 014, 023, 024 | done   |
 | 011 | [Undo and redo](011-undo-redo.md)                            | 006, 018, 019, 023 | todo   |
 | 012 | [Page Export](012-page-export.md)                            | 007, 009, 017 | todo   |
 | 013 | [Slot snapping](013-slot-snapping.md)                         | 006, 009   | done   |

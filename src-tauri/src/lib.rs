@@ -1,5 +1,6 @@
 mod albums;
 mod fonts;
+mod layouts;
 mod photos;
 mod settings;
 
@@ -78,6 +79,22 @@ async fn write_album_file(path: String, json: String, create: bool) -> Result<()
     .await
     .map_err(|error| error.to_string())?
     .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn read_layout_library(root: String) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || layouts::read_library(Path::new(&root)))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn write_layout_library(root: String, json: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || layouts::write_library(Path::new(&root), &json))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -169,6 +186,8 @@ pub fn run() {
             album_exists,
             read_album_file,
             write_album_file,
+            read_layout_library,
+            write_layout_library,
             scan_photos,
             photo_thumbnail,
             photo_page_thumbnail,

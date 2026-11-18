@@ -73,6 +73,25 @@ vi.mock("./AlbumWorkspace", () => ({
     </>;
   },
 }));
+vi.mock("./LayoutWorkspace", () => ({
+  default: ({ paneHost, onBusyChange, bar: { command, onStateChange } = {} }: {
+    paneHost: HTMLElement | null;
+    onBusyChange: (busy: boolean) => void;
+    bar?: {
+      command?: { name: string; serial: number };
+      onStateChange?: (state: { editable: boolean; layoutSelected: boolean; slotSelected: boolean }) => void;
+    };
+  }) => {
+    const [slotSelected, setSlotSelected] = useState(false);
+    useEffect(() => onStateChange?.({ editable: true, layoutSelected: true, slotSelected }), [slotSelected, onStateChange]);
+    return <section aria-label="Layouts">
+      {command && <p>Layout command {command.name} {command.serial}</p>}
+      {paneHost && createPortal(<p>Mock Layout Library</p>, paneHost)}
+      <button type="button" onClick={() => setSlotSelected(true)}>Select mock Layout Slot</button>
+      <button type="button" onClick={() => onBusyChange(true)}>Begin mock Layout edit</button>
+    </section>;
+  },
+}));
 vi.mock("./PhotoBrowser", () => ({
   default: ({ compact, onCompactChange }: { compact?: boolean; onCompactChange?: (compact: boolean) => void }) => <>
     <p>{compact ? "Compact Photo browser" : "Photo browser"}</p>
@@ -211,20 +230,48 @@ it("switches between Album, Layouts and Sort modes from the Photo pane, keeping 
   fireEvent.click(screen.getByRole("button", { name: "Edit mock Album" }));
 
   fireEvent.click(modes.getByRole("button", { name: "Layouts" }));
-  expect(screen.getByRole("region", { name: "Layouts" }).textContent).toContain("010");
+  expect(screen.getByRole("region", { name: "Layouts" })).toBeTruthy();
+  expect(within(pane).getByText("Mock Layout Library")).toBeTruthy();
+  expect(within(pane).getByText("Photo browser").closest("[hidden]")).not.toBeNull();
   expect(screen.getByText("Edited Album").closest("[hidden]")).not.toBeNull();
   expect(screen.getByText("Album workspace inactive")).toBeTruthy();
-  expect(bar().queryByRole("button", { name: "Add Photo Slot" })).toBeNull();
+  expect(bar().queryByRole("button", { name: "Add Spread" })).toBeNull();
   expect(barButton("Album Settings…")).toBeTruthy();
   expect(pane.hidden).toBe(false);
 
   fireEvent.click(modes.getByRole("button", { name: "Sort" }));
   expect(screen.getByRole("region", { name: "Sort" }).textContent).toContain("028");
+  expect(screen.getByRole("region", { name: "Layouts", hidden: true }).closest("[hidden]")).not.toBeNull();
   fireEvent.click(modes.getByRole("button", { name: "Album" }));
   expect(screen.queryByRole("region", { name: "Sort" })).toBeNull();
+  expect(within(pane).getByText("Photo browser").closest("[hidden]")).toBeNull();
   expect(screen.getByText("Edited Album").closest("[hidden]")).toBeNull();
   expect(screen.queryByText("Album workspace inactive")).toBeNull();
-  expect(barButton("Add Photo Slot")).toBeTruthy();
+  expect(barButton("Add Spread")).toBeTruthy();
+});
+
+it("routes Layout commands to Layout mode, swapping Add Slot for the Slot tools when a Slot is selected", async () => {
+  native.enabled = true;
+  render(<App ports={openAlbumPorts()} />);
+  await screen.findByText("Original");
+  fireEvent.click(modeGroup().getByRole("button", { name: "Layouts" }));
+  const middle = () => Array.from(screen.getByRole("toolbar", { name: "Commands" }).querySelector(".command-context")!.querySelectorAll("button"),
+    (button) => button.textContent);
+  await waitFor(() => expect(barButton("New Layout").disabled).toBe(false));
+  expect(middle()).toEqual(["Add Photo Slot", "Add Text Slot", "New Layout", "Duplicate Layout", "Delete Layout"]);
+  fireEvent.click(barButton("Add Photo Slot"));
+  expect(screen.getByText("Layout command add-photo-slot 1")).toBeTruthy();
+  expect(screen.queryByText(/^Command add-photo-slot/)).toBeNull();
+  for (const [label, name] of [["New Layout", "new-layout"], ["Duplicate Layout", "duplicate-layout"], ["Delete Layout", "delete-layout"]]) {
+    fireEvent.click(barButton(label));
+    expect(screen.getByText(new RegExp(`^Layout command ${name} \\d+$`))).toBeTruthy();
+  }
+  fireEvent.click(screen.getByRole("button", { name: "Select mock Layout Slot" }));
+  expect(middle()).toEqual(["New Layout", "Duplicate Layout", "Delete Layout"]);
+
+  await waitFor(() => expect(native.items.find((entry) => entry.text === "Close Album")?.enabled).toBe(true));
+  fireEvent.click(screen.getByRole("button", { name: "Begin mock Layout edit" }));
+  await waitFor(() => expect(native.items.find((entry) => entry.text === "Close Album")?.enabled).toBe(false));
 });
 
 it("opens every Album in Album mode, whichever mode the previous Album was left in", async () => {
@@ -582,6 +629,8 @@ it("collapses the Photo pane to a mode rail and expands it from the selected mod
   fireEvent.keyDown(window, { key: "B", ctrlKey: true });
   expect(pane.hidden).toBe(false);
 
+  // Compact belongs to the Photo browser, which only Album mode shows in the pane.
+  fireEvent.click(modeGroup().getByRole("button", { name: "Album" }));
   fireEvent.click(screen.getByRole("button", { name: "Toggle mock Compact" }));
   expect(screen.getByText("Compact Photo browser")).toBeTruthy();
   expect(ports.setPhotoPane).toHaveBeenLastCalledWith({ width: 300, collapsed: false, compact: true });

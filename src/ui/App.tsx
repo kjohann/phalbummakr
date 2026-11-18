@@ -4,9 +4,10 @@ import { dirname } from "@tauri-apps/api/path";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { createAlbum, deserializeAlbum, serializeAlbum, type Album } from "../core";
+import { createAlbum, deserializeAlbum, serializeAlbum, type Album, type LayoutPorts } from "../core";
 import AlbumWorkspace, { type AlbumCommand, type AlbumCommandName, type CommandBarLink } from "./AlbumWorkspace";
 import CommandBar, { type BarCommand } from "./CommandBar";
+import LayoutWorkspace, { type LayoutBarLink, type LayoutBarState, type LayoutCommand, type LayoutCommandName } from "./LayoutWorkspace";
 import type { Mode } from "./modes";
 import PhotoBrowser from "./PhotoBrowser";
 import PhotoPane, { clampPaneWidth, DEFAULT_PHOTO_PANE, type PaneModes, type PhotoPaneSettings } from "./PhotoPane";
@@ -67,7 +68,7 @@ interface DeletionPreferences {
   setConfirmSlotDeletion: (value: boolean) => Promise<void>;
 }
 
-function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, suspended, modes, bar, preferences, photoPane, onPhotoPaneChange }: {
+function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, suspended, modes, bar, layoutBar, layoutPorts, preferences, photoPane, onPhotoPaneChange }: {
   document: OpenDocument;
   onBusyChange: (busy: boolean) => void;
   onTitleChange: (album: Album | null) => void;
@@ -75,6 +76,8 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
   suspended: boolean;
   modes: PaneModes;
   bar: CommandBarLink;
+  layoutBar: LayoutBarLink;
+  layoutPorts?: LayoutPorts;
   preferences: DeletionPreferences;
   photoPane: PhotoPaneSettings;
   onPhotoPaneChange: (change: Partial<PhotoPaneSettings>) => void;
@@ -85,20 +88,39 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
     onTitleChange(next);
   }, [onTitleChange]);
   const mode = modes.current;
+  // The Layout Library is loaded the first time Layout mode opens, then kept, like Album mode's state.
+  const [layoutsOpened, setLayoutsOpened] = useState(false);
+  if (mode === "layouts" && !layoutsOpened) setLayoutsOpened(true);
+  const [layoutPaneHost, setLayoutPaneHost] = useState<HTMLElement | null>(null);
+  const busy = useRef({ album: false, layouts: false });
+  const reportAlbumBusy = useCallback((value: boolean) => {
+    busy.current.album = value;
+    onBusyChange(busy.current.album || busy.current.layouts);
+  }, [onBusyChange]);
+  const reportLayoutsBusy = useCallback((value: boolean) => {
+    busy.current.layouts = value;
+    onBusyChange(busy.current.album || busy.current.layouts);
+  }, [onBusyChange]);
   return (
     <div className="library-workspace" style={{ display: hidden ? "none" : undefined }}>
       <PhotoPane modes={modes} settings={photoPane} onChange={onPhotoPaneChange}>
-        <PhotoBrowser root={document.root} album={album} compact={photoPane.compact}
-          onCompactChange={(compact) => onPhotoPaneChange({ compact })} />
+        <div className="pane-view" hidden={mode === "layouts"}>
+          <PhotoBrowser root={document.root} album={album} compact={photoPane.compact}
+            onCompactChange={(compact) => onPhotoPaneChange({ compact })} />
+        </div>
+        {layoutsOpened && <div className="pane-view" hidden={mode !== "layouts"} ref={setLayoutPaneHost} />}
       </PhotoPane>
       {/* Hidden rather than unmounted, so Album mode keeps its Spread and Slot selection. */}
       <div className="mode-view" hidden={mode !== "album"}>
         <AlbumWorkspace root={document.root} document={document} suspended={suspended} active={mode === "album" && !hidden}
-          onBusyChange={onBusyChange} onAlbumChange={reportAlbum} bar={bar} {...preferences} />
+          onBusyChange={reportAlbumBusy} onAlbumChange={reportAlbum} bar={bar} {...preferences} />
       </div>
-      {mode === "layouts" && <section className="workspace mode-placeholder" aria-label="Layouts">
-        <h2>Layouts</h2><p>Creating and editing Layouts arrives with issue 010.</p>
-      </section>}
+      {layoutsOpened && <div className="mode-view" hidden={mode !== "layouts"}>
+        <LayoutWorkspace root={document.root} format={(album ?? document.album).pageFormat} ports={layoutPorts}
+          paneHost={layoutPaneHost} active={mode === "layouts" && !hidden && !suspended} bar={layoutBar}
+          onBusyChange={reportLayoutsBusy} confirmSlotDeletion={preferences.confirmSlotDeletion}
+          setConfirmSlotDeletion={preferences.setConfirmSlotDeletion} />
+      </div>}
       {mode === "sort" && <section className="workspace mode-placeholder" aria-label="Sort">
         <h2>Sort</h2><p>Sorting Photos into Folders arrives with issue 028.</p>
       </section>}
@@ -106,7 +128,7 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
   );
 }
 
-export default function App({ ports = desktopPorts }: { ports?: DocumentPorts }) {
+export default function App({ ports = desktopPorts, layoutPorts }: { ports?: DocumentPorts; layoutPorts?: LayoutPorts }) {
   const [document, setDocument] = useState<OpenDocument | null>(null);
   const [title, setTitle] = useState<string | null>(null);
   const [recent, setRecent] = useState<string[]>([]);
@@ -123,6 +145,8 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
   const [slotSelected, setSlotSelected] = useState(false);
   const [toolsHost, setToolsHost] = useState<HTMLElement | null>(null);
   const [albumEditable, setAlbumEditable] = useState(false);
+  const [layoutCommand, setLayoutCommand] = useState<LayoutCommand | undefined>();
+  const [layoutState, setLayoutState] = useState<LayoutBarState>({ editable: false, layoutSelected: false, slotSelected: false });
   const [modeState, setModeState] = useState<{ documentId: number | undefined; mode: Mode }>({ documentId: undefined, mode: "album" });
   const commandSerial = useRef(0);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
@@ -241,8 +265,8 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
     return () => { active = false; };
   }, [ports]);
 
-  const actions = useRef<{ newAlbum: () => void; openAlbum: () => void; openRecent: (path: string) => void; closeAlbum: () => void; preferences: () => void; exit: () => void;   albumCommand: (name: AlbumCommandName) => void; togglePhotos: () => void }>(
-      { newAlbum: () => {}, openAlbum: () => {}, openRecent: () => {}, closeAlbum: () => {}, preferences: () => {}, exit: () => {}, albumCommand: () => {}, togglePhotos: () => {} },
+  const actions = useRef<{ newAlbum: () => void; openAlbum: () => void; openRecent: (path: string) => void; closeAlbum: () => void; preferences: () => void; exit: () => void;   albumCommand: (name: AlbumCommandName) => void; layoutCommand: (name: LayoutCommandName) => void; togglePhotos: () => void }>(
+      { newAlbum: () => {}, openAlbum: () => {}, openRecent: () => {}, closeAlbum: () => {}, preferences: () => {}, exit: () => {}, albumCommand: () => {}, layoutCommand: () => {}, togglePhotos: () => {} },
   );
   const photoPaneAvailable = document !== null && draft === null && !preferencesOpen;
   const fileEnabled = !busy && !restoring && !preferencesOpen;
@@ -255,6 +279,9 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
     },
     albumCommand: (name) => {
       if (document && !draft) setCommand({ name, serial: ++commandSerial.current });
+    },
+    layoutCommand: (name) => {
+      if (document && !draft) setLayoutCommand({ name, serial: ++commandSerial.current });
     },
     newAlbum: () => void run(async () => {
       const path = await ports.chooseNew();
@@ -418,14 +445,28 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
 
   const albumOpen = document !== null && draft === null;
   // Unlike File commands, these stay enabled while an autosave is pending, so the bar doesn't flicker after each edit.
-  const albumCommandsEnabled = albumOpen && albumEditable && !transitioning && !restoring && !preferencesOpen;
+  const commandsAvailable = albumOpen && !transitioning && !restoring && !preferencesOpen;
+  const albumCommandsEnabled = commandsAvailable && albumEditable;
   const albumCommand = (name: AlbumCommandName, label: string, extra: Partial<BarCommand> = {}): BarCommand =>
     ({ id: name, label, disabled: !albumCommandsEnabled, run: () => actions.current.albumCommand(name), ...extra });
+  const layoutBarCommand = (name: LayoutCommandName, label: string, extra: Partial<BarCommand> = {}): BarCommand => ({
+    id: name, label, run: () => actions.current.layoutCommand(name), ...extra,
+    disabled: !(commandsAvailable && layoutState.editable) || extra.disabled,
+  });
+  const layoutCommands = (): BarCommand[] => [
+    ...(layoutState.slotSelected ? [] : [
+      layoutBarCommand("add-photo-slot", "Add Photo Slot", { disabled: !layoutState.layoutSelected }),
+      layoutBarCommand("add-text-slot", "Add Text Slot", { disabled: !layoutState.layoutSelected }),
+    ]),
+    layoutBarCommand("new-layout", "New Layout", { overflow: 1 }),
+    layoutBarCommand("duplicate-layout", "Duplicate Layout", { disabled: !layoutState.layoutSelected, overflow: 3 }),
+    layoutBarCommand("delete-layout", "Delete Layout", { disabled: !layoutState.layoutSelected, overflow: 2 }),
+  ];
   const contextCommands: BarCommand[] = albumOpen && mode === "album" && !slotSelected ? [
     albumCommand("add-photo-slot", "Add Photo Slot"),
     albumCommand("add-text-slot", "Add Text Slot"),
     albumCommand("add-spread", "Add Spread", { overflow: 1 }),
-  ] : [];
+  ] : albumOpen && mode === "layouts" ? layoutCommands() : [];
   const documentCommands: BarCommand[] = albumOpen ? [
     albumCommand("album-settings", "Album Settings…", { overflow: 2 }),
   ] : [
@@ -484,6 +525,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
         onTitleChange={reportTitle} hidden={draft !== null} suspended={transitioning}
         modes={{ current: mode, onChange: setMode, disabled: preferencesOpen }}
         bar={{ command, toolsHost, onSlotSelectedChange: setSlotSelected, onEditableChange: setAlbumEditable }}
+        layoutBar={{ command: layoutCommand, toolsHost, onStateChange: setLayoutState }} layoutPorts={layoutPorts}
         preferences={{ confirmSpreadDeletion, setConfirmSpreadDeletion, confirmSlotDeletion, setConfirmSlotDeletion }}
         photoPane={photoPane} onPhotoPaneChange={changePhotoPane} />}
     </main>

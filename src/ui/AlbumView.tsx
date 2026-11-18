@@ -1,16 +1,16 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
-import { Group, Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva";
+import { Group, Image as KonvaImage, Layer, Rect, Stage } from "react-konva";
 import {
-  addPage, addPhotoSlot, addTextSlot, albumSpreads, deletePage, deleteSlot, duplicatePage, movePage, moveSlot, pageDimensions,
-  fitPhotoRect, panCrop, placePhoto, placePhotoOnPage, placementDisplayCrop, photoUsage, resizeSlot, rotateSlot, setPlacementCrop,
+  addPage, addPhotoSlot, addTextSlot, albumSpreads, deletePage, deleteSlot, duplicatePage, movePage, pageDimensions,
+  fitPhotoRect, panCrop, placePhoto, placePhotoOnPage, placementDisplayCrop, photoUsage, rotateSlot, setPlacementCrop,
   setPlacementFit, setSlotText, setTextStyle, swapPlacements, zoomCrop, POINTS_PER_MM, TEXT_LINE_HEIGHT,
-  type Album, type Crop, type Page, type PageFormat, type PhotoPreviewPorts, type Rectangle, type Slot, type SlotAddress, type TextSlot, type TextStyle,
+  type Album, type Crop, type Page, type PageFormat, type PhotoPreviewPorts, type Slot, type SlotAddress, type TextStyle,
 } from "../core";
 import { hasPhotoDrag, readPhotoDrag } from "./photoDrag";
-import { snapSlot, type SnapGuide } from "./slotSnapping";
+import { applySlotDrag, LayerPage, SnapGuides, TextContent, type SlotDrag } from "./pageCanvas";
 import type { FontPorts } from "./tauriFontPorts";
-import { fitTextSlots, measureTextSlot, textFontStyle } from "./textLayout";
+import { fitTextSlots } from "./textLayout";
 import TextSlotTools from "./TextSlotTools";
 import { PhotoSlotTools, SlotActions } from "./SlotTools";
 import ModalDialog from "./ModalDialog";
@@ -39,60 +39,6 @@ interface Props {
   bar: CommandBarLink;
   onDialogChange: (open: boolean) => void;
   active?: boolean;
-}
-
-/** An in-progress mouse drag of a Slot, in screen pixels. */
-interface SlotDrag {
-  pageId: string;
-  slotId: string;
-  kind: "move" | "resize";
-  dx: number;
-  dy: number;
-  bypass: boolean;
-}
-
-function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, trimHeight: number): {
-  album: Album;
-  guides: SnapGuide[];
-} {
-  const slot = album.pages.find((page) => page.id === drag.pageId)?.slots.find((item) => item.id === drag.slotId);
-  if (!slot) return { album, guides: [] };
-  const unclamped = drag.kind === "move"
-    ? { ...slot, x: slot.x + drag.dx / trimWidth, y: slot.y + drag.dy / trimHeight }
-    : { ...slot, width: slot.width + drag.dx / trimWidth, height: slot.height + drag.dy / trimHeight };
-  const apply = (rect: Rectangle) => drag.kind === "move"
-    ? moveSlot(album, drag.pageId, drag.slotId, rect.x, rect.y)
-    : resizeSlot(album, drag.pageId, drag.slotId, rect.width, rect.height);
-  const updated = fitTextSlots(apply(unclamped), album);
-  if (drag.bypass) return { album: updated, guides: [] };
-  const page = updated.pages.find((item) => item.id === drag.pageId)!;
-  const proposed = page.slots.find((item) => item.id === drag.slotId)!;
-  const dimensions = pageDimensions(album.pageFormat);
-  const sidewaysText = slot.type === "text" && (slot.rotation === 90 || slot.rotation === 270);
-  const property = (axis: "x" | "y") => drag.kind === "move" ? axis : axis === "x" ? "width" : "height";
-  const snapped = snapSlot({
-    rect: proposed,
-    unclamped,
-    pageSize: { width: trimWidth, height: trimHeight },
-    safeZone: { x: album.pageFormat.safeZoneMm / dimensions.widthMm, y: album.pageFormat.safeZoneMm / dimensions.heightMm },
-    otherSlots: page.slots.filter((item) => item.id !== drag.slotId),
-    kind: drag.kind,
-    resizeWidth: !sidewaysText,
-    resizeHeight: slot.type === "photo" || sidewaysText,
-    project: (rect) => {
-      const candidate = fitTextSlots(apply(rect), album);
-      return candidate.pages.find((item) => item.id === drag.pageId)!.slots.find((item) => item.id === drag.slotId)!;
-    },
-  });
-  const result = fitTextSlots(apply(snapped.rect), album);
-  const actual = result.pages.find((item) => item.id === drag.pageId)!.slots.find((item) => item.id === drag.slotId)!;
-  return {
-    album: result,
-    guides: snapped.guides.filter((guide) => {
-      const key = property(guide.axis);
-      return Math.abs(actual[key] - snapped.rect[key]) < 1e-9;
-    }),
-  };
 }
 
 export default function AlbumView({ album: savedAlbum, onChange, disabled, textDisabled, root, photoPorts, fontPorts, onDuplicatePhoto, onCropPendingChange, confirmSpreadDeletion, setConfirmSpreadDeletion, confirmSlotDeletion, setConfirmSlotDeletion, bar, onDialogChange, active = true }: Props) {
@@ -864,53 +810,11 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
             </Fragment>
           );
         }))}
-        {slotDrag && dragPreview && dragPreview.guides.length > 0 && (() => {
-          const side = spread.left?.id === slotDrag.pageId ? 0 : 1;
-          const trimLeft = originX + side * (pageWidth + gap) + bleedMm * scale;
-          const trimTop = originY + bleedMm * scale;
-          return (
-            <svg className="snap-guides" width={viewport.width} height={viewport.height}>
-              {dragPreview.guides.map((guide) => {
-                if (guide.target === "Equal gap") {
-                  return (
-                    <g key={`${guide.axis}-gap`} role="img" aria-label="Snap to Equal gap">
-                      {guide.gaps.map((gap) => {
-                        const x1 = trimLeft + (guide.axis === "x" ? gap.start : guide.cross) * trimWidth;
-                        const y1 = trimTop + (guide.axis === "y" ? gap.start : guide.cross) * trimHeight;
-                        const x2 = trimLeft + (guide.axis === "x" ? gap.end : guide.cross) * trimWidth;
-                        const y2 = trimTop + (guide.axis === "y" ? gap.end : guide.cross) * trimHeight;
-                        return (
-                          <g key={gap.start}>
-                            <line x1={x1} y1={y1} x2={x2} y2={y2} />
-                            <line x1={x1 - (guide.axis === "y" ? 4 : 0)} y1={y1 - (guide.axis === "x" ? 4 : 0)}
-                              x2={x1 + (guide.axis === "y" ? 4 : 0)} y2={y1 + (guide.axis === "x" ? 4 : 0)} />
-                            <line x1={x2 - (guide.axis === "y" ? 4 : 0)} y1={y2 - (guide.axis === "x" ? 4 : 0)}
-                              x2={x2 + (guide.axis === "y" ? 4 : 0)} y2={y2 + (guide.axis === "x" ? 4 : 0)} />
-                            <text x={(x1 + x2) / 2 + 3} y={(y1 + y2) / 2 - 4}>=</text>
-                          </g>
-                        );
-                      })}
-                    </g>
-                  );
-                }
-                const x = trimLeft + guide.position * trimWidth;
-                const y = trimTop + guide.position * trimHeight;
-                return (
-                  <g key={`${guide.axis}-${guide.position}`} role="img" aria-label={`Snap to ${guide.target}`}>
-                    {guide.axis === "x"
-                      ? <line x1={x} y1={trimTop} x2={x} y2={trimTop + trimHeight} />
-                      : <line x1={trimLeft} y1={y} x2={trimLeft + trimWidth} y2={y} />}
-                    <text x={guide.axis === "x" ? x + (guide.position > 0.8 ? -4 : 4) : trimLeft + 4}
-                      y={guide.axis === "x" ? trimTop + trimHeight - 6 : y + (guide.position < 0.5 ? 13 : -4)}
-                      textAnchor={guide.axis === "x" && guide.position > 0.8 ? "end" : "start"}>
-                      {guide.target}
-                    </text>
-                  </g>
-                );
-              })}
-            </svg>
-          );
-        })()}
+        {slotDrag && dragPreview && dragPreview.guides.length > 0 && (
+          <SnapGuides guides={dragPreview.guides} width={viewport.width} height={viewport.height}
+            trimLeft={originX + (spread.left?.id === slotDrag.pageId ? 0 : 1) * (pageWidth + gap) + bleedMm * scale}
+            trimTop={originY + bleedMm * scale} trimWidth={trimWidth} trimHeight={trimHeight} />
+        )}
         {active && toolsHost && selectedSlot && createPortal(<Fragment key={`${selectedPage.id}:${selectedSlot.id}`}>
           {selectedSlot.type === "text" ? (
             <TextSlotTools style={selectedSlot.style}
@@ -1133,41 +1037,6 @@ function VisiblePagePreview({ page, format, root, photoPorts, width, height, sca
 
 function ignoreOverflow() {}
 function ignorePreviewStatus() {}
-
-function TextContent({ slot, id, rect, scale, format, hidden, onOverflow }: {
-  slot: TextSlot; id: string; rect: Rectangle;
-  scale: number; format: PageFormat; hidden: boolean; onOverflow: (id: string, overflow: boolean) => void;
-}) {
-  const layout = useMemo(() => measureTextSlot(slot, format), [slot.text, slot.style, slot.width, slot.height, slot.rotation, format]);
-  useEffect(() => { onOverflow(id, layout.tooWide); }, [id, layout.tooWide, onOverflow]);
-  const textScale = scale / POINTS_PER_MM;
-  return (
-    <Group x={rect.x} y={rect.y} scaleX={textScale} scaleY={textScale}
-      clipX={0} clipY={0} clipWidth={layout.width} clipHeight={rect.height / textScale}>
-      <Text width={layout.width} text={slot.text}
-        fontFamily={slot.style.fontFamily} fontSize={slot.style.fontSize} fontStyle={textFontStyle(slot.style)}
-        textDecoration={slot.style.underline ? "underline" : ""}
-        fill={slot.style.color} align={slot.style.align} lineHeight={TEXT_LINE_HEIGHT} opacity={hidden ? 0 : 1} />
-    </Group>
-  );
-}
-
-function LayerPage({ x, y, width, height, bleed, safeZone, children }: {
-  x: number; y: number; width: number; height: number; bleed: number; safeZone: number; children: ReactNode;
-}) {
-  return (
-    <>
-      <Rect x={x} y={y} width={width} height={height} fill="#ffffff" stroke="#b89176" strokeWidth={1}
-        shadowColor="#1e2926" shadowBlur={12} shadowOpacity={0.1} shadowOffsetY={4} />
-      {children}
-      <Rect x={x + bleed} y={y + bleed} width={width - 2 * bleed} height={height - 2 * bleed}
-        stroke="#9e6d4e" strokeWidth={1} dash={[5, 4]} />
-      <Rect x={x + bleed + safeZone} y={y + bleed + safeZone}
-        width={width - 2 * (bleed + safeZone)} height={height - 2 * (bleed + safeZone)}
-        stroke="#56829d" strokeWidth={1} dash={[3, 3]} />
-    </>
-  );
-}
 
 /** Draws a Placement from its cached preview; originals are only used by Page Export. */
 function PlacementImage({ x, y, width, height, crop, fit, root, path, photoPorts, thumbnailRequest, thumbnail, attempt, slotId, onStatus }: {

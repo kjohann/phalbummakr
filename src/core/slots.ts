@@ -222,7 +222,8 @@ function centredCrop(photoAspect: number, targetAspect: number, centreX = 0.5, c
   };
 }
 
-function refitPlacement(album: Album, placement: Placement, from: PhotoSlot, to: PhotoSlot): Placement {
+/** Keeps a Placement's zoom and centre while adapting its Crop to another Photo Slot's content aspect ratio. */
+export function refitPlacement(album: Album, placement: Placement, from: PhotoSlot, to: PhotoSlot): Placement {
   const { crop } = placement;
   const previousAspect = slotAspect(album, from);
   if (Math.abs(previousAspect - slotAspect(album, to)) < 1e-12) return placement;
