@@ -75,13 +75,22 @@ middle Spread and choose **×** to delete it. Right-click a Page for insertion,
 deletion and duplication options, or right-click empty strip space to add a
 Spread before the last one. Duplicating copies the Page onto the same side of a
 new Spread, except that a copy of the last Page is placed on the left before it.
-Deleting a Spread with content asks for confirmation unless disabled with
-**Never ask again** or **File > Preferences**. The first and last Spreads cannot
+Deleting a Spread happens straight away; use **Undo** if it was a mistake. The
+first and last Spreads cannot
 be deleted. Drag a Page thumbnail onto another to move it to that position, or
 focus it and use Alt+Left/Right to move it one position.
 Page numbers and Spreads update from the new order, while Page identities remain
 stable. The selected thumbnail scrolls into view. The editor keeps the trim edge
 at A4 proportions, with Bleed outside it and a dashed Safe Zone inside it.
+
+**Undo** and **Redo** at the right of the command bar, or Ctrl+Z and Ctrl+Y
+(or Ctrl+Shift+Z), step through every Album change made since the Album was
+opened: Slots, Placements, Crops, text and Pages. A drag, a pan, or one session
+of typing in a Text Slot counts as one step. Undo jumps to the Page where the
+change happened. The history lasts for the session only; autosave always writes
+the current state. In Layout mode, each Layout has its own history. Creating,
+duplicating and deleting Layouts, and moving Photos between Folders, are not
+undone.
 
 **Album settings** contains the title and print settings. Use **Apply print settings** for the title, Bleed,
 Safe Zone and DPI changes. The Page Format remains A4 landscape. All applied edits

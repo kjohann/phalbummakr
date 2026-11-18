@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { createAlbum, deserializeAlbum, serializeAlbum, type Album, type AlbumPorts, type PhotoPreviewPorts } from "../core";
+import {
+  canRedo, canUndo, createAlbum, deserializeAlbum, emptyHistory, endGroup, recordChange, serializeAlbum, stepHistory,
+  type Album, type AlbumPorts, type HistoryDirection, type PhotoPreviewPorts, type UndoHistory,
+} from "../core";
 import AlbumView from "./AlbumView";
 import ModalDialog from "./ModalDialog";
 import { tauriAlbumPorts } from "./tauriAlbumPorts";
@@ -8,7 +11,21 @@ import { tauriFontPorts, type FontPorts } from "./tauriFontPorts";
 import { fitTextSlots } from "./textLayout";
 import type { LayoutLibraryState } from "./useLayoutLibrary";
 
-export type AlbumCommandName = "album-settings" | "add-spread" | "add-photo-slot" | "add-text-slot" | "save-as-layout";
+export type AlbumCommandName = "album-settings" | "add-spread" | "add-photo-slot" | "add-text-slot" | "save-as-layout" | "undo" | "redo";
+
+/** What the open document can currently undo and redo. */
+export interface HistoryState {
+  canUndo: boolean;
+  canRedo: boolean;
+}
+
+/** The open Album's undo history, as AlbumView uses it. */
+export interface AlbumHistory {
+  /** Undoes or redoes one step, returning the Album before and after; null when there is nothing to step to. */
+  step: (direction: HistoryDirection) => { before: Album; after: Album } | null;
+  /** Makes the next change a new undo step, e.g. when the user leaves the text being typed. */
+  endGroup: () => void;
+}
 
 /** A command bar command for the open Album; `serial` makes repeated commands distinct. */
 export interface AlbumCommand {
@@ -24,6 +41,7 @@ export interface CommandBarLink {
   onSlotSelectedChange?: (selected: boolean) => void;
   /** Whether Album commands can currently change the Album. Stays true while an autosave is only pending. */
   onEditableChange?: (editable: boolean) => void;
+  onHistoryChange?: (history: HistoryState) => void;
 }
 
 interface Props {
@@ -35,10 +53,6 @@ interface Props {
   onAlbumChange?: (album: Album | null) => void;
   document?: { path: string; album: Album };
   suspended?: boolean;
-  confirmSpreadDeletion?: boolean;
-  setConfirmSpreadDeletion?: (value: boolean) => Promise<void>;
-  confirmSlotDeletion?: boolean;
-  setConfirmSlotDeletion?: (value: boolean) => Promise<void>;
   bar?: CommandBarLink;
   /** False while another mode is shown; the hidden workspace then leaves keyboard shortcuts alone. */
   active?: boolean;
@@ -51,8 +65,8 @@ export interface AlbumLayouts {
   paneHost: HTMLElement | null;
 }
 
-export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document, suspended = false, confirmSpreadDeletion = true, setConfirmSpreadDeletion, confirmSlotDeletion = true, setConfirmSlotDeletion, bar = {}, active = true, layouts }: Props) {
-  const { command, onEditableChange } = bar;
+export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document, suspended = false, bar = {}, active = true, layouts }: Props) {
+  const { command, onEditableChange, onHistoryChange } = bar;
   const [names, setNames] = useState<string[]>([]);
   const [current, setCurrent] = useState<{ filename: string; album: Album } | null>(
     () => document ? { filename: document.path, album: fitTextSlots(document.album) } : null,
@@ -72,15 +86,17 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
     () => document && current && serializeAlbum(current.album) !== serializeAlbum(document.album) ? "pending" : "saved",
   );
   const [cropPending, setCropPending] = useState(false);
-  const [dialogOpen, setDialogOpen] = useState(false);
   const [retry, setRetry] = useState(0);
   const [refresh, setRefresh] = useState(0);
   const [listing, setListing] = useState(!document);
   const savedJson = useRef<string | null>(document ? serializeAlbum(document.album) : null);
   // Gesture callbacks can outlive a render, so apply them to the latest Album.
   const currentRef = useRef(current);
+  // Kept only for the session: reopening an Album starts with an empty history.
+  const historyRef = useRef(emptyHistory<Album>());
+  const [historyState, setHistoryState] = useState<HistoryState>({ canUndo: false, canRedo: false });
   const saveInFlight = useRef(false);
-  const locked = busy || listing || saveStatus !== "saved" || cropPending || dialogOpen;
+  const locked = busy || listing || saveStatus !== "saved" || cropPending;
   const handledCommand = useRef(command?.serial);
 
   useEffect(() => {
@@ -93,6 +109,17 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
     currentRef.current = next;
     setCurrent(next);
   }
+
+  function setHistory(next: UndoHistory<Album>) {
+    historyRef.current = next;
+    setHistoryState((previous) => previous.canUndo === canUndo(next) && previous.canRedo === canRedo(next)
+      ? previous : { canUndo: canUndo(next), canRedo: canRedo(next) });
+  }
+
+  useEffect(() => {
+    onHistoryChange?.(historyState);
+  }, [historyState, onHistoryChange]);
+  useEffect(() => () => onHistoryChange?.({ canUndo: false, canRedo: false }), [onHistoryChange]);
 
   useEffect(() => {
     if (document) return;
@@ -112,7 +139,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
     onBusyChange?.(locked);
   }, [locked, onBusyChange]);
 
-  const editable = current !== null && !suspended && !busy && !listing && !cropPending && !dialogOpen
+  const editable = current !== null && !suspended && !busy && !listing && !cropPending
     && saveStatus !== "saving" && saveStatus !== "error";
   useEffect(() => {
     onEditableChange?.(editable);
@@ -164,6 +191,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
       const fitted = fitTextSlots(album);
       savedJson.current = serializeAlbum(album);
       setSaveStatus(fitted === album ? "saved" : "pending");
+      setHistory(emptyHistory());
       setCurrentAlbum({ filename: name, album: fitted });
       setDuplicateWarning(null);
       setCreating(false);
@@ -192,6 +220,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
       savedJson.current = serializeAlbum(album);
       setSaveStatus("saved");
       setNames((previous) => [...new Set([...previous, album.title])].sort());
+      setHistory(emptyHistory());
       setCurrentAlbum({ filename: album.title, album });
       setDuplicateWarning(null);
       setCreating(false);
@@ -203,20 +232,43 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
     }
   }
 
-  function changeAlbum(update: (album: Album) => Album) {
+  /** Applies a change as one undo step; consecutive changes in the same `group` share a step. */
+  function changeAlbum(update: (album: Album) => Album, group?: string) {
     if (suspended) return;
     const previous = currentRef.current;
     if (!previous) return;
     try {
       const album = update(previous.album);
+      if (album === previous.album) return;
       serializeAlbum(album);
       setError(null);
-      setSaveStatus(saveInFlight.current ? "saving" : "pending");
-      setCurrentAlbum({ ...previous, album });
+      setHistory(recordChange(historyRef.current, previous.album, group));
+      showAlbum({ ...previous, album });
     } catch (cause) {
       setError(`Could not update Album: ${String(cause)}`);
     }
   }
+
+  function showAlbum(next: { filename: string; album: Album }) {
+    setSaveStatus(saveInFlight.current ? "saving" : "pending");
+    setCurrentAlbum(next);
+  }
+
+  const history: AlbumHistory = {
+    step: (direction) => {
+      const present = currentRef.current;
+      if (!present || suspended) return null;
+      const result = stepHistory(historyRef.current, present.album, direction);
+      if (!result) return null;
+      setError(null);
+      setHistory(result.history);
+      showAlbum({ ...present, album: result.state });
+      return { before: present.album, after: result.state };
+    },
+    endGroup: () => {
+      if (historyRef.current.group !== undefined) setHistory(endGroup(historyRef.current));
+    },
+  };
 
   return (
     <section className="workspace album-workspace" aria-label="Album workspace">
@@ -310,14 +362,11 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
               </form>
             </ModalDialog>
           )}
-          <AlbumView key={current.filename} album={current.album} onChange={changeAlbum}
+          <AlbumView key={current.filename} album={current.album} onChange={changeAlbum} history={history}
             root={root} photoPorts={photoPorts} fontPorts={fontPorts}
-            confirmSpreadDeletion={confirmSpreadDeletion} setConfirmSpreadDeletion={setConfirmSpreadDeletion}
-            confirmSlotDeletion={confirmSlotDeletion} setConfirmSlotDeletion={setConfirmSlotDeletion}
             bar={bar} active={active} layouts={layouts} onNotice={setNotice}
             onDuplicatePhoto={setDuplicateWarning}
             onCropPendingChange={setCropPending}
-            onDialogChange={setDialogOpen}
             textDisabled={suspended || busy || saveStatus === "error"}
             disabled={suspended || busy || saveStatus === "saving" || saveStatus === "error"} />
         </>

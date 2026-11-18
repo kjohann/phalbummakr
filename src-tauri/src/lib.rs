@@ -21,18 +21,6 @@ fn album_settings(app: tauri::AppHandle) -> Result<settings::AlbumSettings, Stri
 }
 
 #[tauri::command]
-fn set_confirm_spread_deletion(app: tauri::AppHandle, value: bool) -> Result<(), String> {
-    settings::set_confirm_spread_deletion(&settings_file(&app)?, value)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn set_confirm_slot_deletion(app: tauri::AppHandle, value: bool) -> Result<(), String> {
-    settings::set_confirm_slot_deletion(&settings_file(&app)?, value)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
 fn set_side_pane(app: tauri::AppHandle, pane: settings::SidePane) -> Result<(), String> {
     settings::set_side_pane(&settings_file(&app)?, pane).map_err(|error| error.to_string())
 }
@@ -177,8 +165,6 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             album_settings,
-            set_confirm_spread_deletion,
-            set_confirm_slot_deletion,
             set_side_pane,
             remember_album,
             forget_album,

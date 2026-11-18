@@ -4,28 +4,24 @@ import { dirname } from "@tauri-apps/api/path";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { createAlbum, deserializeAlbum, serializeAlbum, type Album, type LayoutPorts } from "../core";
-import AlbumWorkspace, { type AlbumCommand, type AlbumCommandName, type CommandBarLink } from "./AlbumWorkspace";
+import { createAlbum, deserializeAlbum, serializeAlbum, type Album, type HistoryDirection, type LayoutPorts } from "../core";
+import AlbumWorkspace, { type AlbumCommand, type AlbumCommandName, type CommandBarLink, type HistoryState } from "./AlbumWorkspace";
 import CommandBar, { type BarCommand } from "./CommandBar";
 import LayoutWorkspace, { type LayoutBarLink, type LayoutBarState, type LayoutCommand, type LayoutCommandName } from "./LayoutWorkspace";
 import type { Mode } from "./modes";
 import PhotoBrowser from "./PhotoBrowser";
 import SidePane, { clampPaneWidth, DEFAULT_SIDE_PANE, type PaneModes, type SidePaneSettings } from "./SidePane";
-import ModalDialog from "./ModalDialog";
+import { historyShortcut } from "./historyShortcut";
 import { useLayoutLibrary } from "./useLayoutLibrary";
 
 interface Settings {
   lastAlbum: string | null;
   recentAlbums: string[];
-  confirmSpreadDeletion: boolean;
-  confirmSlotDeletion: boolean;
   sidePane?: SidePaneSettings;
 }
 
 export interface DocumentPorts {
   settings(): Promise<Settings>;
-  setConfirmSpreadDeletion(value: boolean): Promise<void>;
-  setConfirmSlotDeletion(value: boolean): Promise<void>;
   setSidePane(pane: SidePaneSettings): Promise<void>;
   exists(path: string): Promise<boolean>;
   read(path: string): Promise<string>;
@@ -41,8 +37,6 @@ export interface DocumentPorts {
 const filters = [{ name: "Album", extensions: ["phalbum"] }];
 const desktopPorts: DocumentPorts = {
   settings: () => invoke("album_settings"),
-  setConfirmSpreadDeletion: (value) => invoke("set_confirm_spread_deletion", { value }),
-  setConfirmSlotDeletion: (value) => invoke("set_confirm_slot_deletion", { value }),
   setSidePane: (pane) => invoke("set_side_pane", { pane }),
   exists: (path) => invoke("album_exists", { path }),
   read: (path) => invoke("read_album_file", { path }),
@@ -60,13 +54,6 @@ interface OpenDocument {
   path: string;
   root: string;
   album: Album;
-}
-
-interface DeletionPreferences {
-  confirmSpreadDeletion: boolean;
-  setConfirmSpreadDeletion: (value: boolean) => Promise<void>;
-  confirmSlotDeletion: boolean;
-  setConfirmSlotDeletion: (value: boolean) => Promise<void>;
 }
 
 const PANE_TABS = [{ id: "photos", label: "Photos" }, { id: "layouts", label: "Layouts" }] as const;
@@ -93,7 +80,7 @@ function PaneTabs({ current, onChange }: { current: PaneTab; onChange: (tab: Pan
   );
 }
 
-function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, suspended, modes, bar, layoutBar, layoutPorts, preferences, sidePane, onSidePaneChange, onLayoutLibraryReadyChange }: {
+function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, suspended, modes, bar, layoutBar, layoutPorts, sidePane, onSidePaneChange, onLayoutLibraryReadyChange }: {
   document: OpenDocument;
   onBusyChange: (busy: boolean) => void;
   onTitleChange: (album: Album | null) => void;
@@ -103,7 +90,6 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
   bar: CommandBarLink;
   layoutBar: LayoutBarLink;
   layoutPorts?: LayoutPorts;
-  preferences: DeletionPreferences;
   sidePane: SidePaneSettings;
   onSidePaneChange: (change: Partial<SidePaneSettings>) => void;
   /** Whether the shared Layout Library can take a new Layout, for Save as Layout. */
@@ -154,14 +140,12 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
       {/* Hidden rather than unmounted, so Album mode keeps its Spread and Slot selection. */}
       <div className="mode-view" hidden={mode !== "album"}>
         <AlbumWorkspace root={document.root} document={document} suspended={suspended} active={mode === "album" && !hidden}
-          onBusyChange={reportAlbumBusy} onAlbumChange={reportAlbum} bar={bar} {...preferences}
+          onBusyChange={reportAlbumBusy} onAlbumChange={reportAlbum} bar={bar}
           layouts={{ state: layouts, paneHost: albumLayoutsHost }} />
       </div>
       {layoutsOpened && <div className="mode-view" hidden={mode !== "layouts"}>
         <LayoutWorkspace format={format} layouts={layouts}
-          paneHost={layoutPaneHost} active={mode === "layouts" && !hidden && !suspended} bar={layoutBar}
-          confirmSlotDeletion={preferences.confirmSlotDeletion}
-          setConfirmSlotDeletion={preferences.setConfirmSlotDeletion} />
+          paneHost={layoutPaneHost} active={mode === "layouts" && !hidden && !suspended} bar={layoutBar} />
       </div>}
       {mode === "sort" && <section className="workspace mode-placeholder" aria-label="Sort">
         <h2>Sort</h2><p>Sorting Photos into Folders arrives with issue 028.</p>
@@ -179,22 +163,18 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
   const [busy, setBusy] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [confirmSpreadDeletion, setConfirmSpreadDeletionState] = useState(true);
-  const [confirmSlotDeletion, setConfirmSlotDeletionState] = useState(true);
   const [sidePane, setSidePaneState] = useState(DEFAULT_SIDE_PANE);
   const sidePaneRef = useRef(DEFAULT_SIDE_PANE);
   const [command, setCommand] = useState<AlbumCommand | undefined>();
   const [slotSelected, setSlotSelected] = useState(false);
   const [toolsHost, setToolsHost] = useState<HTMLElement | null>(null);
   const [albumEditable, setAlbumEditable] = useState(false);
+  const [albumHistory, setAlbumHistory] = useState<HistoryState>({ canUndo: false, canRedo: false });
   const [layoutLibraryReady, setLayoutLibraryReady] = useState(false);
   const [layoutCommand, setLayoutCommand] = useState<LayoutCommand | undefined>();
-  const [layoutState, setLayoutState] = useState<LayoutBarState>({ editable: false, layoutSelected: false, slotSelected: false });
+  const [layoutState, setLayoutState] = useState<LayoutBarState>({ editable: false, layoutSelected: false, slotSelected: false, canUndo: false, canRedo: false });
   const [modeState, setModeState] = useState<{ documentId: number | undefined; mode: Mode }>({ documentId: undefined, mode: "album" });
   const commandSerial = useRef(0);
-  const [preferencesOpen, setPreferencesOpen] = useState(false);
-  const [preferenceSaving, setPreferenceSaving] = useState(false);
-  const [preferenceError, setPreferenceError] = useState<string | null>(null);
   const busyRef = useRef(false);
   const operationRef = useRef(false);
   const documentId = useRef(0);
@@ -207,14 +187,6 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
     setBusy(value || operationRef.current);
   }, []);
   const reportTitle = useCallback((album: Album | null) => setTitle(album?.title ?? null), []);
-  const setConfirmSpreadDeletion = useCallback(async (value: boolean) => {
-    await ports.setConfirmSpreadDeletion(value);
-    setConfirmSpreadDeletionState(value);
-  }, [ports]);
-  const setConfirmSlotDeletion = useCallback(async (value: boolean) => {
-    await ports.setConfirmSlotDeletion(value);
-    setConfirmSlotDeletionState(value);
-  }, [ports]);
   const changeSidePane = useCallback((change: Partial<SidePaneSettings>) => {
     const next = { ...sidePaneRef.current, ...change };
     sidePaneRef.current = next;
@@ -271,8 +243,6 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
         const settings = await ports.settings();
         if (!active) return;
         setRecent(settings.recentAlbums);
-        setConfirmSpreadDeletionState(settings.confirmSpreadDeletion);
-        setConfirmSlotDeletionState(settings.confirmSlotDeletion);
         const pane = { ...DEFAULT_SIDE_PANE, ...settings.sidePane };
         sidePaneRef.current = { ...pane, width: clampPaneWidth(pane.width) };
         setSidePaneState(sidePaneRef.current);
@@ -308,11 +278,11 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
     return () => { active = false; };
   }, [ports]);
 
-  const actions = useRef<{ newAlbum: () => void; openAlbum: () => void; openRecent: (path: string) => void; closeAlbum: () => void; preferences: () => void; exit: () => void;   albumCommand: (name: AlbumCommandName) => void; layoutCommand: (name: LayoutCommandName) => void; togglePhotos: () => void }>(
-      { newAlbum: () => {}, openAlbum: () => {}, openRecent: () => {}, closeAlbum: () => {}, preferences: () => {}, exit: () => {}, albumCommand: () => {}, layoutCommand: () => {}, togglePhotos: () => {} },
+  const actions = useRef<{ newAlbum: () => void; openAlbum: () => void; openRecent: (path: string) => void; closeAlbum: () => void; exit: () => void; albumCommand: (name: AlbumCommandName) => void; layoutCommand: (name: LayoutCommandName) => void; togglePhotos: () => void; history: (direction: HistoryDirection) => void }>(
+      { newAlbum: () => {}, openAlbum: () => {}, openRecent: () => {}, closeAlbum: () => {}, exit: () => {}, albumCommand: () => {}, layoutCommand: () => {}, togglePhotos: () => {}, history: () => {} },
   );
-  const sidePaneAvailable = document !== null && draft === null && !preferencesOpen;
-  const fileEnabled = !busy && !restoring && !preferencesOpen;
+  const sidePaneAvailable = document !== null && draft === null;
+  const fileEnabled = !busy && !restoring;
   // Keyed by document, so every newly opened Album starts in Album mode.
   const mode = modeState.documentId === document?.id ? modeState.mode : "album";
   const setMode = (next: Mode) => setModeState({ documentId: document?.id, mode: next });
@@ -325,6 +295,11 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
     },
     layoutCommand: (name) => {
       if (document && !draft) setLayoutCommand({ name, serial: ++commandSerial.current });
+    },
+    history: (direction) => {
+      if (!(direction === "undo" ? undoEnabled : redoEnabled)) return;
+      if (mode === "album") actions.current.albumCommand(direction);
+      else if (mode === "layouts") actions.current.layoutCommand(direction);
     },
     newAlbum: () => void run(async () => {
       const path = await ports.chooseNew();
@@ -341,7 +316,6 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
       setTitle(null);
       setDraft(null);
     }, "Could not close Album"),
-    preferences: () => { setPreferenceError(null); setPreferencesOpen(true); },
     exit: () => {
       if (isTauri()) void getCurrentWindow().close().catch((cause: unknown) => setError(`Could not close window: ${String(cause)}`));
     },
@@ -359,6 +333,21 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
     };
     window.addEventListener("keydown", toggle);
     return () => window.removeEventListener("keydown", toggle);
+  }, []);
+
+  useEffect(() => {
+    // A Text Slot's editor shows Album content, so app undo replaces the browser's own undo there.
+    const step = (event: KeyboardEvent) => {
+      const direction = event.defaultPrevented ? null : historyShortcut(event);
+      if (!direction) return;
+      if (event.target instanceof HTMLElement && !event.target.matches(".slot-text-editor")
+        && event.target.closest("input, textarea, select, [contenteditable]")) return;
+      if (window.document.querySelector("[aria-modal='true']")) return;
+      event.preventDefault();
+      actions.current.history(direction);
+    };
+    window.addEventListener("keydown", step);
+    return () => window.removeEventListener("keydown", step);
   }, []);
 
   useEffect(() => {
@@ -396,7 +385,6 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
           "open-album": fileEnabled,
           "open-recent": fileEnabled && recent.length > 0,
           "close-album": fileEnabled && (document !== null || draft !== null),
-          "preferences": fileEnabled,
         },
       };
       // Replacing a Windows menu briefly resizes the WebView.
@@ -434,7 +422,6 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
             text: path.replaceAll("&", "&&"), action: () => actions.current.openRecent(path),
           })) },
           { id: "close-album", text: "Close Album", enabled: file["close-album"], action: () => actions.current.closeAlbum() },
-          { id: "preferences", text: "Preferences…", enabled: file["preferences"], action: () => actions.current.preferences() },
           { text: "Exit", action: () => actions.current.exit() },
         ],
       }] });
@@ -488,7 +475,7 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
 
   const albumOpen = document !== null && draft === null;
   // Unlike File commands, these stay enabled while an autosave is pending, so the bar doesn't flicker after each edit.
-  const commandsAvailable = albumOpen && !transitioning && !restoring && !preferencesOpen;
+  const commandsAvailable = albumOpen && !transitioning && !restoring;
   const albumCommandsEnabled = commandsAvailable && albumEditable;
   const albumCommand = (name: AlbumCommandName, label: string, extra: Partial<BarCommand> = {}): BarCommand =>
     ({ id: name, label, disabled: !albumCommandsEnabled, run: () => actions.current.albumCommand(name), ...extra });
@@ -511,7 +498,14 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
     albumCommand("add-spread", "Add Spread", { overflow: 1 }),
     albumCommand("save-as-layout", "Save as Layout", { overflow: 2, disabled: !(albumCommandsEnabled && layoutLibraryReady) }),
   ] : albumOpen && mode === "layouts" ? layoutCommands() : [];
+  const history = mode === "album" ? { enabled: albumCommandsEnabled, ...albumHistory }
+    : mode === "layouts" ? { enabled: commandsAvailable && layoutState.editable, canUndo: layoutState.canUndo, canRedo: layoutState.canRedo }
+      : { enabled: false, canUndo: false, canRedo: false };
+  const undoEnabled = history.enabled && history.canUndo;
+  const redoEnabled = history.enabled && history.canRedo;
   const documentCommands: BarCommand[] = albumOpen ? [
+    { id: "undo", label: "Undo", shortcut: "Control+Z", disabled: !undoEnabled, run: () => actions.current.history("undo") },
+    { id: "redo", label: "Redo", shortcut: "Control+Y", disabled: !redoEnabled, run: () => actions.current.history("redo") },
     albumCommand("album-settings", "Album Settings…", { overflow: 2 }),
   ] : [
     { id: "new-album", label: "New Album…", disabled: !fileEnabled, run: () => actions.current.newAlbum() },
@@ -522,24 +516,6 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
     <main className="app-shell">
       <CommandBar context={contextCommands} document={documentCommands} toolsRef={setToolsHost} />
       {error && <p className="error-banner" role="alert">{error}</p>}
-      {preferencesOpen && <ModalDialog label="Preferences" closeDisabled={preferenceSaving} onClose={() => setPreferencesOpen(false)}>
-          <h1>Preferences</h1>
-          {([
-            ["Confirm Spread deletion", confirmSpreadDeletion, setConfirmSpreadDeletion],
-            ["Confirm Slot deletion", confirmSlotDeletion, setConfirmSlotDeletion],
-          ] as const).map(([label, checked, save]) => (
-            <label key={label}><input type="checkbox" checked={checked} disabled={preferenceSaving}
-              onChange={(event) => {
-                const value = event.target.checked;
-                setPreferenceError(null);
-                setPreferenceSaving(true);
-                void save(value).catch((cause: unknown) => setPreferenceError(`Could not save preference: ${String(cause)}`))
-                  .finally(() => setPreferenceSaving(false));
-              }} /> {label}</label>
-          ))}
-          {preferenceError && <p className="error-banner" role="alert">{preferenceError}</p>}
-          <button type="button" disabled={preferenceSaving} onClick={() => setPreferencesOpen(false)}>Close</button>
-      </ModalDialog>}
       {draft ? (
         <form className="album-form new-album-form" role="dialog" aria-modal="true" onSubmit={(event) => void create(event)} aria-label="Album settings">
           <h1>Album settings</h1>
@@ -567,10 +543,9 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
       )}
       {document && <DocumentWorkspace key={document.id} document={document} onBusyChange={reportBusy}
         onTitleChange={reportTitle} hidden={draft !== null} suspended={transitioning}
-        modes={{ current: mode, onChange: setMode, disabled: preferencesOpen }}
-        bar={{ command, toolsHost, onSlotSelectedChange: setSlotSelected, onEditableChange: setAlbumEditable }}
+        modes={{ current: mode, onChange: setMode }}
+        bar={{ command, toolsHost, onSlotSelectedChange: setSlotSelected, onEditableChange: setAlbumEditable, onHistoryChange: setAlbumHistory }}
         layoutBar={{ command: layoutCommand, toolsHost, onStateChange: setLayoutState }} layoutPorts={layoutPorts}
-        preferences={{ confirmSpreadDeletion, setConfirmSpreadDeletion, confirmSlotDeletion, setConfirmSlotDeletion }}
         sidePane={sidePane} onSidePaneChange={changeSidePane} onLayoutLibraryReadyChange={setLayoutLibraryReady} />}
     </main>
   );

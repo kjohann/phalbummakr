@@ -63,7 +63,7 @@ function AlbumWorkspace(props: ComponentProps<typeof Workspace>) {
       <div ref={setToolsHost} />
       <button type="button" onClick={() => send("add-photo-slot")}>Add Photo Slot</button>
       <button type="button" onClick={() => send("add-text-slot")}>Add Text Slot</button>
-      {(["album-settings", "add-spread", "save-as-layout"] as const).map((name) => (
+      {(["album-settings", "add-spread", "save-as-layout", "undo", "redo"] as const).map((name) => (
         <button key={name} type="button" onClick={() => send(name)}>Bar {name}</button>
       ))}
     </div>
@@ -182,23 +182,6 @@ it("keeps the selected Page when deleting another Spread", () => {
   expect(screen.getByText("PAGE 4 OF 4")).toBeTruthy();
 });
 
-it("asks before discarding a Spread with content and can disable future prompts", async () => {
-  const { ports } = disk();
-  const setConfirmSpreadDeletion = vi.fn(async () => {});
-  const album = addTextSlot(createAlbum({ name: "Existing", pageCount: 4 }), "page-3");
-  render(<AlbumWorkspace root="D:\\Photos" ports={ports} document={{ path: "Existing", album }}
-    setConfirmSpreadDeletion={setConfirmSpreadDeletion} />);
-  fireEvent.click(screen.getByRole("button", { name: "Delete Spread 2" }));
-  const dialog = within(screen.getByRole("dialog", { name: "Discard Spread and its content?" }));
-  expect(dialog.getByLabelText("Never ask again")).toBe(document.activeElement);
-  screen.getByRole("button", { name: "Add Photo Slot" }).focus();
-  expect(dialog.getByLabelText("Never ask again")).toBe(document.activeElement);
-  fireEvent.click(dialog.getByLabelText("Never ask again"));
-  fireEvent.click(dialog.getByRole("button", { name: "Discard Spread" }));
-  await waitFor(() => expect(setConfirmSpreadDeletion).toHaveBeenCalledWith(false));
-  await waitFor(() => expect(screen.getByText(/ OF 2$/)).toBeTruthy());
-});
-
 it("offers context actions appropriate to a Page or empty strip", () => {
   const { ports } = disk();
   render(<AlbumWorkspace root="D:\\Photos" ports={ports}
@@ -278,21 +261,6 @@ it("shows non-interactive Inside Covers on both end Spreads", () => {
   expect(screen.getByText("PAGE 2 OF 2")).toBeTruthy();
   expect(screen.queryByRole("button", { name: /Photo Slot 1/ })).toBeNull();
   expect(ports.write).not.toHaveBeenCalled();
-});
-
-it("cancels a destructive Spread deletion and honors the disabled preference", () => {
-  const { ports } = disk();
-  let album = createAlbum({ name: "Existing", pageCount: 4 });
-  album = addTextSlot(addTextSlot(album, "page-1"), "page-2");
-  const document = { path: "Existing", album };
-  const { rerender } = render(<AlbumWorkspace root="D:\\Photos" ports={ports} document={document} />);
-  fireEvent.click(screen.getByRole("button", { name: "Delete Spread 2" }));
-  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-  expect(screen.getByText(/ OF 4$/)).toBeTruthy();
-  rerender(<AlbumWorkspace root="D:\\Photos" ports={ports} document={document} confirmSpreadDeletion={false} />);
-  fireEvent.click(screen.getByRole("button", { name: "Delete Spread 2" }));
-  expect(screen.queryByRole("dialog")).toBeNull();
-  expect(screen.getByText(/ OF 2$/)).toBeTruthy();
 });
 
 it("autosaves an Album document without rendering save-status feedback", async () => {
@@ -480,7 +448,7 @@ it("warns when even one character is wider than a Text Slot without shrinking it
 
 it("moves and width-resizes Text Slots while retaining fitted height and keyboard editing", async () => {
   const { ports, files } = disk();
-  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} confirmSlotDeletion={false} />);
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
   fireEvent.click(await screen.findByRole("button", { name: "Add Text Slot" }));
   const edit = screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" });
@@ -1008,28 +976,17 @@ it("pans with the centred crop handle while dragging elsewhere moves the Slot", 
   expect(screen.queryByRole("button", { name: "Pan Photo in Page 1 Photo Slot 1" })).toBeNull();
 });
 
-it("asks before deleting the selected Slot from the toolbar or Delete key and can stop asking", async () => {
+it("deletes the selected Slot from the toolbar or Delete key without asking, but not while its text is edited", async () => {
   const { ports } = disk();
-  const setConfirmSlotDeletion = vi.fn(async () => {});
-  const { rerender } = render(<AlbumWorkspace root="D:\\Photos" ports={ports} setConfirmSlotDeletion={setConfirmSlotDeletion}
-    fontPorts={{ list: async () => ["Arial"] }} />);
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
   fireEvent.click(await screen.findByRole("button", { name: "Add Text Slot" }));
   fireEvent.keyDown(screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" }), { key: "Delete" });
-  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.getByRole("button", { name: "Page 1 Text Slot 1" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   fireEvent.click(bar().getByRole("button", { name: "Delete Slot" }));
-  let dialog = within(screen.getByRole("dialog", { name: "Delete Slot?" }));
-  fireEvent.click(dialog.getByRole("button", { name: "Cancel" }));
-  expect(screen.getByRole("button", { name: "Page 1 Photo Slot 2" })).toBeTruthy();
-  fireEvent.keyDown(document.body, { key: "Delete" });
-  dialog = within(screen.getByRole("dialog", { name: "Delete Slot?" }));
-  fireEvent.click(dialog.getByLabelText("Never ask again"));
-  fireEvent.click(dialog.getByRole("button", { name: "Delete" }));
-  await waitFor(() => expect(screen.queryByRole("button", { name: "Page 1 Photo Slot 2" })).toBeNull());
-  expect(setConfirmSlotDeletion).toHaveBeenCalledWith(false);
-  rerender(<AlbumWorkspace root="D:\\Photos" ports={ports} setConfirmSlotDeletion={setConfirmSlotDeletion}
-    fontPorts={{ list: async () => ["Arial"] }} confirmSlotDeletion={false} />);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Page 1 Photo Slot 2" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Page 1 Text Slot 1" }));
   fireEvent.keyDown(document.body, { key: "Delete" });
   expect(screen.queryByRole("dialog")).toBeNull();
@@ -1085,7 +1042,7 @@ it("selects a right-clicked Slot and offers its toolbar actions", async () => {
   expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[1]).toMatchObject({ rotation: 90, placement: { fit: true } });
   fireEvent.contextMenu(photo);
   fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
-  expect(screen.getByRole("dialog", { name: "Delete Slot?" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Page 1 Photo Slot 2" })).toBeNull();
 });
 
 
@@ -1100,7 +1057,6 @@ it("runs command bar commands on the open Album and reports Slot selection", asy
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   expect(onSlotSelectedChange).toHaveBeenLastCalledWith(true);
   fireEvent.click(bar().getByRole("button", { name: "Delete Slot" }));
-  fireEvent.click(within(screen.getByRole("dialog", { name: "Delete Slot?" })).getByRole("button", { name: "Delete" }));
   await waitFor(() => expect(screen.queryByRole("button", { name: "Page 1 Photo Slot 1" })).toBeNull());
   expect(onSlotSelectedChange).toHaveBeenLastCalledWith(false);
   await waitForAutosave();
@@ -1130,13 +1086,13 @@ it("leaves the Delete key alone while another mode is shown, but still opens Alb
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   rerender(<div hidden><AlbumWorkspace {...props} active={false} /></div>);
   fireEvent.keyDown(window, { key: "Delete" });
-  expect(screen.queryByRole("dialog", { name: "Delete Slot?" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Page 1 Photo Slot 1", hidden: true })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Bar album-settings", hidden: true }));
   expect(screen.getByRole("dialog", { name: "Album settings" }).closest("[hidden]")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Close" }));
   rerender(<div><AlbumWorkspace {...props} active /></div>);
   fireEvent.keyDown(window, { key: "Delete" });
-  expect(screen.getByRole("dialog", { name: "Delete Slot?" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Page 1 Photo Slot 1" })).toBeNull();
 });
 
 it("reports Album commands as available while an autosave is pending, but not while it is written or failed", async () => {
@@ -1358,7 +1314,7 @@ it("shows equal-gap guides while moving a Text Slot between Photo Slots", async 
 
 it("adds, moves, resizes and deletes Photo Slots on the selected Page and persists their Page fractions", async () => {
   const { ports, files } = disk();
-  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} confirmSlotDeletion={false} />);
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
   await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
   expect(screen.queryByRole("button", { name: "Delete Slot" })).toBeNull();
@@ -2011,6 +1967,13 @@ it("applies a Layout from its menu in the Side pane to a Page of the current Spr
   await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages[2].slots)
     .toMatchObject([{ type: "photo", x: 0.1, placement: null }, { type: "photo", x: 0.5, placement: null }]));
   expect(deserializeAlbum(files.get("Existing")!).pages[1].slots).toEqual([]);
+
+  // Applying a Layout is one undo step, which brings back what did not fit.
+  fireEvent.click(screen.getByRole("button", { name: "Bar undo" }));
+  fireEvent.click(screen.getByRole("button", { name: "Bar undo" }));
+  await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages[0].slots.map((slot) => slot.type))
+    .toEqual(["photo", "photo", "text"]));
+  expect(deserializeAlbum(files.get("Existing")!).pages[2].slots).toEqual([]);
 });
 
 const canvasPage = (number: number) =>
@@ -2087,4 +2050,121 @@ it("shows a failed Layout Library save in Album mode and retries it", async () =
   fireEvent.click(screen.getByRole("button", { name: "Retry Layout Library save" }));
   await waitFor(() => expect(readLayoutLibrary(library.store.json, albumWithContent().pageFormat).layouts).toHaveLength(2));
   expect(screen.queryByRole("alert")).toBeNull();
+});
+
+it("deletes a Spread with content straight away, and undoes and redoes it while autosave writes the current state", async () => {
+  const { ports, files } = disk();
+  const onHistoryChange = vi.fn();
+  const album = addTextSlot(createAlbum({ name: "Existing", pageCount: 4 }), "page-3");
+  files.set("Existing", serializeAlbum(album));
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} bar={{ onHistoryChange }} document={{ path: "Existing", album }} />);
+  expect(onHistoryChange).toHaveBeenLastCalledWith({ canUndo: false, canRedo: false });
+  fireEvent.click(screen.getByRole("button", { name: "Delete Spread 2" }));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.getByText(/ OF 2$/)).toBeTruthy();
+  expect(onHistoryChange).toHaveBeenLastCalledWith({ canUndo: true, canRedo: false });
+  await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages).toHaveLength(2));
+
+  fireEvent.click(screen.getByRole("button", { name: "Bar undo" }));
+  expect(screen.getByText("PAGE 2 OF 4")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Page 3 Text Slot 1" })).toBeTruthy();
+  expect(onHistoryChange).toHaveBeenLastCalledWith({ canUndo: false, canRedo: true });
+  await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages.map((page) => page.slots.length)).toEqual([0, 0, 1, 0]));
+
+  fireEvent.click(screen.getByRole("button", { name: "Bar redo" }));
+  expect(screen.getByText(/ OF 2$/)).toBeTruthy();
+  expect(onHistoryChange).toHaveBeenLastCalledWith({ canUndo: true, canRedo: false });
+  await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages).toHaveLength(2));
+});
+
+it("undoes and redoes adding Spreads, duplicating a Page and dragging a Page as one step each", () => {
+  const { ports } = disk();
+  const onAlbumChange = vi.fn();
+  const album = addTextSlot(createAlbum({ name: "Existing", pageCount: 4 }), "page-2");
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} onAlbumChange={onAlbumChange} document={{ path: "Existing", album }} />);
+  const order = () => (onAlbumChange.mock.lastCall![0] as Album).pages.map((page) => `${page.id}:${page.slots.length}`);
+  const original = order();
+  const strip = () => within(screen.getByRole("navigation", { name: "Spreads" }));
+
+  fireEvent.click(screen.getByRole("button", { name: "Bar add-spread" }));
+  fireEvent.contextMenu(strip().getByRole("button", { name: "Select Page 2" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Duplicate Page onto New Spread" }));
+  const duplicated = order();
+  expect(duplicated).toHaveLength(8);
+  const transfer = { setData: vi.fn(), effectAllowed: "none", dropEffect: "none" };
+  fireEvent.dragStart(strip().getByRole("button", { name: "Select Page 2" }), { dataTransfer: transfer });
+  fireEvent.dragOver(strip().getByRole("button", { name: "Select Page 5" }), { dataTransfer: transfer });
+  fireEvent.drop(strip().getByRole("button", { name: "Select Page 5" }), { dataTransfer: transfer });
+  const dragged = order();
+  expect(dragged).not.toEqual(duplicated);
+
+  fireEvent.click(screen.getByRole("button", { name: "Bar undo" }));
+  expect(order()).toEqual(duplicated);
+  fireEvent.click(screen.getByRole("button", { name: "Bar undo" }));
+  expect(order()).toHaveLength(6);
+  fireEvent.click(screen.getByRole("button", { name: "Bar undo" }));
+  expect(order()).toEqual(original);
+  fireEvent.click(screen.getByRole("button", { name: "Bar redo" }));
+  fireEvent.click(screen.getByRole("button", { name: "Bar redo" }));
+  fireEvent.click(screen.getByRole("button", { name: "Bar redo" }));
+  expect(order()).toEqual(dragged);
+});
+
+it("undoes a Slot deletion, restoring its Photo, position and rotation", () => {
+  const { ports } = disk();
+  const onAlbumChange = vi.fn();
+  const photo = { path: "a.jpg", width: 6000, height: 4000, orientation: 1 };
+  const album = rotateSlot(placePhoto(addPhotoSlot(createAlbum({ name: "Existing" }), "page-1", { x: 0.3, y: 0.6 }), "page-1", "slot-1", photo), "page-1", "slot-1", 90);
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} onAlbumChange={onAlbumChange}
+    document={{ path: "Existing", album }} />);
+  fireEvent.click(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }));
+  fireEvent.keyDown(document.body, { key: "Delete" });
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Page 1 Photo Slot 1" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Bar undo" }));
+  expect(screen.getByRole("button", { name: "Page 1 Photo Slot 1" })).toBeTruthy();
+  expect((onAlbumChange.mock.lastCall![0] as Album).pages[0].slots).toEqual(album.pages[0].slots);
+});
+
+it("counts a Slot drag and a session of typing as one undo step each", () => {
+  const { ports } = disk();
+  const onAlbumChange = vi.fn();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} fontPorts={{ list: async () => ["Arial"] }} onAlbumChange={onAlbumChange}
+    document={{ path: "Existing", album: addPhotoSlot(createAlbum({ name: "Existing" }), "page-1") }} />);
+  const slots = () => (onAlbumChange.mock.lastCall![0] as Album).pages[0].slots;
+  const before = slots()[0];
+  const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  fireEvent.mouseDown(slot, { button: 0, clientX: 100, clientY: 100 });
+  for (const step of [10, 20, 30]) fireEvent.mouseMove(window, { clientX: 100 + step, clientY: 100 });
+  fireEvent.mouseUp(window, { clientX: 159.4, clientY: 100 });
+  expect(slots()[0].x).toBeCloseTo(before.x + 0.1);
+
+  fireEvent.click(screen.getByRole("button", { name: "Add Text Slot" }));
+  const editor = screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 2" });
+  for (const text of ["H", "Hi", "Hi!"]) fireEvent.change(editor, { target: { value: text } });
+  fireEvent.blur(editor);
+  fireEvent.change(editor, { target: { value: "Hi!!" } });
+  // The app's window-wide undo shortcut must see Ctrl+Z pressed while typing.
+  const windowKeys = vi.fn();
+  window.addEventListener("keydown", windowKeys);
+  fireEvent.keyDown(editor, { key: "z", ctrlKey: true });
+  fireEvent.keyDown(editor, { key: "a" });
+  window.removeEventListener("keydown", windowKeys);
+  expect(windowKeys.mock.calls.map(([event]) => (event as KeyboardEvent).key)).toEqual(["z"]);
+  // Closing the editor with Escape and reopening it starts a new step too.
+  fireEvent.keyDown(editor, { key: "Escape" });
+  fireEvent.doubleClick(screen.getByRole("button", { name: "Page 1 Text Slot 2" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 2" }), { target: { value: "Hi!!?" } });
+
+  fireEvent.click(screen.getByRole("button", { name: "Bar undo" }));
+  expect(slots()[1]).toMatchObject({ text: "Hi!!" });
+
+  fireEvent.click(screen.getByRole("button", { name: "Bar undo" }));
+  expect(slots()[1]).toMatchObject({ text: "Hi!" });
+  fireEvent.click(screen.getByRole("button", { name: "Bar undo" }));
+  expect(slots()[1]).toMatchObject({ text: "" });
+  fireEvent.click(screen.getByRole("button", { name: "Bar undo" }));
+  expect(slots()).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Bar undo" }));
+  expect(slots()[0]).toEqual(before);
 });

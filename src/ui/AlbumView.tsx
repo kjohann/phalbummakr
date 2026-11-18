@@ -5,17 +5,17 @@ import {
   addPage, addPhotoSlot, addTextSlot, albumSpreads, applyLayout, deletePage, deleteSlot, duplicatePage, movePage, pageDimensions,
   fitPhotoRect, panCrop, placePhoto, placePhotoOnPage, placementDisplayCrop, photoUsage, rotateSlot, saveLayoutFromPage, setPlacementCrop,
   setPlacementFit, setSlotText, setTextStyle, swapPlacements, zoomCrop, POINTS_PER_MM, TEXT_LINE_HEIGHT,
-  type Album, type AppliedLayout, type Crop, type Page, type PageFormat, type PhotoPreviewPorts, type Slot, type SlotAddress, type TextStyle,
+  type Album, type AppliedLayout, type HistoryDirection, type Crop, type Page, type PageFormat, type PhotoPreviewPorts, type Slot, type SlotAddress, type TextStyle,
 } from "../core";
 import { hasLayoutDrag, hasPhotoDrag, readLayoutDrag, readPhotoDrag, writeLayoutDrag } from "./photoDrag";
+import { historyShortcut } from "./historyShortcut";
 import LayoutLibraryPane, { plural } from "./LayoutLibraryPane";
 import { applySlotDrag, LayerPage, SnapGuides, TextContent, type SlotDrag } from "./pageCanvas";
 import type { FontPorts } from "./tauriFontPorts";
 import { fitTextSlots } from "./textLayout";
 import TextSlotTools from "./TextSlotTools";
 import { PhotoSlotTools, SlotActions } from "./SlotTools";
-import ModalDialog from "./ModalDialog";
-import type { AlbumLayouts, CommandBarLink } from "./AlbumWorkspace";
+import type { AlbumHistory, AlbumLayouts, CommandBarLink } from "./AlbumWorkspace";
 
 const PLACEMENT_DRAG_TYPE = "application/x-phalbummakr-placement";
 
@@ -25,7 +25,9 @@ function hasPlacementDrag(dataTransfer: DataTransfer): boolean {
 
 interface Props {
   album: Album;
-  onChange: (update: (album: Album) => Album) => void;
+  /** Applies a change as one undo step; consecutive changes in the same `group` share a step. */
+  onChange: (update: (album: Album) => Album, group?: string) => void;
+  history: AlbumHistory;
   disabled: boolean;
   textDisabled: boolean;
   root: string;
@@ -33,12 +35,7 @@ interface Props {
   fontPorts: FontPorts;
   onDuplicatePhoto: (path: string) => void;
   onCropPendingChange: (pending: boolean) => void;
-  confirmSpreadDeletion: boolean;
-  setConfirmSpreadDeletion?: (value: boolean) => Promise<void>;
-  confirmSlotDeletion: boolean;
-  setConfirmSlotDeletion?: (value: boolean) => Promise<void>;
   bar: CommandBarLink;
-  onDialogChange: (open: boolean) => void;
   active?: boolean;
   layouts?: AlbumLayouts;
   /** Reports what happened when a Layout was applied or saved; `null` clears the notice. */
@@ -58,7 +55,7 @@ function appliedLayoutNotice({ dropped, aspectMismatch }: AppliedLayout, pageNum
   return messages.length ? messages.join(" ") : null;
 }
 
-export default function AlbumView({ album: savedAlbum, onChange, disabled, textDisabled, root, photoPorts, fontPorts, onDuplicatePhoto, onCropPendingChange, confirmSpreadDeletion, setConfirmSpreadDeletion, confirmSlotDeletion, setConfirmSlotDeletion, bar, onDialogChange, active = true, layouts, onNotice }: Props) {
+export default function AlbumView({ album: savedAlbum, onChange, history, disabled, textDisabled, root, photoPorts, fontPorts, onDuplicatePhoto, onCropPendingChange, bar, active = true, layouts, onNotice }: Props) {
   const { command, toolsHost, onSlotSelectedChange } = bar;
   const viewportRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLElement>(null);
@@ -79,11 +76,6 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
   const [cropPreview, setCropPreview] = useState<{ pageId: string; slotId: string; crop: Crop } | null>(null);
   const [photoDragActive, setPhotoDragActive] = useState(false);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; index: number } | null>(null);
-  const [slotDeleteTarget, setSlotDeleteTarget] = useState<SlotAddress | null>(null);
-  const [neverAsk, setNeverAsk] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
   const [stripMenu, setStripMenu] = useState<{ x: number; y: number; pageId: string | null } | null>(null);
   const [canvasMenu, setCanvasMenu] = useState<{ x: number; y: number; pageId: string } & (
     { kind: "page"; centre: { x: number; y: number } } | { kind: "slot"; slotId: string }
@@ -93,10 +85,6 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
   /** The Page a dragged Layout would be applied to. */
   const [layoutDropPageId, setLayoutDropPageId] = useState<string | null>(null);
   const handledCommand = useRef(command?.serial);
-  useEffect(() => {
-    onDialogChange(deleteTarget !== null || slotDeleteTarget !== null);
-    return () => onDialogChange(false);
-  }, [deleteTarget, slotDeleteTarget, onDialogChange]);
   const [thumbnailBySlot, setThumbnailBySlot] = useState<Record<string, string>>({});
   const [previewStates, setPreviewStates] = useState<Record<string, {
     path: string; status: "loading" | "ready" | "error"; attempt: number;
@@ -159,19 +147,11 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
     });
   }
 
-  function requestDeleteSpread(index: number) {
+  function deleteSpread(index: number) {
     const item = spreads[index];
     if (!item.left || !item.right || disabled) return;
-    if (confirmSpreadDeletion && (item.left.slots.length > 0 || item.right.slots.length > 0)) {
-      setNeverAsk(false);
-      setDeleteError(null);
-      setDeleteTarget({ id: item.left.id, index: index * 2 - 1 });
-    } else {
-      removeSpread(item.left.id, index * 2 - 1);
-    }
-  }
-
-  function removeSpread(id: string, index: number) {
+    const id = item.left.id;
+    const pageIndex = index * 2 - 1;
     changeAlbum((current) => {
       const currentIndex = current.pages.findIndex((page) => page.id === id);
       if (currentIndex <= 0 || currentIndex >= current.pages.length - 1 || currentIndex % 2 !== 1) {
@@ -179,27 +159,30 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
       }
       const updated = deletePage(current, id);
       if (!updated.pages.some((page) => page.id === selectedId)) {
-        selectPage(updated.pages[Math.min(index, updated.pages.length - 1)].id);
+        selectPage(updated.pages[Math.min(pageIndex, updated.pages.length - 1)].id);
       }
       return updated;
     });
   }
 
-  async function confirmDeleteSpread() {
-    if (!deleteTarget || deleting) return;
-    setDeleting(true);
-    try {
-      if (neverAsk) {
-        if (!setConfirmSpreadDeletion) throw new Error("Preferences are unavailable.");
-        await setConfirmSpreadDeletion(false);
+  /** Undoes or redoes one step, then shows where it happened if that is not on the selected Page. */
+  function undoOrRedo(direction: HistoryDirection) {
+    if (disabled || cropPreviewRef.current) return;
+    stopSlotDrag.current?.();
+    const result = history.step(direction);
+    if (!result) return;
+    const { before, after } = result;
+    const selected = after.pages.find((page) => page.id === selectedId);
+    if (selected && selected !== before.pages.find((page) => page.id === selectedId)) {
+      if (!selected.slots.some((slot) => slot.id === selectedSlotId)) {
+        setSelectedSlotId(null);
+        setEditingText(null);
       }
-      removeSpread(deleteTarget.id, deleteTarget.index);
-      setDeleteTarget(null);
-    } catch (cause) {
-      setDeleteError(`Could not save preference: ${String(cause)}`);
-    } finally {
-      setDeleting(false);
+      return;
     }
+    const changed = after.pages.findIndex((page, index) => page !== before.pages[index]);
+    if (changed >= 0) selectPage(after.pages[changed].id);
+    else if (!selected) selectPage(after.pages[Math.min(visiblePageIndex, after.pages.length - 1)].id);
   }
 
   useEffect(() => {
@@ -229,9 +212,9 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
     onChange((current) => setPlacementCrop(current, pending.pageId, pending.slotId, pending.crop));
   }
 
-  function changeAlbum(update: (album: Album) => Album) {
+  function changeAlbum(update: (album: Album) => Album, group?: string) {
     commitCropPreview();
-    onChange((current) => fitTextSlots(update(current), current));
+    onChange((current) => fitTextSlots(update(current), current), group);
   }
 
   useEffect(() => {
@@ -454,32 +437,9 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
     changeAlbum((current) => rotateSlot(current, pageId, slotId, turn));
   }
 
-  function requestDeleteSlot(pageId = selectedPage.id, slotId = selectedSlot?.id) {
+  function deleteSlotAt(pageId = selectedPage.id, slotId = selectedSlot?.id) {
     if (!slotId || disabled) return;
-    if (confirmSlotDeletion) {
-      setNeverAsk(false);
-      setDeleteError(null);
-      setSlotDeleteTarget({ pageId, slotId });
-    } else {
-      removeSlot(pageId, slotId);
-    }
-  }
-
-  async function confirmDeleteSlot() {
-    if (!slotDeleteTarget || deleting) return;
-    setDeleting(true);
-    try {
-      if (neverAsk) {
-        if (!setConfirmSlotDeletion) throw new Error("Preferences are unavailable.");
-        await setConfirmSlotDeletion(false);
-      }
-      removeSlot(slotDeleteTarget.pageId, slotDeleteTarget.slotId);
-      setSlotDeleteTarget(null);
-    } catch (cause) {
-      setDeleteError(`Could not save preference: ${String(cause)}`);
-    } finally {
-      setDeleting(false);
-    }
+    removeSlot(pageId, slotId);
   }
 
   function applyLayoutTo(pageId: string, layoutId: string) {
@@ -537,6 +497,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
     else if (command.name === "add-photo-slot") addSlot("photo", selectedPage.id);
     else if (command.name === "add-text-slot") addSlot("text", selectedPage.id);
     else if (command.name === "save-as-layout") saveAsLayout();
+    else if (command.name === "undo" || command.name === "redo") undoOrRedo(command.name);
   });
 
   useEffect(() => {
@@ -547,7 +508,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
       // Dialogs, including the New Album form, own the keyboard.
       if (document.querySelector("[aria-modal='true']")) return;
       event.preventDefault();
-      requestDeleteSlot();
+      deleteSlotAt();
     };
     window.addEventListener("keydown", deleteSelected);
     return () => window.removeEventListener("keydown", deleteSelected);
@@ -565,7 +526,9 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
 
   function changeTextStyle(style: Partial<TextStyle>) {
     if (selectedSlot?.type !== "text") return;
-    changeAlbum((current) => setTextStyle(current, selectedPage.id, selectedSlot.id, { ...selectedSlot.style, ...style }));
+    // The colour picker reports every colour it passes; they form one step until the colour is chosen.
+    const group = Object.keys(style).join() === "color" ? `colour:${selectedPage.id}:${selectedSlot.id}` : undefined;
+    changeAlbum((current) => setTextStyle(current, selectedPage.id, selectedSlot.id, { ...selectedSlot.style, ...style }), group);
   }
 
   function toggleTextShortcut(event: ReactKeyboardEvent, pageId: string, slot: Slot): boolean {
@@ -723,7 +686,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
                 } else if ((event.key === "Delete" || event.key === "Backspace") && !disabled) {
                   event.preventDefault();
                   selectSlot(page.id, slot.id);
-                  requestDeleteSlot(page.id, slot.id);
+                  deleteSlotAt(page.id, slot.id);
                 }
               }}
               onDragOver={(event) => {
@@ -808,8 +771,9 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
                 <textarea className="slot-text-editor" aria-label={`Edit ${name}`} autoFocus value={slot.text} disabled={textDisabled}
                   placeholder={slot.placeholder}
                   ref={selectedTextEditor}
-                  onFocus={() => { returnToTextEditor.current = false; }}
+                  onFocus={() => { returnToTextEditor.current = false; history.endGroup(); }}
                   onBlur={(event) => {
+                    history.endGroup();
                     returnToTextEditor.current = event.relatedTarget instanceof Node && toolsHost?.contains(event.relatedTarget) === true;
                   }}
                   style={{
@@ -829,12 +793,14 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
                   onContextMenu={(event) => event.stopPropagation()}
                   onKeyDown={(event) => {
                     if (toggleTextShortcut(event, page.id, slot)) return;
+                    // Undo and redo are handled for the whole window.
+                    if (historyShortcut(event)) return;
                     event.stopPropagation();
                     if (event.key === "Escape") setEditingText(null);
                   }}
                   onChange={(event) => {
                     const text = event.target.value;
-                    changeAlbum((current) => setSlotText(current, page.id, slot.id, text));
+                    changeAlbum((current) => setSlotText(current, page.id, slot.id, text), `text:${page.id}:${slot.id}`);
                   }} />
               )}
               {slot.type === "text" && (overflowSlots[targetId] || outsidePage) && (
@@ -885,15 +851,15 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
             <TextSlotTools style={selectedSlot.style}
               fonts={fonts} fontError={fontError} disabled={textDisabled}
               onShortcut={(event) => toggleTextShortcut(event, selectedPage.id, selectedSlot)}
-              onStyle={changeTextStyle} onCommit={restoreTextEditorFocus}
+              onStyle={changeTextStyle} onCommit={() => { history.endGroup(); restoreTextEditorFocus(); }}
               onRetryFonts={() => { setFontError(null); setFontRetry((value) => value + 1); }}>
-              <SlotActions disabled={disabled} onRotate={rotateSelectedSlot} onDelete={() => requestDeleteSlot()} />
+              <SlotActions disabled={disabled} onRotate={rotateSelectedSlot} onDelete={() => deleteSlotAt()} />
             </TextSlotTools>
           ) : (
             <PhotoSlotTools fit={selectedSlot.placement?.fit ?? null} disabled={disabled}
               onFit={(fit) => changeAlbum((current) => setPlacementFit(current, selectedPage.id, selectedSlot.id, fit))}
               onZoom={(factor) => zoomPlacementBy(selectedPage.id, selectedSlot.id, factor)}
-              onRotate={rotateSelectedSlot} onDelete={() => requestDeleteSlot()} />
+              onRotate={rotateSelectedSlot} onDelete={() => deleteSlotAt()} />
           )}
         </Fragment>, toolsHost)}
       </div>
@@ -927,7 +893,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
           <div className="spread-thumbnail" key={index} role="group" aria-label={`Spread ${index + 1}`}>
             {index > 0 && index < spreads.length - 1 && <button type="button" className="spread-delete"
               aria-label={`Delete Spread ${index + 1}`} disabled={disabled}
-              onClick={() => requestDeleteSpread(index)}>×</button>}
+              onClick={() => deleteSpread(index)}>×</button>}
             {[item.left, item.right].map((page, side) => page ? (
               <div className="page-thumbnail-wrapper" key={page.id}>
               <PagePreview page={page} format={album.pageFormat} root={root} photoPorts={photoPorts} />
@@ -998,7 +964,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
             <button role="menuitem" type="button" disabled={full || targetSpreadIndex === spreads.length - 1}
               onClick={() => { editPages((current) => addPage(current, stripMenu.pageId!), targetSpreadIndex * 2 + 1); close(); }}>Insert Spread After</button>
             <button role="menuitem" type="button" disabled={targetSpreadIndex === 0 || targetSpreadIndex === spreads.length - 1}
-              onClick={() => { requestDeleteSpread(targetSpreadIndex); close(); }}>Delete Spread</button>
+              onClick={() => { deleteSpread(targetSpreadIndex); close(); }}>Delete Spread</button>
             <button role="menuitem" type="button" disabled={full}
               onClick={() => {
                 const insertion = Math.min(targetSpreadIndex * 2 + 1, album.pages.length - 1);
@@ -1030,7 +996,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
             onClick={() => { changeAlbum((current) => rotateSlot(current, pageId, slotId, -90)); close(); }}>Rotate left</button>
           <button role="menuitem" type="button"
             onClick={() => { changeAlbum((current) => rotateSlot(current, pageId, slotId, 90)); close(); }}>Rotate right</button>
-          <button role="menuitem" type="button" onClick={() => { requestDeleteSlot(pageId, slotId); close(); }}>Delete</button>
+          <button role="menuitem" type="button" onClick={() => { deleteSlotAt(pageId, slotId); close(); }}>Delete</button>
         </div>;
       })()}
       {layouts?.paneHost && createPortal(
@@ -1056,24 +1022,6 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
             onClick={() => { applyLayoutTo(page.id, layoutMenu.layoutId); setLayoutMenu(null); }}>Apply to {side} Page</button>
         ))}
       </div>, document.body)}
-      {deleteTarget && <ModalDialog label="Discard Spread and its content?" closeDisabled={deleting} onClose={() => setDeleteTarget(null)}>
-          <h2>Discard Spread and its content?</h2>
-          <label><input type="checkbox" checked={neverAsk} onChange={(event) => setNeverAsk(event.target.checked)} /> Never ask again</label>
-          {deleteError && <p role="alert">{deleteError}</p>}
-          <div className="album-toolbar">
-            <button type="button" disabled={deleting} onClick={() => void confirmDeleteSpread()}>Discard Spread</button>
-            <button type="button" disabled={deleting} onClick={() => setDeleteTarget(null)}>Cancel</button>
-          </div>
-      </ModalDialog>}
-      {slotDeleteTarget && <ModalDialog label="Delete Slot?" closeDisabled={deleting} onClose={() => setSlotDeleteTarget(null)}>
-          <h2>Delete Slot?</h2>
-          <label><input type="checkbox" checked={neverAsk} onChange={(event) => setNeverAsk(event.target.checked)} /> Never ask again</label>
-          {deleteError && <p role="alert">{deleteError}</p>}
-          <div className="album-toolbar">
-            <button type="button" disabled={deleting} onClick={() => void confirmDeleteSlot()}>Delete</button>
-            <button type="button" disabled={deleting} onClick={() => setSlotDeleteTarget(null)}>Cancel</button>
-          </div>
-      </ModalDialog>}
     </section>
   );
 }

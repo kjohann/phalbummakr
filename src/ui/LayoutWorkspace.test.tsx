@@ -65,7 +65,7 @@ function Harness({ ports, ...props }: Omit<ComponentProps<typeof LayoutWorkspace
     <section aria-label="Side pane" ref={setPaneHost} />
     <div role="toolbar" aria-label="Commands">
       <div ref={setToolsHost} />
-      {(["new-layout", "duplicate-layout", "delete-layout", "add-photo-slot", "add-text-slot"] as const).map((name) => (
+      {(["new-layout", "duplicate-layout", "delete-layout", "add-photo-slot", "add-text-slot", "undo", "redo"] as const).map((name) => (
         <button key={name} type="button" onClick={() => send(name)}>Bar {name}</button>
       ))}
     </div>
@@ -176,7 +176,7 @@ it("moves a Slot with the mouse, as in Album mode", async () => {
 
 it("offers the Slot tools without content commands, and saves style, rotation and deletion", async () => {
   const { ports, store } = disk();
-  render(<Harness ports={ports} confirmSlotDeletion={false} />);
+  render(<Harness ports={ports} />);
   fireEvent.click((await cards())[9]);
   fireEvent.click(screen.getByRole("button", { name: "Text Slot 2" }));
   const textTools = within(bar().getByRole("group", { name: "Text Slot tools" }));
@@ -195,10 +195,10 @@ it("offers the Slot tools without content commands, and saves style, rotation an
 
 it("leaves the Delete key alone while another mode is shown", async () => {
   const { ports } = disk();
-  const { rerender } = render(<Harness ports={ports} confirmSlotDeletion={false} />);
+  const { rerender } = render(<Harness ports={ports} />);
   await cards();
   fireEvent.click(screen.getByRole("button", { name: "Photo Slot 1" }));
-  rerender(<Harness ports={ports} confirmSlotDeletion={false} active={false} />);
+  rerender(<Harness ports={ports} active={false} />);
   fireEvent.keyDown(window, { key: "Delete" });
   expect(screen.getByRole("button", { name: "Photo Slot 1" })).toBeTruthy();
   expect(bar().queryByRole("group", { name: "Photo Slot tools" })).toBeNull();
@@ -220,4 +220,36 @@ it("edits a Text Slot's placeholder in Layout mode", async () => {
   expect(screen.queryByRole("textbox", { name: /placeholder/ })).toBeNull();
   expect(within(screen.getByRole("group", { name: "Layout editor" })).getByText("Where and when?")).toBeTruthy();
   await waitFor(() => expect(store.json && saved(store).layouts[9].slots[1]).toMatchObject({ text: "", placeholder: "Where and when?" }));
+});
+
+it("keeps a separate undo history for each Layout", async () => {
+  const { ports } = disk();
+  const onStateChange = vi.fn();
+  render(<Harness ports={ports} bar={{ onStateChange }} />);
+  const canvas = () => within(screen.getByRole("group", { name: "Layout editor" }));
+  const deleteSlot = (name: string) => {
+    fireEvent.click(canvas().getByRole("button", { name }));
+    fireEvent.keyDown(document.body, { key: "Delete" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(canvas().queryByRole("button", { name })).toBeNull();
+  };
+  await cards();
+  deleteSlot("Photo Slot 1");
+  fireEvent.click(library().getAllByRole("button")[9]);
+  expect(onStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ canUndo: false, canRedo: false }));
+  deleteSlot("Text Slot 2");
+  expect(onStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ canUndo: true, canRedo: false }));
+
+  fireEvent.click(bar().getByRole("button", { name: "Bar undo" }));
+  expect(canvas().getByRole("button", { name: "Text Slot 2" })).toBeTruthy();
+  expect(onStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ canUndo: false, canRedo: true }));
+  fireEvent.click(bar().getByRole("button", { name: "Bar undo" }));
+  expect(canvas().getByRole("button", { name: "Photo Slot 1" })).toBeTruthy();
+
+  fireEvent.click(library().getAllByRole("button")[0]);
+  expect(canvas().queryByRole("button", { name: "Photo Slot 1" })).toBeNull();
+  fireEvent.click(bar().getByRole("button", { name: "Bar undo" }));
+  expect(canvas().getByRole("button", { name: "Photo Slot 1" })).toBeTruthy();
+  fireEvent.click(bar().getByRole("button", { name: "Bar redo" }));
+  expect(canvas().queryByRole("button", { name: "Photo Slot 1" })).toBeNull();
 });

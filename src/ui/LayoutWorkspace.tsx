@@ -3,11 +3,12 @@ import { createPortal } from "react-dom";
 import { Group, Layer, Rect, Stage } from "react-konva";
 import {
   addPhotoSlot, addTextSlot, deleteLayout, deleteSlot, duplicateLayout, madeForOtherAspectRatio, newLayout, pageAspectRatio, pageDimensions,
-  rotateSlot, setLayoutSlots, setSlotPlaceholder, setTextStyle, POINTS_PER_MM, TEXT_LINE_HEIGHT,
-  type Album, type Layout, type PageFormat, type Slot, type TextStyle,
+  canRedo, canUndo, emptyHistory, endGroup, recordChange, rotateSlot, setLayoutSlots, setSlotPlaceholder, setTextStyle, stepHistory,
+  POINTS_PER_MM, TEXT_LINE_HEIGHT, type Album, type Layout, type PageFormat, type Slot, type HistoryDirection, type TextStyle, type UndoHistory,
 } from "../core";
 import LayoutLibraryPane from "./LayoutLibraryPane";
 import ModalDialog from "./ModalDialog";
+import { historyShortcut } from "./historyShortcut";
 import { applySlotDrag, LayerPage, SnapGuides, TextContent, type SlotDrag } from "./pageCanvas";
 import { PhotoSlotTools, SlotActions } from "./SlotTools";
 import { tauriFontPorts, type FontPorts } from "./tauriFontPorts";
@@ -15,7 +16,7 @@ import { fitTextSlots } from "./textLayout";
 import TextSlotTools from "./TextSlotTools";
 import type { LayoutLibraryState } from "./useLayoutLibrary";
 
-export type LayoutCommandName = "new-layout" | "duplicate-layout" | "delete-layout" | "add-photo-slot" | "add-text-slot";
+export type LayoutCommandName = "new-layout" | "duplicate-layout" | "delete-layout" | "add-photo-slot" | "add-text-slot" | "undo" | "redo";
 
 /** A command bar command for Layout mode; `serial` makes repeated commands distinct. */
 export interface LayoutCommand {
@@ -28,6 +29,9 @@ export interface LayoutBarState {
   editable: boolean;
   layoutSelected: boolean;
   slotSelected: boolean;
+  /** Whether the selected Layout's own history can step back or forward. */
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
 /** How Layout mode and the command bar talk to each other. */
@@ -49,8 +53,6 @@ interface Props {
   /** False while another mode is shown; the hidden workspace then leaves keyboard shortcuts and the bar alone. */
   active: boolean;
   bar?: LayoutBarLink;
-  confirmSlotDeletion?: boolean;
-  setConfirmSlotDeletion?: (value: boolean) => Promise<void>;
 }
 
 const LAYOUT_PAGE = "layout";
@@ -60,7 +62,7 @@ function layoutAlbum(layout: Layout, format: PageFormat): Album {
   return { schemaVersion: 2, title: "", pageFormat: format, pages: [{ id: LAYOUT_PAGE, background: "#ffffff", slots: layout.slots }] };
 }
 
-export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFontPorts, paneHost, active, bar = {}, confirmSlotDeletion = true, setConfirmSlotDeletion }: Props) {
+export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFontPorts, paneHost, active, bar = {} }: Props) {
   const { command, toolsHost, onStateChange } = bar;
   const { library, disabled, error, change: changeLibrary } = layouts;
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -68,10 +70,9 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
   /** The Text Slot whose placeholder is being edited. */
   const [editingPlaceholder, setEditingPlaceholder] = useState<string | null>(null);
   const [layoutDeleteTarget, setLayoutDeleteTarget] = useState<string | null>(null);
-  const [slotDeleteTarget, setSlotDeleteTarget] = useState<string | null>(null);
-  const [neverAsk, setNeverAsk] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  // Each Layout's own undo history, for the session.
+  const histories = useRef(new Map<string, UndoHistory<Layout>>());
+  const [, setHistoryVersion] = useState(0);
   const [canvasMenu, setCanvasMenu] = useState<{ x: number; y: number } & (
     { kind: "page"; centre: { x: number; y: number } } | { kind: "slot"; slotId: string }
   ) | null>(null);
@@ -146,20 +147,53 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
   const editable = !disabled;
   const layoutSelected = layout !== null;
   const slotSelected = selectedSlot !== null;
+  const selectedHistory = (layout && histories.current.get(layout.id)) || emptyHistory<Layout>();
+  const undoable = canUndo(selectedHistory);
+  const redoable = canRedo(selectedHistory);
   useEffect(() => {
-    onStateChange?.({ editable, layoutSelected, slotSelected });
-  }, [editable, layoutSelected, slotSelected, onStateChange]);
-  useEffect(() => () => onStateChange?.({ editable: false, layoutSelected: false, slotSelected: false }), [onStateChange]);
+    onStateChange?.({ editable, layoutSelected, slotSelected, canUndo: undoable, canRedo: redoable });
+  }, [editable, layoutSelected, slotSelected, undoable, redoable, onStateChange]);
+  useEffect(() => () => onStateChange?.({ editable: false, layoutSelected: false, slotSelected: false, canUndo: false, canRedo: false }), [onStateChange]);
 
-  function changeLayout(update: (album: Album) => Album) {
+  function setHistory(id: string, history: UndoHistory<Layout>) {
+    histories.current.set(id, history);
+    setHistoryVersion((version) => version + 1);
+  }
+
+  /** Applies a change to the selected Layout as one undo step; consecutive changes in the same `group` share a step. */
+  function changeLayout(update: (album: Album) => Album, group?: string) {
     const id = selectedId;
     if (!id) return;
-    changeLibrary((current) => {
+    let previous: Layout | undefined;
+    const applied = changeLibrary((current) => {
       const target = current.layouts.find((item) => item.id === id);
       if (!target) throw new Error("Layout not found in the Layout Library.");
+      previous = target;
       const before = layoutAlbum(target, format);
       return setLayoutSlots(current, id, fitTextSlots(update(before), before, true).pages[0].slots, pageAspectRatio(format));
     });
+    if (applied && previous) setHistory(id, recordChange(histories.current.get(id) ?? emptyHistory(), previous, group));
+  }
+
+  function endChangeGroup() {
+    const history = selectedId ? histories.current.get(selectedId) : undefined;
+    if (selectedId && history?.group !== undefined) setHistory(selectedId, endGroup(history));
+  }
+
+  function undoOrRedo(direction: HistoryDirection) {
+    const id = selectedId;
+    const history = id ? histories.current.get(id) : undefined;
+    if (!id || !history || disabled || !(direction === "undo" ? canUndo(history) : canRedo(history))) return;
+    stopSlotDrag.current?.();
+    let next: UndoHistory<Layout> | undefined;
+    const applied = changeLibrary((current) => {
+      const present = current.layouts.find((item) => item.id === id);
+      const result = present && stepHistory(history, present, direction);
+      if (!result) throw new Error("The Layout is no longer in the Layout Library.");
+      next = result.history;
+      return { ...current, layouts: current.layouts.map((item) => item.id === id ? result.state : item) };
+    });
+    if (applied && next) setHistory(id, next);
   }
 
   function selectLayout(id: string | null) {
@@ -182,32 +216,9 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
     changeLayout((current) => deleteSlot(current, LAYOUT_PAGE, slotId));
   }
 
-  function requestDeleteSlot(slotId = selectedSlot?.id) {
+  function deleteSlotAt(slotId = selectedSlot?.id) {
     if (!slotId || disabled) return;
-    if (confirmSlotDeletion) {
-      setNeverAsk(false);
-      setDeleteError(null);
-      setSlotDeleteTarget(slotId);
-    } else {
-      removeSlot(slotId);
-    }
-  }
-
-  async function confirmDeleteSlot() {
-    if (!slotDeleteTarget || deleting) return;
-    setDeleting(true);
-    try {
-      if (neverAsk) {
-        if (!setConfirmSlotDeletion) throw new Error("Preferences are unavailable.");
-        await setConfirmSlotDeletion(false);
-      }
-      removeSlot(slotDeleteTarget);
-      setSlotDeleteTarget(null);
-    } catch (cause) {
-      setDeleteError(`Could not save preference: ${String(cause)}`);
-    } finally {
-      setDeleting(false);
-    }
+    removeSlot(slotId);
   }
 
   function confirmDeleteLayout() {
@@ -217,6 +228,7 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
     if (!id || !current) return;
     const index = current.layouts.findIndex((item) => item.id === id);
     if (!changeLibrary((latest) => deleteLayout(latest, id))) return;
+    histories.current.delete(id);
     const remaining = current.layouts.filter((item) => item.id !== id);
     selectLayout(remaining[Math.min(index, remaining.length - 1)]?.id ?? null);
   }
@@ -230,11 +242,13 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
   function changeTextStyle(style: Partial<TextStyle>) {
     if (selectedSlot?.type !== "text") return;
     const slotId = selectedSlot.id;
+    // The colour picker reports every colour it passes; they form one step until the colour is chosen.
+    const group = Object.keys(style).join() === "color" ? `colour:${slotId}` : undefined;
     changeLayout((current) => {
       const slot = current.pages[0].slots.find((item) => item.id === slotId);
       if (slot?.type !== "text") throw new Error("Text Slot not found in Layout.");
       return setTextStyle(current, LAYOUT_PAGE, slotId, { ...slot.style, ...style });
-    });
+    }, group);
   }
 
   function toggleTextShortcut(event: ReactKeyboardEvent, slot: Slot): boolean {
@@ -318,6 +332,7 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
       setLayoutDeleteTarget(layout.id);
     } else if (command.name === "add-photo-slot") addSlot("photo");
     else if (command.name === "add-text-slot") addSlot("text");
+    else if (command.name === "undo" || command.name === "redo") undoOrRedo(command.name);
   });
 
   useEffect(() => {
@@ -327,7 +342,7 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
       if (target instanceof HTMLElement && (target.isContentEditable || target.closest("input, textarea, select"))) return;
       if (document.querySelector("[aria-modal='true']")) return;
       event.preventDefault();
-      requestDeleteSlot();
+      deleteSlotAt();
     };
     window.addEventListener("keydown", deleteSelected);
     return () => window.removeEventListener("keydown", deleteSelected);
@@ -425,7 +440,7 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
                   } else if ((event.key === "Delete" || event.key === "Backspace") && !disabled) {
                     event.preventDefault();
                     selectSlot(slot.id);
-                    requestDeleteSlot(slot.id);
+                    deleteSlotAt(slot.id);
                   }
                 }}>
                 {slot.type === "text" && editingPlaceholder === slot.id && (
@@ -448,12 +463,16 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
                     onContextMenu={(event) => event.stopPropagation()}
                     onKeyDown={(event) => {
                       if (toggleTextShortcut(event, slot)) return;
+                      // Undo and redo are handled for the whole window.
+                      if (historyShortcut(event)) return;
                       event.stopPropagation();
                       if (event.key === "Escape") setEditingPlaceholder(null);
                     }}
+                    onFocus={endChangeGroup}
+                    onBlur={endChangeGroup}
                     onChange={(event) => {
                       const placeholder = event.target.value;
-                      changeLayout((current) => setSlotPlaceholder(current, LAYOUT_PAGE, slot.id, placeholder));
+                      changeLayout((current) => setSlotPlaceholder(current, LAYOUT_PAGE, slot.id, placeholder), `placeholder:${slot.id}`);
                     }} />
                 )}
                 {!disabled && (
@@ -472,13 +491,13 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
             {selectedSlot.type === "text" ? (
               <TextSlotTools style={selectedSlot.style} fonts={fonts} fontError={fontError} disabled={disabled}
                 onShortcut={(event) => toggleTextShortcut(event, selectedSlot)}
-                onStyle={changeTextStyle} onCommit={ignoreCommit}
+                onStyle={changeTextStyle} onCommit={endChangeGroup}
                 onRetryFonts={() => { setFontError(null); setFontRetry((value) => value + 1); }}>
-                <SlotActions disabled={disabled} onRotate={rotateSelectedSlot} onDelete={() => requestDeleteSlot()} />
+                <SlotActions disabled={disabled} onRotate={rotateSelectedSlot} onDelete={() => deleteSlotAt()} />
               </TextSlotTools>
             ) : (
               <PhotoSlotTools fit={null} content={false} disabled={disabled} onFit={ignoreCommit} onZoom={ignoreCommit}
-                onRotate={rotateSelectedSlot} onDelete={() => requestDeleteSlot()} />
+                onRotate={rotateSelectedSlot} onDelete={() => deleteSlotAt()} />
             )}
           </Fragment>, toolsHost)}
         </div>
@@ -506,7 +525,7 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
             onClick={() => { changeLayout((current) => rotateSlot(current, LAYOUT_PAGE, slotId, -90)); close(); }}>Rotate left</button>
           <button role="menuitem" type="button"
             onClick={() => { changeLayout((current) => rotateSlot(current, LAYOUT_PAGE, slotId, 90)); close(); }}>Rotate right</button>
-          <button role="menuitem" type="button" onClick={() => { requestDeleteSlot(slotId); close(); }}>Delete</button>
+          <button role="menuitem" type="button" onClick={() => { deleteSlotAt(slotId); close(); }}>Delete</button>
         </div>;
       })()}
       {layoutDeleteTarget && <ModalDialog label="Delete Layout?" onClose={() => setLayoutDeleteTarget(null)}>
@@ -515,15 +534,6 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
         <div className="album-toolbar">
           <button type="button" onClick={confirmDeleteLayout}>Delete Layout</button>
           <button type="button" onClick={() => setLayoutDeleteTarget(null)}>Cancel</button>
-        </div>
-      </ModalDialog>}
-      {slotDeleteTarget && <ModalDialog label="Delete Slot?" closeDisabled={deleting} onClose={() => setSlotDeleteTarget(null)}>
-        <h2>Delete Slot?</h2>
-        <label><input type="checkbox" checked={neverAsk} onChange={(event) => setNeverAsk(event.target.checked)} /> Never ask again</label>
-        {deleteError && <p role="alert">{deleteError}</p>}
-        <div className="album-toolbar">
-          <button type="button" disabled={deleting} onClick={() => void confirmDeleteSlot()}>Delete</button>
-          <button type="button" disabled={deleting} onClick={() => setSlotDeleteTarget(null)}>Cancel</button>
         </div>
       </ModalDialog>}
     </section>

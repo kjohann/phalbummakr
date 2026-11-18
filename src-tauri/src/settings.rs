@@ -7,8 +7,6 @@ use std::path::{Path, PathBuf};
 pub struct AlbumSettings {
     pub last_album: Option<PathBuf>,
     pub recent_albums: Vec<PathBuf>,
-    pub confirm_spread_deletion: bool,
-    pub confirm_slot_deletion: bool,
     #[serde(alias = "photoPane")]
     pub side_pane: SidePane,
 }
@@ -18,8 +16,6 @@ impl Default for AlbumSettings {
         Self {
             last_album: None,
             recent_albums: Vec::new(),
-            confirm_spread_deletion: true,
-            confirm_slot_deletion: true,
             side_pane: SidePane::default(),
         }
     }
@@ -87,18 +83,6 @@ pub fn clear_last_album(path: &Path) -> io::Result<()> {
     write_album_settings(path, &settings)
 }
 
-pub fn set_confirm_spread_deletion(path: &Path, value: bool) -> io::Result<()> {
-    let mut settings = read_album_settings(path)?;
-    settings.confirm_spread_deletion = value;
-    write_album_settings(path, &settings)
-}
-
-pub fn set_confirm_slot_deletion(path: &Path, value: bool) -> io::Result<()> {
-    let mut settings = read_album_settings(path)?;
-    settings.confirm_slot_deletion = value;
-    write_album_settings(path, &settings)
-}
-
 pub fn set_side_pane(path: &Path, pane: SidePane) -> io::Result<()> {
     let mut settings = read_album_settings(path)?;
     settings.side_pane = pane;
@@ -110,32 +94,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn spread_deletion_preference_defaults_to_enabled_and_survives_album_updates() {
+    fn drops_the_retired_deletion_preferences_from_older_settings_files() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
-        assert!(read_album_settings(&path).unwrap().confirm_spread_deletion);
-        std::fs::write(&path, r#"{"lastAlbum":null,"recentAlbums":[]}"#).unwrap();
-        assert!(read_album_settings(&path).unwrap().confirm_spread_deletion);
-        set_confirm_spread_deletion(&path, false).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"lastAlbum":null,"recentAlbums":[],"confirmSpreadDeletion":false,"confirmSlotDeletion":false}"#,
+        )
+        .unwrap();
         remember_album(&path, Path::new("first.phalbum")).unwrap();
-        assert!(!read_album_settings(&path).unwrap().confirm_spread_deletion);
-        set_confirm_spread_deletion(&path, true).unwrap();
-        assert!(read_album_settings(&path).unwrap().confirm_spread_deletion);
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(saved.contains("first.phalbum") && !saved.contains("confirm"));
     }
-
-    #[test]
-    fn slot_deletion_preference_defaults_to_enabled_and_persists() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
-        std::fs::write(&path, r#"{"lastAlbum":null,"recentAlbums":[]}"#).unwrap();
-        assert!(read_album_settings(&path).unwrap().confirm_slot_deletion);
-        set_confirm_slot_deletion(&path, false).unwrap();
-        remember_album(&path, Path::new("first.phalbum")).unwrap();
-        let saved = read_album_settings(&path).unwrap();
-        assert!(!saved.confirm_slot_deletion);
-        assert!(saved.confirm_spread_deletion);
-    }
-
     #[test]
     fn side_pane_defaults_to_open_and_persists_across_other_updates() {
         let dir = tempfile::tempdir().unwrap();
