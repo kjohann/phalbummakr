@@ -23,6 +23,11 @@ section to it instead of creating another. An addendum:
 Never edit the acceptance criteria of a completed issue; add them to its addendum
 or to a new issue.
 
+An issue that is dropped gets the status `closed` and a `## Close reason`
+section (see the [issues index](issues/README.md)). Closed issues are never
+reopened or given addenda: follow-up work goes in a new numbered issue that links
+back to the closed one.
+
 For code fixes or tweaks not covered by an addendum, create and index a new
 numbered issue using the [issue template](issues/README.md#new-issues) before
 implementing the change.

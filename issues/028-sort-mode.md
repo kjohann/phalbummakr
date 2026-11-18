@@ -13,7 +13,7 @@ A mode for looking at Photos large, comparing up to four and sending the chosen 
 - [ ] Clicking a Photo in the Comparison chooses or unchooses it. A single shown Photo counts as chosen.
 - [ ] "Send to Folder…" in the command bar moves the chosen Photos, using [026](026-sorting-core.md). It is disabled when no Photo is chosen.
 - [ ] Right-clicking a Photo in the grid offers Show, Add to Comparison / Remove from Comparison and Send to Folder ▸. In the Comparison, it offers Choose / Unchoose, Remove from Comparison and Send to Folder ▸.
-- [ ] Send to Folder ▸ lists the Folder tree and "New Folder…", which creates the Folder and moves the Photos into it.
-- [ ] In Sort mode, Photos can also be dragged from the grid onto a Folder in the tree.
+- [ ] Send to Folder ▸ is a nested submenu that mirrors the Folder hierarchy, plus "New Folder…", which creates the Folder and moves the Photos into it.
+- [ ] Dragging a Photo onto a folder tile or breadcrumb works in Sort mode as described in [026](026-sorting-core.md).
 - [ ] Moved Photos leave the Comparison. When only one Photo was shown, the next Photo in the grid appears.
 - [ ] The large view shows the Photo's Usage badge.
