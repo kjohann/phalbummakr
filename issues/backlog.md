@@ -9,6 +9,8 @@ Decided in the design session but deliberately left out of the MVP. Promote an i
 - **Missing Photos**: mark Placements whose file is gone and relink them by hand, with a match suggested from file name and capture date.
 - **Drag several Photos to a Folder**: dragging moves only the dragged Photo (026). Moving several at once is done with "Send to Folder ▸" in Sort mode (028).
 - **Usage in other Albums**, shown in the Photo's details (nice to have).
+- **Redesign the "already in the Album" warning**: the warning that pops up when a Photo already used in the Album is placed again is annoying, and it makes the whole Spread jitter. Find a less intrusive design.
+- **Locate where a Photo is used**: the usage badge shows that a Photo is used but not where. Explore highlighting the Slots that use it and/or a tooltip listing the Pages it's used on.
 - **HEIC support**, only if the app is published.
 
 ## Editing
@@ -19,6 +21,7 @@ Decided in the design session but deliberately left out of the MVP. Promote an i
 - **Resize Slots from every corner**: today a Slot can only be resized from its bottom-right handle.
 - **Alt-drag to duplicate a Slot**, as in Miro and FigJam: holding Alt while dragging leaves the original in place and drops a copy. Alt currently turns snapping off during a drag (013), so the two need a different split of modifiers.
 - **Move several Slots together**: select several Slots on a Page and move them as a group. Mixed selections of Photo Slots and Text Slots need thought: which Slot tools still apply, and how snapping and rotation behave for a group.
+- **Clear a Photo Slot**: pressing Delete with a Photo Slot selected removes the whole Slot. Add a way to remove just the Photo and keep the empty Slot.
 - **Snap to matching distances**: beyond the Equal gap guides from 013, help place Slots at the same distance from the Page's edges as other Slots, for example mirrored at opposite sides of a Page, and help build evenly spaced grids.
 
 ## Album and output
