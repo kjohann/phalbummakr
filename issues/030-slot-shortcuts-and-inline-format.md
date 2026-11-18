@@ -7,7 +7,8 @@ Status: todo · Type: tweak · Depends on: 024
 Add keyboard shortcuts for zooming a Crop and rotating a Slot. Also show the
 Text Slot tools' bold, italic and underline as buttons directly in the command
 bar, like a WYSIWYG editor, instead of behind the Format dropdown from
-[024](024-slot-tools-in-command-bar.md).
+[024](024-slot-tools-in-command-bar.md). Text alignment gets the same
+treatment: the alignment dropdown was easy to miss.
 
 ## Acceptance criteria
 
@@ -31,6 +32,13 @@ bar, like a WYSIWYG editor, instead of behind the Format dropdown from
   other Slot tools do.
 - [ ] Ctrl+B, Ctrl+I and Ctrl+U work as before, and the buttons' tooltips
   show them.
+- [ ] Text alignment is three icon buttons (left, centre, right) instead of a
+  dropdown. The current alignment is shown as pressed, and they keep focus in
+  the text being edited, like the formatting buttons.
+- [ ] When the bar is too narrow, such as at the 720 px minimum window width,
+  the formatting buttons and the alignment buttons each fold into a dropdown
+  again. At wider widths they stay inline.
+- [ ] The same tools work in Layout mode ([010](010-layouts.md)).
 
 ## Notes
 
@@ -41,7 +49,5 @@ bar, like a WYSIWYG editor, instead of behind the Format dropdown from
   that while editing text.
 - Ctrl+Plus may arrive as `+` or `=` depending on the keyboard layout and
   Shift; the numeric keypad keys should also work.
-- Three more buttons make the Text Slot tools wider. Check them against the
-  bar's overflow at the 720 px minimum window width (see 024's Notes). If they
-  don't fit there, keep Bold, Italic and Underline in a Format dropdown only
-  when the bar is too narrow. At wider widths they stay inline.
+- Six more buttons make the Text Slot tools wider. Check them against the
+  bar's overflow at the 720 px minimum window width (see 024's Notes).
