@@ -15,6 +15,9 @@ Decided in the design session but deliberately left out of the MVP. Promote an i
 - **Single-Page focus view**: show one Page at a time, larger, for focused editing.
 - **Mouse-wheel and pinch zoom** of a Photo's Crop, removed in 019 in favour of the Zoom buttons.
 - **Photo rotation within a fixed Slot** in 90° steps. Free rotation is something to explore later.
+- **Resize Slots from every corner**: today a Slot can only be resized from its bottom-right handle.
+- **Alt-drag to duplicate a Slot**, as in Miro and FigJam: holding Alt while dragging leaves the original in place and drops a copy. Alt currently turns snapping off during a drag (013), so the two need a different split of modifiers.
+- **Snap to matching distances**: beyond the Equal gap guides from 013, help place Slots at the same distance from the Page's edges as other Slots, for example mirrored at opposite sides of a Page, and help build evenly spaced grids.
 
 ## Album and output
 
