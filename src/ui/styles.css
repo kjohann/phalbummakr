@@ -119,14 +119,58 @@ body {
 .photo-pane {
   position: relative;
   display: flex;
+  flex-direction: column;
   flex: 0 0 auto;
   max-width: 60vw;
   min-height: 0;
   border-right: 1px solid #d9dcd5;
+  background: #f7f8f4;
 }
 
 .photo-pane[hidden] {
   display: none;
+}
+
+.photo-pane-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 10px 0 16px;
+}
+
+.photo-pane-header h1 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.photo-pane-pin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #415d50;
+  background: transparent;
+  cursor: pointer;
+}
+
+.photo-pane-pin[aria-pressed="true"],
+.photo-browser-tools .button-quiet[aria-pressed="true"] {
+  border-color: #c9d2c7;
+  background: #e2e8df;
+}
+
+.photo-pane-pin:hover {
+  background: #e9ebe6;
+}
+
+.photo-pane-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
 }
 
 .photo-pane-resizer {
@@ -145,40 +189,23 @@ body {
   background: linear-gradient(to right, transparent 3px, #8ea597 3px, #8ea597 5px, transparent 5px);
 }
 
-.photo-pane-toggle,
 .photo-pane-open {
-  position: absolute;
-  top: 50%;
-  z-index: 3;
+  align-self: center;
+  flex: 0 0 auto;
   width: 16px;
   height: 44px;
   padding: 0;
   border: 1px solid #d9dcd5;
+  border-left: 0;
+  border-radius: 0 3px 3px 0;
   color: #415d50;
   background: #f7f8f4;
   font: inherit;
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
-  transform: translateY(-50%);
 }
 
-.photo-pane-toggle {
-  right: -9px;
-  border-radius: 3px;
-}
-
-.photo-pane-open {
-  position: relative;
-  top: auto;
-  align-self: center;
-  flex: 0 0 auto;
-  border-left: 0;
-  border-radius: 0 3px 3px 0;
-  transform: none;
-}
-
-.photo-pane-toggle:hover,
 .photo-pane-open:hover {
   background: #e9ebe6;
 }
@@ -196,12 +223,13 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20px 16px 8px;
+  gap: 8px;
+  padding: 8px 16px;
 }
 
-.photo-browser h1 {
-  margin: 0 0 4px;
-  font-size: 16px;
+.photo-browser-tools {
+  display: flex;
+  gap: 6px;
 }
 
 .photo-count,

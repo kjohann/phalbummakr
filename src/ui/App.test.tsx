@@ -66,7 +66,10 @@ vi.mock("./AlbumWorkspace", () => ({
   },
 }));
 vi.mock("./PhotoBrowser", () => ({
-  default: ({ compact }: { compact?: boolean }) => <p>{compact ? "Compact Photo browser" : "Photo browser"}</p>,
+  default: ({ compact, onCompactChange }: { compact?: boolean; onCompactChange?: (compact: boolean) => void }) => <>
+    <p>{compact ? "Compact Photo browser" : "Photo browser"}</p>
+    <button type="button" onClick={() => onCompactChange?.(!compact)}>Toggle mock Compact</button>
+  </>,
 }));
 
 beforeEach(() => {
@@ -179,7 +182,6 @@ it("keeps Album commands enabled while an autosave is pending but not while edit
   expect(["Delete", "Add Spread", "Album Settings…"].map((name) => barButton(name).disabled)).toEqual([false, false, false]);
   fireEvent.click(screen.getByRole("button", { name: "Block mock edits" }));
   expect(["Delete", "Add Spread", "Album Settings…"].map((name) => barButton(name).disabled)).toEqual([true, true, true]);
-  expect(barButton("Toggle Photos").disabled).toBe(false);
 });
 
 it("switches between Album, Layouts and Sort modes, keeping the Album's state", async () => {
@@ -522,36 +524,37 @@ function photoPanePorts(photoPane?: { width: number; collapsed: boolean; compact
   } satisfies DocumentPorts;
 }
 
-it("collapses, reopens and compacts the Photo pane from the command bar, Ctrl+B and its edge buttons, and remembers it", async () => {
+it("unpins and pins the Photo pane from its pin, its edge button and Ctrl+B, compacts it, and remembers it", async () => {
   const ports = photoPanePorts({ width: 300, collapsed: false, compact: false });
   render(<App ports={ports} />);
   await screen.findByText("Original");
-  await waitFor(() => expect(barButton("Toggle Photos").disabled).toBe(false));
-  expect(barButton("Toggle Photos").getAttribute("aria-keyshortcuts")).toBe("Control+B");
-  expect(barButton("Toggle Photos").getAttribute("aria-pressed")).toBe("true");
+  expect(bar().queryByRole("button", { name: "Toggle Photos" })).toBeNull();
+  expect(bar().queryByRole("button", { name: "Compact Photos" })).toBeNull();
   const pane = screen.getByRole("region", { name: "Photo pane" });
   expect(pane.style.width).toBe("300px");
-  expect(screen.queryByRole("button", { name: "Show Photos" })).toBeNull();
+  expect(within(pane).getByRole("heading", { name: "Photos" })).toBeTruthy();
+  const pin = within(pane).getByRole("button", { name: "Pin Photo pane" });
+  expect(pin.getAttribute("aria-pressed")).toBe("true");
+  expect(pin.getAttribute("aria-keyshortcuts")).toBe("Control+B");
+  expect(pin.title).toContain("Ctrl+B");
+  expect(screen.queryByRole("button", { name: "Show Photo pane" })).toBeNull();
 
-  fireEvent.click(barButton("Toggle Photos"));
+  fireEvent.click(pin);
   expect(pane.hidden).toBe(true);
-  expect(barButton("Toggle Photos").getAttribute("aria-pressed")).toBe("false");
   expect(ports.setPhotoPane).toHaveBeenLastCalledWith({ width: 300, collapsed: true, compact: false });
-  fireEvent.click(screen.getByRole("button", { name: "Show Photos" }));
+  const show = screen.getByRole("button", { name: "Show Photo pane" });
+  expect(show.getAttribute("aria-keyshortcuts")).toBe("Control+B");
+  expect(show.title).toContain("Ctrl+B");
+  fireEvent.click(show);
   expect(pane.hidden).toBe(false);
   fireEvent.keyDown(window, { key: "b", ctrlKey: true });
   expect(pane.hidden).toBe(true);
+  expect(screen.getByText("Photo browser")).toBeTruthy();
   fireEvent.keyDown(window, { key: "B", ctrlKey: true });
   expect(pane.hidden).toBe(false);
-  fireEvent.click(screen.getByRole("button", { name: "Hide Photos" }));
-  expect(pane.hidden).toBe(true);
-  expect(screen.getByText("Photo browser")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Show Photos" }));
 
-  expect(barButton("Compact Photos").getAttribute("aria-pressed")).toBe("false");
-  fireEvent.click(barButton("Compact Photos"));
+  fireEvent.click(screen.getByRole("button", { name: "Toggle mock Compact" }));
   expect(screen.getByText("Compact Photo browser")).toBeTruthy();
-  expect(barButton("Compact Photos").getAttribute("aria-pressed")).toBe("true");
   expect(ports.setPhotoPane).toHaveBeenLastCalledWith({ width: 300, collapsed: false, compact: true });
 });
 
@@ -567,10 +570,9 @@ it("leaves Ctrl+B to text fields, Text Slots that handle it and open dialogs", a
   fireEvent(screen.getByRole("button", { name: "Edit mock Album" }), handled);
   const item = (menu: string, text: string) =>
     native.menus.find((entry) => entry.text === menu)?.items?.find((entry) => entry.text === text);
-  await waitFor(() => expect(barButton("Toggle Photos").disabled).toBe(false));
+  await waitFor(() => expect(item("File", "Preferences…")?.enabled).toBe(true));
   await act(async () => item("File", "Preferences…")!.action!());
   fireEvent.keyDown(screen.getByRole("button", { name: "Close" }), { key: "b", ctrlKey: true });
-  expect(barButton("Toggle Photos").disabled).toBe(true);
   expect(pane.hidden).toBe(false);
   expect(ports.setPhotoPane).not.toHaveBeenCalled();
 });

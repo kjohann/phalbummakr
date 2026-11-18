@@ -131,7 +131,12 @@ function PhotoGrid({ root, photos, folders, usage, compact, onOpenFolder }: {
   );
 }
 
-export default function PhotoBrowser({ root, album = null, compact = false }: { root: string; album?: Album | null; compact?: boolean }) {
+export default function PhotoBrowser({ root, album = null, compact = false, onCompactChange }: {
+  root: string;
+  album?: Album | null;
+  compact?: boolean;
+  onCompactChange?: (compact: boolean) => void;
+}) {
   const [scan, setScan] = useState(0);
   const [unusedOnly, setUnusedOnly] = useState(false);
   const [result, setResult] = useState<(PhotoScan & {
@@ -183,15 +188,16 @@ export default function PhotoBrowser({ root, album = null, compact = false }: { 
   return (
     <aside className="photo-browser" aria-label="Library Photos">
       <header className="photo-browser-header">
-        <div>
-          <h1>Photos</h1>
-          <span className="photo-count" role="status">
-            {loading ? "Scanning Library..." : result ? `${photos.length.toLocaleString()} Photos` : "Scan failed"}
-          </span>
+        <span className="photo-count" role="status">
+          {loading ? "Scanning Library..." : result ? `${photos.length.toLocaleString()} Photos` : "Scan failed"}
+        </span>
+        <div className="photo-browser-tools">
+          {onCompactChange && <button type="button" className="button-quiet" aria-pressed={compact}
+            onClick={() => onCompactChange(!compact)}>Compact</button>}
+          <button type="button" className="button-quiet" disabled={loading} onClick={() => setScan(scan + 1)}>
+            Rescan
+          </button>
         </div>
-        <button type="button" className="button-quiet" disabled={loading} onClick={() => setScan(scan + 1)}>
-          Rescan
-        </button>
       </header>
       {result && (
         <nav className="photo-breadcrumbs" aria-label="Photo folders">

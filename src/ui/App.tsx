@@ -87,8 +87,9 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
   }, [onTitleChange]);
   return (
     <div className="library-workspace" style={{ display: hidden ? "none" : undefined }}>
-      <PhotoPane settings={photoPane} onChange={onPhotoPaneChange}>
-        <PhotoBrowser root={document.root} album={album} compact={photoPane.compact} />
+      <PhotoPane title="Photos" settings={photoPane} onChange={onPhotoPaneChange}>
+        <PhotoBrowser root={document.root} album={album} compact={photoPane.compact}
+          onCompactChange={(compact) => onPhotoPaneChange({ compact })} />
       </PhotoPane>
       {/* Hidden rather than unmounted, so Album mode keeps its Spread and Slot selection. */}
       <div className="mode-view" hidden={mode !== "album"}>
@@ -240,8 +241,8 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
     return () => { active = false; };
   }, [ports]);
 
-  const actions = useRef<{ newAlbum: () => void; openAlbum: () => void; openRecent: (path: string) => void; closeAlbum: () => void; preferences: () => void; exit: () => void; albumCommand: (name: AlbumCommandName) => void; togglePhotos: () => void; compactPhotos: () => void }>(
-    { newAlbum: () => {}, openAlbum: () => {}, openRecent: () => {}, closeAlbum: () => {}, preferences: () => {}, exit: () => {}, albumCommand: () => {}, togglePhotos: () => {}, compactPhotos: () => {} },
+  const actions = useRef<{ newAlbum: () => void; openAlbum: () => void; openRecent: (path: string) => void; closeAlbum: () => void; preferences: () => void; exit: () => void;   albumCommand: (name: AlbumCommandName) => void; togglePhotos: () => void }>(
+      { newAlbum: () => {}, openAlbum: () => {}, openRecent: () => {}, closeAlbum: () => {}, preferences: () => {}, exit: () => {}, albumCommand: () => {}, togglePhotos: () => {} },
   );
   const photoPaneAvailable = document !== null && draft === null && !preferencesOpen;
   const fileEnabled = !busy && !restoring && !preferencesOpen;
@@ -251,9 +252,6 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
   actions.current = {
     togglePhotos: () => {
       if (photoPaneAvailable) changePhotoPane({ collapsed: !photoPaneRef.current.collapsed });
-    },
-    compactPhotos: () => {
-      if (photoPaneAvailable) changePhotoPane({ compact: !photoPaneRef.current.compact });
     },
     albumCommand: (name) => {
       if (document && !draft) setCommand({ name, serial: ++commandSerial.current });
@@ -430,11 +428,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
     albumCommand("add-spread", "Add Spread", { overflow: 1 }),
   ] : [];
   const documentCommands: BarCommand[] = albumOpen ? [
-    { id: "toggle-photos", label: "Toggle Photos", pressed: !photoPane.collapsed, shortcut: "Control+B", overflow: 2,
-      disabled: !photoPaneAvailable, run: () => actions.current.togglePhotos() },
-    { id: "compact-photos", label: "Compact Photos", pressed: photoPane.compact, overflow: 4,
-      disabled: !photoPaneAvailable, run: () => actions.current.compactPhotos() },
-    albumCommand("album-settings", "Album Settings…", { overflow: 3 }),
+    albumCommand("album-settings", "Album Settings…", { overflow: 2 }),
   ] : [
     { id: "new-album", label: "New Album…", disabled: !fileEnabled, run: () => actions.current.newAlbum() },
     { id: "open-album", label: "Open Album…", disabled: !fileEnabled, run: () => actions.current.openAlbum() },

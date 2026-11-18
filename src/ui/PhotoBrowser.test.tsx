@@ -82,8 +82,17 @@ it("shows compact tiles without file names but keeps Usage badges and folder nam
     if (command === "scan_photos") return { photos: [first, photo(1)], folders: ["holiday"], warnings: [] };
     return "data:image/png;base64,dGVzdA==";
   });
+  const onCompactChange = vi.fn();
   const album = placePhoto(addPhotoSlot(createAlbum({ name: "Test", pageCount: 2 }), "page-1"), "page-1", "slot-1", first);
-  render(<PhotoBrowser root="D:\\Photos" album={album} compact />);
+  const { rerender } = render(<PhotoBrowser root="D:\\Photos" album={album} onCompactChange={onCompactChange} />);
+  const toggle = screen.getByRole("button", { name: "Compact" });
+  expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  fireEvent.click(toggle);
+  expect(onCompactChange).toHaveBeenLastCalledWith(true);
+  rerender(<PhotoBrowser root="D:\\Photos" album={album} compact onCompactChange={onCompactChange} />);
+  expect(toggle.getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(toggle);
+  expect(onCompactChange).toHaveBeenLastCalledWith(false);
   await screen.findByRole("button", { name: "Open folder holiday" });
   await waitFor(() => expect(screen.getAllByRole("img")).toHaveLength(2));
   expect(screen.queryByText(first.path)).toBeNull();

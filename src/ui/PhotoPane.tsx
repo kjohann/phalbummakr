@@ -20,7 +20,9 @@ function windowMaxWidth() {
   return Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.floor(window.innerWidth * MAX_WINDOW_SHARE)));
 }
 
-export default function PhotoPane({ settings, onChange, children }: {
+/** The left pane. Its header and pin stay the same whatever it shows; `title` names the current content. */
+export default function PhotoPane({ title, settings, onChange, children }: {
+  title: string;
   settings: PhotoPaneSettings;
   onChange: (change: Partial<PhotoPaneSettings>) => void;
   children: ReactNode;
@@ -65,16 +67,25 @@ export default function PhotoPane({ settings, onChange, children }: {
   return (
     <>
       <section className="photo-pane" aria-label="Photo pane" hidden={settings.collapsed} style={{ width }}>
-        {children}
+        <header className="photo-pane-header">
+          <h1>{title}</h1>
+          <button type="button" className="photo-pane-pin" aria-label="Pin Photo pane" aria-pressed={!settings.collapsed}
+            aria-keyshortcuts="Control+B" title="Unpin Photo pane (Ctrl+B)"
+            onClick={() => onChange({ collapsed: true })}>
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+              <path d="M5 1.5h6M6 1.5v5L3.5 9.5h9L10 6.5v-5M8 9.5V15" fill="none" stroke="currentColor"
+                strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round" />
+            </svg>
+          </button>
+        </header>
+        <div className="photo-pane-content">{children}</div>
         <div className="photo-pane-resizer" role="separator" aria-orientation="vertical" aria-label="Resize Photos"
           aria-valuenow={width} aria-valuemin={MIN_WIDTH} aria-valuemax={maxWidth} tabIndex={0}
           onMouseDown={startResize} onKeyDown={resizeWithKeys} />
-        <button type="button" className="photo-pane-toggle" aria-label="Hide Photos" title="Hide Photos (Ctrl+B)"
-          onClick={() => onChange({ collapsed: true })}>‹</button>
       </section>
       {settings.collapsed && (
-        <button type="button" className="photo-pane-open" aria-label="Show Photos" title="Show Photos (Ctrl+B)"
-          onClick={() => onChange({ collapsed: false })}>›</button>
+        <button type="button" className="photo-pane-open" aria-label="Show Photo pane" aria-keyshortcuts="Control+B"
+          title="Show Photo pane (Ctrl+B)" onClick={() => onChange({ collapsed: false })}>›</button>
       )}
     </>
   );
