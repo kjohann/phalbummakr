@@ -68,6 +68,22 @@ it("moves the lowest-priority commands into the ⋯ menu when the bar is too nar
   expect(bar().queryByRole("button", { name: "More commands" })).toBeNull();
 });
 
+it("hosts the selected Slot's tools in the middle group and leaves room for them before overflowing", () => {
+  const { document } = commands();
+  let host: HTMLElement | null = null;
+  vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(function (this: HTMLElement) {
+    return this.classList.contains("command-tools") ? 250 : 0;
+  });
+  render(<CommandBar context={[]} document={document} toolsRef={(element) => { host = element; }} />);
+  expect(host).not.toBeNull();
+  expect(screen.getByRole("toolbar", { name: "Commands" }).querySelector(".command-context")!.contains(host)).toBe(true);
+
+  // 600 measured + 250 of tools + 30 for "⋯" is 280 px too wide for 600, so all three document commands move.
+  barWidth = 600;
+  act(() => resize());
+  expect(shown()).toEqual(["⋯"]);
+});
+
 it("runs overflowed commands from the ⋯ menu with their enabled and pressed states", () => {
   const { run, context, document: documentCommands } = commands();
   barWidth = 420;

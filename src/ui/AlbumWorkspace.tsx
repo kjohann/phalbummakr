@@ -7,12 +7,22 @@ import { tauriPhotoPorts } from "./tauriPhotoPorts";
 import { tauriFontPorts, type FontPorts } from "./tauriFontPorts";
 import { fitTextSlots } from "./textLayout";
 
-export type AlbumCommandName = "delete-slot" | "album-settings" | "add-spread" | "add-photo-slot" | "add-text-slot";
+export type AlbumCommandName = "album-settings" | "add-spread" | "add-photo-slot" | "add-text-slot";
 
 /** A command bar command for the open Album; `serial` makes repeated commands distinct. */
 export interface AlbumCommand {
   name: AlbumCommandName;
   serial: number;
+}
+
+/** How the open Album and the command bar talk to each other. */
+export interface CommandBarLink {
+  command?: AlbumCommand;
+  /** Where the selected Slot's tools render: the middle of the command bar. */
+  toolsHost?: HTMLElement | null;
+  onSlotSelectedChange?: (selected: boolean) => void;
+  /** Whether Album commands can currently change the Album. Stays true while an autosave is only pending. */
+  onEditableChange?: (editable: boolean) => void;
 }
 
 interface Props {
@@ -28,15 +38,13 @@ interface Props {
   setConfirmSpreadDeletion?: (value: boolean) => Promise<void>;
   confirmSlotDeletion?: boolean;
   setConfirmSlotDeletion?: (value: boolean) => Promise<void>;
-  command?: AlbumCommand;
-  onSlotSelectedChange?: (selected: boolean) => void;
-  /** Whether Album commands can currently change the Album. Stays true while an autosave is only pending. */
-  onEditableChange?: (editable: boolean) => void;
+  bar?: CommandBarLink;
   /** False while another mode is shown; the hidden workspace then leaves keyboard shortcuts alone. */
   active?: boolean;
 }
 
-export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document, suspended = false, confirmSpreadDeletion = true, setConfirmSpreadDeletion, confirmSlotDeletion = true, setConfirmSlotDeletion, command, onSlotSelectedChange, onEditableChange, active = true }: Props) {
+export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document, suspended = false, confirmSpreadDeletion = true, setConfirmSpreadDeletion, confirmSlotDeletion = true, setConfirmSlotDeletion, bar = {}, active = true }: Props) {
+  const { command, onEditableChange } = bar;
   const [names, setNames] = useState<string[]>([]);
   const [current, setCurrent] = useState<{ filename: string; album: Album } | null>(
     () => document ? { filename: document.path, album: fitTextSlots(document.album) } : null,
@@ -282,7 +290,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
             root={root} photoPorts={photoPorts} fontPorts={fontPorts}
             confirmSpreadDeletion={confirmSpreadDeletion} setConfirmSpreadDeletion={setConfirmSpreadDeletion}
             confirmSlotDeletion={confirmSlotDeletion} setConfirmSlotDeletion={setConfirmSlotDeletion}
-            command={command} onSlotSelectedChange={onSlotSelectedChange} active={active}
+            bar={bar} active={active}
             onDuplicatePhoto={setDuplicateWarning}
             onCropPendingChange={setCropPending}
             onDialogChange={setDialogOpen}

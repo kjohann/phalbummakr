@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { addPhotoSlot, addTextSlot, createAlbum, deserializeAlbum, photoUsage, placePhoto, serializeAlbum, setSlotText, type Album, type AlbumPorts } from "../core";
 import Workspace, { type AlbumCommand, type AlbumCommandName } from "./AlbumWorkspace";
 import PhotoBrowser from "./PhotoBrowser";
-import TextSlotControls from "./TextSlotControls";
+import { PhotoSlotTools } from "./SlotTools";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
 vi.mock("react-konva", () => ({
   Stage: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -34,17 +34,11 @@ vi.mock("konva/lib/shapes/Text", () => ({
 
 beforeEach(() => {
   HTMLElement.prototype.scrollIntoView = vi.fn();
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-    return this.classList.contains("text-slot-controls")
-      ? new DOMRect(0, 0, 440, 40)
-      : new DOMRect();
-  });
   // A 1278 x 800 editor gives a scale of 2 px per mm, so an A4 trim Page is 594 x 420 px.
   vi.stubGlobal("ResizeObserver", class {
     constructor(private callback: ResizeObserverCallback) {}
     observe(target: Element) {
-      const controls = target.classList.contains("text-slot-controls");
-      this.callback([{ target, contentRect: new DOMRectReadOnly(0, 0, controls ? 440 : 1278, controls ? 40 : 800) } as ResizeObserverEntry], this);
+      this.callback([{ target, contentRect: new DOMRectReadOnly(0, 0, 1278, 800) } as ResizeObserverEntry], this);
     }
     unobserve() {}
     disconnect() {}
@@ -58,21 +52,26 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** Stands in for the command bar, which sends commands to the workspace. */
+/** Stands in for the command bar, which sends commands to the workspace and hosts the selected Slot's tools. */
 function AlbumWorkspace(props: ComponentProps<typeof Workspace>) {
   const [command, setCommand] = useState<AlbumCommand>();
+  const [toolsHost, setToolsHost] = useState<HTMLElement | null>(null);
   const send = (name: AlbumCommandName) => setCommand((current) => ({ name, serial: (current?.serial ?? 0) + 1 }));
   return <>
-    <button type="button" onClick={() => send("add-photo-slot")}>Add Photo Slot</button>
-    <button type="button" onClick={() => send("add-text-slot")}>Add Text Slot</button>
-    {(["delete-slot", "album-settings", "add-spread"] as const).map((name) => (
-      <button key={name} type="button" onClick={() => send(name)}>Bar {name}</button>
-    ))}
-    <Workspace {...props} command={command} />
+    <div role="toolbar" aria-label="Commands">
+      <div ref={setToolsHost} />
+      <button type="button" onClick={() => send("add-photo-slot")}>Add Photo Slot</button>
+      <button type="button" onClick={() => send("add-text-slot")}>Add Text Slot</button>
+      {(["album-settings", "add-spread"] as const).map((name) => (
+        <button key={name} type="button" onClick={() => send(name)}>Bar {name}</button>
+      ))}
+    </div>
+    <Workspace {...props} bar={{ ...props.bar, command, toolsHost }} />
   </>;
 }
 
 const MenuHarness = AlbumWorkspace;
+const bar = () => within(screen.getByRole("toolbar", { name: "Commands" }));
 
 function disk() {
   const files = new Map<string, string>([["Existing", serializeAlbum(createAlbum({ name: "Existing", pageCount: 2 }))]]);
@@ -357,38 +356,6 @@ it("resizes the writing width of a sideways Text Slot using its vertical handle"
   await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].height * 420).toBeCloseTo(before + 42));
 });
 
-it("positions right-page text controls before the first ResizeObserver notification", () => {
-  vi.stubGlobal("ResizeObserver", class {
-    observe() {}
-    disconnect() {}
-  });
-  const bounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
-    .mockReturnValue(new DOMRect(0, 0, 440, 40));
-  render(<TextSlotControls anchor={{ x: 1100, y: 50, width: 100, height: 20 }}
-    viewport={{ width: 1278, height: 800 }}
-    style={{ fontFamily: "Arial", fontSize: 18, color: "#000000", bold: false, italic: false, underline: false, align: "left" }}
-    fonts={["Arial"]} fontError={null} disabled={false}
-    onStyle={vi.fn()} onRetryFonts={vi.fn()} onShortcut={vi.fn()} />);
-  const controls = screen.getByRole("toolbar", { name: "Text Slot controls" });
-  expect(controls.style.left).toBe("830px");
-  expect(controls.style.top).toBe("8px");
-
-  bounds.mockReturnValue(new DOMRect(0, 0, 500, 80));
-  fireEvent.change(screen.getByLabelText("Font size"), { target: { value: "custom" } });
-  expect(controls.style.left).toBe("770px");
-  expect(controls.style.top).toBe("78px");
-});
-
-it("keeps the text toolbar beside a tall Slot when it cannot fit above or below", () => {
-  render(<TextSlotControls anchor={{ x: 800, y: 10, width: 20, height: 380 }}
-    viewport={{ width: 1278, height: 400 }}
-    style={{ fontFamily: "Arial", fontSize: 18, color: "#000000", bold: false, italic: false, underline: false, align: "left" }}
-    fonts={["Arial"]} fontError={null} disabled={false}
-    onStyle={vi.fn()} onRetryFonts={vi.fn()} onShortcut={vi.fn()} />);
-  const controls = screen.getByRole("toolbar", { name: "Text Slot controls" });
-  expect(parseFloat(controls.style.left) + 440).toBeLessThanOrEqual(800);
-});
-
 it("fits Text Slot height to its content and persists growth and shrinkage", async () => {
   const { ports, files } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
@@ -404,14 +371,14 @@ it("fits Text Slot height to its content and persists growth and shrinkage", asy
   await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].height).toBeCloseTo(15.24 / 420));
 });
 
-it("attaches compact text controls to the box with presets and an exact point size", async () => {
+it("shows a Text Slot's style controls in the command bar with presets and an exact point size", async () => {
   const { ports, files } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
   fireEvent.click(await screen.findByRole("button", { name: "Add Text Slot" }));
-  const controls = screen.getByRole("toolbar", { name: "Text Slot controls" });
-  expect(screen.getByRole("group", { name: "Spread editor" }).contains(controls)).toBe(true);
-  expect(within(screen.getByRole("toolbar", { name: "Text Slot controls" })).getByLabelText("Font family")).toBeTruthy();
+  const controls = bar().getByRole("group", { name: "Text Slot tools" });
+  expect(within(screen.getByRole("group", { name: "Spread editor" })).queryByLabelText("Font family")).toBeNull();
+  expect(within(controls).getByLabelText("Font family")).toBeTruthy();
   fireEvent.change(within(controls).getByLabelText("Font size"), { target: { value: "36" } });
   fireEvent.change(within(controls).getByLabelText("Font size"), { target: { value: "custom" } });
   fireEvent.change(within(controls).getByLabelText("Font size (pt)"), { target: { value: "22.5" } });
@@ -441,7 +408,7 @@ it("toggles whole-box formatting with standard shortcuts while editing and selec
   expect((editor as HTMLTextAreaElement).style.textDecoration).toBe("underline");
   fireEvent.keyDown(editor, { key: "Escape" });
   fireEvent.keyDown(screen.getByRole("button", { name: "Page 1 Text Slot 1" }), { key: "b", metaKey: true });
-  fireEvent.keyDown(screen.getByRole("toolbar", { name: "Text Slot controls" }), { key: "i", ctrlKey: true });
+  fireEvent.keyDown(bar().getByRole("group", { name: "Text Slot tools" }), { key: "i", ctrlKey: true });
   await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0]).toMatchObject({
     text: "Caption", style: { bold: false, italic: false, underline: true },
   }));
@@ -906,7 +873,7 @@ function drag(element: Element, dx: number, dy: number) {
   fireEvent.mouseUp(window, { clientX: 100 + dx, clientY: 100 + dy });
 }
 
-it("attaches Photo Slot controls to the selected Slot and zooms the Crop in 10% steps", async () => {
+it("shows Photo Slot tools in the command bar and zooms the Crop in 10% steps", async () => {
   const { ports, files } = disk();
   render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
@@ -915,30 +882,75 @@ it("attaches Photo Slot controls to the selected Slot and zooms the Crop in 10% 
     photoDrop({ path: "a.jpg", width: 6000, height: 4000, orientation: 1 }));
   await waitForAutosave();
   const before = deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop;
-  const toolbar = within(screen.getByRole("toolbar", { name: "Photo Slot controls" }));
+  const toolbar = within(bar().getByRole("group", { name: "Photo Slot tools" }));
+  expect(within(screen.getByRole("region", { name: "Album Pages" })).queryByRole("button", { name: "Zoom in" })).toBeNull();
   for (const name of ["Zoom out", "Zoom in", "Rotate Slot counterclockwise", "Rotate Slot clockwise", "Delete Slot"]) {
     expect(toolbar.getByRole("button", { name })).toBeTruthy();
   }
   fireEvent.click(toolbar.getByRole("button", { name: "Zoom in" }));
   await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop.width)
     .toBeCloseTo(before.width / 1.1));
-  fireEvent.click(toolbar.getByRole("checkbox", { name: "Fit Photo" }));
+  const fit = toolbar.getByRole("button", { name: "Fit Photo" });
+  expect(fit.getAttribute("aria-pressed")).toBe("false");
+  fireEvent.click(fit);
+  expect(toolbar.getByRole("button", { name: "Fit Photo" }).getAttribute("aria-pressed")).toBe("true");
   expect(toolbar.queryByRole("button", { name: "Zoom in" })).toBeNull();
   expect(toolbar.queryByRole("button", { name: "Zoom out" })).toBeNull();
-  expect(document.querySelector(".page-toolbar")).toBeNull();
 });
 
-it("adds Rotate and Delete to a selected Text Slot's controls", async () => {
+it("leaves Fit and Zoom out of Photo Slot tools where Slots hold no content, as in Layout mode", () => {
+  render(<PhotoSlotTools fit={false} content={false} disabled={false}
+    onFit={vi.fn()} onZoom={vi.fn()} onRotate={vi.fn()} onDelete={vi.fn()} />);
+  expect(screen.getAllByRole("button").map((button) => button.getAttribute("aria-label")))
+    .toEqual(["Rotate Slot counterclockwise", "Rotate Slot clockwise", "Delete Slot"]);
+});
+
+it("removes the Slot's tools from the command bar when the selection is cleared", async () => {
+  const { ports } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Photo Slot" }));
+  expect(bar().getByRole("group", { name: "Photo Slot tools" })).toBeTruthy();
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Spreads" })).getByRole("button", { name: "Select Page 2" }));
+  expect(bar().queryByRole("group", { name: "Photo Slot tools" })).toBeNull();
+});
+
+it("shows Rotate and Delete with a selected Text Slot's tools in the command bar", async () => {
   const { ports } = disk();
   render(<AlbumWorkspace root="D:\\Photos" ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
   fireEvent.click(await screen.findByRole("button", { name: "Add Text Slot" }));
-  const toolbar = within(screen.getByRole("toolbar", { name: "Text Slot controls" }));
+  const toolbar = within(bar().getByRole("group", { name: "Text Slot tools" }));
   expect(toolbar.getByLabelText("Font family")).toBeTruthy();
   fireEvent.click(toolbar.getByRole("button", { name: "Rotate Slot clockwise" }));
-  expect(screen.getByRole("button", { name: "Page 1 Text Slot 1" }).parentElement).toBeTruthy();
+  expect(document.querySelector('[data-slot-rotation="90"]')).not.toBeNull();
   expect(toolbar.getByRole("button", { name: "Rotate Slot counterclockwise" })).toBeTruthy();
   expect(toolbar.getByRole("button", { name: "Delete Slot" })).toBeTruthy();
+});
+
+it("keeps focus and selection in the text being edited while its style changes from the command bar", async () => {
+  const { ports } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} fontPorts={{ list: async () => ["Arial", "Georgia"] }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Text Slot" }));
+  const editor = screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" }) as HTMLTextAreaElement;
+  fireEvent.change(editor, { target: { value: "Caption" } });
+  editor.focus();
+  editor.setSelectionRange(2, 5);
+  const toolbar = within(bar().getByRole("group", { name: "Text Slot tools" }));
+
+  for (const button of [toolbar.getByText("Format"), toolbar.getByRole("button", { name: "Rotate Slot clockwise" })]) {
+    const press = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+    fireEvent(button, press);
+    expect(press.defaultPrevented).toBe(true);
+  }
+
+  const family = await toolbar.findByRole("option", { name: "Georgia" }).then(() => toolbar.getByLabelText("Font family"));
+  family.focus();
+  fireEvent.change(family, { target: { value: "Georgia" } });
+  expect(document.activeElement).toBe(editor);
+  expect([editor.selectionStart, editor.selectionEnd]).toEqual([2, 5]);
+  expect(editor.style.fontFamily).toBe("Georgia");
 });
 
 it("pans with the centred crop handle while dragging elsewhere moves the Slot", async () => {
@@ -965,7 +977,7 @@ it("pans with the centred crop handle while dragging elsewhere moves the Slot", 
   const moved = deserializeAlbum(files.get("Existing")!).pages[0].slots[0];
   expect(moved.x).toBeCloseTo(before.x + 0.1);
   expect(moved.placement!.crop).toEqual(panned.placement!.crop);
-  fireEvent.click(screen.getByRole("checkbox", { name: "Fit Photo" }));
+  fireEvent.click(screen.getByRole("button", { name: "Fit Photo" }));
   expect(screen.queryByRole("button", { name: "Pan Photo in Page 1 Photo Slot 1" })).toBeNull();
 });
 
@@ -979,7 +991,7 @@ it("asks before deleting the selected Slot from the toolbar or Delete key and ca
   fireEvent.keyDown(screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" }), { key: "Delete" });
   expect(screen.queryByRole("dialog")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
-  fireEvent.click(within(screen.getByRole("toolbar", { name: "Photo Slot controls" })).getByRole("button", { name: "Delete Slot" }));
+  fireEvent.click(bar().getByRole("button", { name: "Delete Slot" }));
   let dialog = within(screen.getByRole("dialog", { name: "Delete Slot?" }));
   fireEvent.click(dialog.getByRole("button", { name: "Cancel" }));
   expect(screen.getByRole("button", { name: "Page 1 Photo Slot 2" })).toBeTruthy();
@@ -1053,14 +1065,14 @@ it("selects a right-clicked Slot and offers its toolbar actions", async () => {
 it("runs command bar commands on the open Album and reports Slot selection", async () => {
   const { ports } = disk();
   const onSlotSelectedChange = vi.fn();
-  render(<MenuHarness root="D:\\Photos" ports={ports} onSlotSelectedChange={onSlotSelectedChange} />);
+  render(<MenuHarness root="D:\\Photos" ports={ports} bar={{ onSlotSelectedChange }} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
   await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
   expect(screen.queryByRole("button", { name: "Album settings" })).toBeNull();
   expect(onSlotSelectedChange).toHaveBeenLastCalledWith(false);
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   expect(onSlotSelectedChange).toHaveBeenLastCalledWith(true);
-  fireEvent.click(screen.getByRole("button", { name: "Bar delete-slot" }));
+  fireEvent.click(bar().getByRole("button", { name: "Delete Slot" }));
   fireEvent.click(within(screen.getByRole("dialog", { name: "Delete Slot?" })).getByRole("button", { name: "Delete" }));
   await waitFor(() => expect(screen.queryByRole("button", { name: "Page 1 Photo Slot 1" })).toBeNull());
   expect(onSlotSelectedChange).toHaveBeenLastCalledWith(false);
@@ -1106,7 +1118,7 @@ it("reports Album commands as available while an autosave is pending, but not wh
   let failWrite: (cause: Error) => void = () => {};
   ports.write = vi.fn(() => new Promise<void>((resolve, reject) => { finishWrite = resolve; failWrite = reject; }));
   const onEditableChange = vi.fn();
-  render(<AlbumWorkspace root="D:\\Photos" ports={ports} onEditableChange={onEditableChange}
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} bar={{ onEditableChange }}
     document={{ path: "Existing", album: createAlbum({ name: "Existing" }) }} />);
   expect(onEditableChange).toHaveBeenLastCalledWith(true);
   vi.useFakeTimers();
@@ -1374,7 +1386,7 @@ it("swaps placed Photos through the Photo drag handle without moving their Slots
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 2" }),
     photoDrop({ path: "b.jpg", width: 4000, height: 6000, orientation: 1 }));
-  fireEvent.click(screen.getByRole("checkbox", { name: "Fit Photo" }));
+  fireEvent.click(screen.getByRole("button", { name: "Fit Photo" }));
   await waitForAutosave();
   const before = deserializeAlbum(files.get("Existing")!).pages[0].slots;
   const dataTransfer = placementTransfer();
@@ -1901,7 +1913,7 @@ it("keeps Crop local during a pan gesture, commits at release, and persists Fit"
   expect(zoomed.width).toBeLessThan(panned.width);
   expect(ports.write).toHaveBeenCalledTimes(writesBeforeZoom + 1);
 
-  fireEvent.click(screen.getByRole("checkbox", { name: "Fit Photo" }));
+  fireEvent.click(screen.getByRole("button", { name: "Fit Photo" }));
   await act(() => vi.advanceTimersByTimeAsync(500));
   expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.fit).toBe(true);
   expect(screen.queryByRole("button", { name: "Pan Photo in Page 1 Photo Slot 1" })).toBeNull();

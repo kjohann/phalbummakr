@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 
 export interface BarCommand {
   id: string;
@@ -16,6 +16,8 @@ export interface BarCommand {
 interface Props {
   context: BarCommand[];
   document: BarCommand[];
+  /** Receives the element in the middle group where the selected Slot's tools are rendered. */
+  toolsRef?: (element: HTMLDivElement | null) => void;
 }
 
 function shortcutLabel(shortcut: string) {
@@ -30,9 +32,10 @@ function CommandButton({ command, measure }: { command: BarCommand; measure: boo
 }
 
 /** Which overflowable commands must move into the "⋯" menu for the bar to fit. */
-function overflowing(bar: HTMLElement, measure: HTMLElement, more: HTMLElement, commands: BarCommand[]): string[] {
+function overflowing(bar: HTMLElement, measure: HTMLElement, more: HTMLElement, tools: HTMLElement, commands: BarCommand[]): string[] {
   const available = bar.clientWidth;
-  let needed = measure.offsetWidth;
+  // The tools are rendered from outside the bar, so the invisible copy cannot lay them out.
+  let needed = measure.offsetWidth + tools.scrollWidth;
   if (needed <= available) return [];
   const gap = parseFloat(getComputedStyle(measure.querySelector(".command-group") ?? measure).columnGap) || 0;
   needed += more.offsetWidth + gap;
@@ -95,10 +98,17 @@ function OverflowMenu({ commands }: { commands: BarCommand[] }) {
   </div>;
 }
 
-export default function CommandBar({ context, document: documentCommands }: Props) {
+export default function CommandBar({ context, document: documentCommands, toolsRef }: Props) {
   const barRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef<HTMLSpanElement>(null);
+  const toolsElement = useRef<HTMLDivElement | null>(null);
+  const toolsRefRef = useRef(toolsRef);
+  toolsRefRef.current = toolsRef;
+  const setTools = useCallback((element: HTMLDivElement | null) => {
+    toolsElement.current = element;
+    toolsRefRef.current?.(element);
+  }, []);
   const [hidden, setHidden] = useState<string[]>([]);
   const all = [...context, ...documentCommands];
   const commandsRef = useRef(all);
@@ -109,15 +119,17 @@ export default function CommandBar({ context, document: documentCommands }: Prop
     const bar = barRef.current;
     const measure = measureRef.current;
     const more = moreRef.current;
-    if (!bar || !measure || !more) return;
+    const tools = toolsElement.current;
+    if (!bar || !measure || !more || !tools) return;
     const update = () => {
-      const next = overflowing(bar, measure, more, commandsRef.current);
+      const next = overflowing(bar, measure, more, tools, commandsRef.current);
       setHidden((current) => current.join("|") === next.join("|") ? current : next);
     };
     update();
     const observer = new ResizeObserver(update);
     observer.observe(bar);
     observer.observe(measure);
+    observer.observe(tools);
     return () => observer.disconnect();
   }, [layoutKey]);
 
@@ -125,6 +137,7 @@ export default function CommandBar({ context, document: documentCommands }: Prop
   const overflowed = all.filter((command) => hidden.includes(command.id));
   const groups = (measure: boolean) => <>
     <div className="command-group command-context">
+      {!measure && <div className="command-tools" ref={setTools} />}
       {shown(context, measure).map((command) => <CommandButton key={command.id} command={command} measure={measure} />)}
     </div>
     <div className="command-group command-document">

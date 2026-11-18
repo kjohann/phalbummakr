@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Group, Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva";
 import {
   addPage, addPhotoSlot, addTextSlot, albumSpreads, deletePage, deleteSlot, duplicatePage, movePage, moveSlot, pageDimensions,
@@ -10,10 +11,10 @@ import { hasPhotoDrag, readPhotoDrag } from "./photoDrag";
 import { snapSlot, type SnapGuide } from "./slotSnapping";
 import type { FontPorts } from "./tauriFontPorts";
 import { fitTextSlots, measureTextSlot, textFontStyle } from "./textLayout";
-import TextSlotControls from "./TextSlotControls";
-import { PhotoSlotControls, SlotActions } from "./SlotToolbar";
+import TextSlotTools from "./TextSlotTools";
+import { PhotoSlotTools, SlotActions } from "./SlotTools";
 import ModalDialog from "./ModalDialog";
-import type { AlbumCommand } from "./AlbumWorkspace";
+import type { CommandBarLink } from "./AlbumWorkspace";
 
 const PLACEMENT_DRAG_TYPE = "application/x-phalbummakr-placement";
 
@@ -35,8 +36,7 @@ interface Props {
   setConfirmSpreadDeletion?: (value: boolean) => Promise<void>;
   confirmSlotDeletion: boolean;
   setConfirmSlotDeletion?: (value: boolean) => Promise<void>;
-  command?: AlbumCommand;
-  onSlotSelectedChange?: (selected: boolean) => void;
+  bar: CommandBarLink;
   onDialogChange: (open: boolean) => void;
   active?: boolean;
 }
@@ -95,7 +95,8 @@ function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, trimHeig
   };
 }
 
-export default function AlbumView({ album: savedAlbum, onChange, disabled, textDisabled, root, photoPorts, fontPorts, onDuplicatePhoto, onCropPendingChange, confirmSpreadDeletion, setConfirmSpreadDeletion, confirmSlotDeletion, setConfirmSlotDeletion, command, onSlotSelectedChange, onDialogChange, active = true }: Props) {
+export default function AlbumView({ album: savedAlbum, onChange, disabled, textDisabled, root, photoPorts, fontPorts, onDuplicatePhoto, onCropPendingChange, confirmSpreadDeletion, setConfirmSpreadDeletion, confirmSlotDeletion, setConfirmSlotDeletion, bar, onDialogChange, active = true }: Props) {
+  const { command, toolsHost, onSlotSelectedChange } = bar;
   const viewportRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLElement>(null);
   const draggedId = useRef<string | null>(null);
@@ -469,9 +470,15 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
     changeAlbum((current) => deleteSlot(current, pageId, slotId));
   }
 
-  const selectedAnchor = selectedSlot
-    ? slotRect(selectedSlot, originX + (spread.left?.id === selectedPage.id ? 0 : pageWidth + gap) + bleedMm * scale)
-    : null;
+  const selectedTextEditor = useRef<HTMLTextAreaElement | null>(null);
+  // Set when focus leaves the text being edited for a Slot tool, so it can return once the style is chosen.
+  const returnToTextEditor = useRef(false);
+
+  function restoreTextEditorFocus() {
+    if (!returnToTextEditor.current) return;
+    returnToTextEditor.current = false;
+    selectedTextEditor.current?.focus({ preventScroll: true });
+  }
 
   function rotateSelectedSlot(turn: 90 | -90) {
     if (!selectedSlot || disabled) return;
@@ -522,8 +529,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
   useEffect(() => {
     if (!command || handledCommand.current === command.serial) return;
     handledCommand.current = command.serial;
-    if (command.name === "delete-slot") requestDeleteSlot();
-    else if (command.name === "add-spread") addSpreadAtEnd();
+    if (command.name === "add-spread") addSpreadAtEnd();
     else if (command.name === "add-photo-slot") addSlot("photo", selectedPage.id);
     else if (command.name === "add-text-slot") addSlot("text", selectedPage.id);
   });
@@ -790,6 +796,11 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
               )}
               {slot.type === "text" && editingText === targetId && (
                 <textarea className="slot-text-editor" aria-label={`Edit ${name}`} autoFocus value={slot.text} disabled={textDisabled}
+                  ref={selectedTextEditor}
+                  onFocus={() => { returnToTextEditor.current = false; }}
+                  onBlur={(event) => {
+                    returnToTextEditor.current = event.relatedTarget instanceof Node && toolsHost?.contains(event.relatedTarget) === true;
+                  }}
                   style={{
                     ...(slot.rotation ? {
                       inset: "auto", left: "50%", top: "50%",
@@ -900,22 +911,22 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
             </svg>
           );
         })()}
-        {scale > 0 && selectedSlot?.type === "text" && (
-          <TextSlotControls key={`${selectedPage.id}:${selectedSlot.id}`} style={selectedSlot.style}
-            anchor={selectedAnchor!}
-            viewport={viewport} fonts={fonts} fontError={fontError} disabled={textDisabled}
-            onShortcut={(event) => toggleTextShortcut(event, selectedPage.id, selectedSlot)}
-            onStyle={changeTextStyle} onRetryFonts={() => { setFontError(null); setFontRetry((value) => value + 1); }}>
-            <SlotActions disabled={disabled} onRotate={(turn) => rotateSelectedSlot(turn)} onDelete={() => requestDeleteSlot()} />
-          </TextSlotControls>
-        )}
-        {scale > 0 && selectedSlot?.type === "photo" && (
-          <PhotoSlotControls key={`${selectedPage.id}:${selectedSlot.id}`} anchor={selectedAnchor!} viewport={viewport}
-            fit={selectedSlot.placement?.fit ?? null} disabled={disabled}
-            onFit={(fit) => changeAlbum((current) => setPlacementFit(current, selectedPage.id, selectedSlot.id, fit))}
-            onZoom={(factor) => zoomPlacementBy(selectedPage.id, selectedSlot.id, factor)}
-            onRotate={(turn) => rotateSelectedSlot(turn)} onDelete={() => requestDeleteSlot()} />
-        )}
+        {active && toolsHost && selectedSlot && createPortal(<Fragment key={`${selectedPage.id}:${selectedSlot.id}`}>
+          {selectedSlot.type === "text" ? (
+            <TextSlotTools style={selectedSlot.style}
+              fonts={fonts} fontError={fontError} disabled={textDisabled}
+              onShortcut={(event) => toggleTextShortcut(event, selectedPage.id, selectedSlot)}
+              onStyle={changeTextStyle} onCommit={restoreTextEditorFocus}
+              onRetryFonts={() => { setFontError(null); setFontRetry((value) => value + 1); }}>
+              <SlotActions disabled={disabled} onRotate={rotateSelectedSlot} onDelete={() => requestDeleteSlot()} />
+            </TextSlotTools>
+          ) : (
+            <PhotoSlotTools fit={selectedSlot.placement?.fit ?? null} disabled={disabled}
+              onFit={(fit) => changeAlbum((current) => setPlacementFit(current, selectedPage.id, selectedSlot.id, fit))}
+              onZoom={(factor) => zoomPlacementBy(selectedPage.id, selectedSlot.id, factor)}
+              onRotate={rotateSelectedSlot} onDelete={() => requestDeleteSlot()} />
+          )}
+        </Fragment>, toolsHost)}
       </div>
       <div className="workspace-footer">
         <span>PAGE {visiblePageIndex + 1} OF {album.pages.length}</span>

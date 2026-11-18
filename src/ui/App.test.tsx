@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createAlbum, serializeAlbum } from "../core";
 import App, { type DocumentPorts } from "./App";
@@ -42,25 +43,32 @@ vi.mock("@tauri-apps/api/menu", () => ({
   } },
 }));
 vi.mock("./AlbumWorkspace", () => ({
-  default: ({ document, suspended, active = true, onBusyChange, command, onSlotSelectedChange, onEditableChange }: {
+  default: ({ document, suspended, active = true, onBusyChange, bar: { command, onSlotSelectedChange, onEditableChange, toolsHost } = {} }: {
     document: { album: { title: string } };
     suspended?: boolean;
     active?: boolean;
     onBusyChange: (busy: boolean) => void;
-    command?: { name: string; serial: number };
-    onSlotSelectedChange?: (selected: boolean) => void;
-    onEditableChange?: (editable: boolean) => void;
+    bar?: {
+      command?: { name: string; serial: number };
+      onSlotSelectedChange?: (selected: boolean) => void;
+      onEditableChange?: (editable: boolean) => void;
+      toolsHost?: HTMLElement | null;
+    };
   }) => {
     const [title, setTitle] = useState(document.album.title);
+    const [selected, setSelected] = useState(false);
     useState(() => { if (!active) native.inactiveMounts++; });
     useEffect(() => onEditableChange?.(true), [onEditableChange]);
+    useEffect(() => onSlotSelectedChange?.(selected), [selected, onSlotSelectedChange]);
     return <><p>{title}</p>
       {command && <p>Command {command.name} {command.serial}</p>}
       <button type="button" disabled={suspended} onClick={() => setTitle("Edited Album")}>Edit mock Album</button>
       <button type="button" onClick={() => onBusyChange(true)}>Begin mock edit</button>
       <button type="button" onClick={() => onBusyChange(false)}>Finish mock save</button>
-      <button type="button" onClick={() => onSlotSelectedChange?.(true)}>Select mock Slot</button>
+      <button type="button" onClick={() => setSelected(true)}>Select mock Slot</button>
+      <button type="button" onClick={() => setSelected(false)}>Clear mock Slot</button>
       <button type="button" onClick={() => onEditableChange?.(false)}>Block mock edits</button>
+      {selected && active && toolsHost && createPortal(<button type="button">Mock Slot tool</button>, toolsHost)}
       {!active && <p>Album workspace inactive</p>}
     </>;
   },
@@ -165,23 +173,29 @@ it("routes command bar commands to the open Album, keeping only the native File 
   expect(screen.getByText("Command album-settings 3")).toBeTruthy();
   fireEvent.click(barButton("Add Spread"));
   expect(screen.getByText("Command add-spread 4")).toBeTruthy();
+});
 
+it("shows the selected Slot's tools instead of the default commands in the middle of the bar", async () => {
+  render(<App ports={openAlbumPorts()} />);
+  await screen.findByText("Original");
+  const middle = () => screen.getByRole("toolbar", { name: "Commands" }).querySelector(".command-context")!;
   fireEvent.click(screen.getByRole("button", { name: "Select mock Slot" }));
-  expect(bar().queryByRole("button", { name: "Add Photo Slot" })).toBeNull();
-  expect(barButton("Delete").getAttribute("aria-keyshortcuts")).toBe("Delete");
-  fireEvent.click(barButton("Delete"));
-  expect(screen.getByText("Command delete-slot 5")).toBeTruthy();
+  expect(Array.from(middle().querySelectorAll("button"), (button) => button.textContent)).toEqual(["Mock Slot tool"]);
+  expect(barButton("Album Settings…")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Clear mock Slot" }));
+  expect(Array.from(middle().querySelectorAll("button"), (button) => button.textContent))
+    .toEqual(["Add Photo Slot", "Add Text Slot", "Add Spread"]);
 });
 
 it("keeps Album commands enabled while an autosave is pending but not while edits are blocked", async () => {
   render(<App ports={openAlbumPorts()} />);
   await screen.findByText("Original");
-  fireEvent.click(screen.getByRole("button", { name: "Select mock Slot" }));
-  await waitFor(() => expect(barButton("Delete").disabled).toBe(false));
+  await waitFor(() => expect(barButton("Add Spread").disabled).toBe(false));
   fireEvent.click(screen.getByRole("button", { name: "Begin mock edit" }));
-  expect(["Delete", "Add Spread", "Album Settings…"].map((name) => barButton(name).disabled)).toEqual([false, false, false]);
+  expect(["Add Photo Slot", "Add Spread", "Album Settings…"].map((name) => barButton(name).disabled)).toEqual([false, false, false]);
   fireEvent.click(screen.getByRole("button", { name: "Block mock edits" }));
-  expect(["Delete", "Add Spread", "Album Settings…"].map((name) => barButton(name).disabled)).toEqual([true, true, true]);
+  expect(["Add Photo Slot", "Add Spread", "Album Settings…"].map((name) => barButton(name).disabled)).toEqual([true, true, true]);
 });
 
 const modeGroup = () => within(screen.getByRole("group", { name: "Mode" }));

@@ -629,6 +629,7 @@ body {
 }
 
 .command-context {
+  min-width: 0;
   flex: 1;
 }
 
@@ -1232,58 +1233,44 @@ body {
   pointer-events: none;
 }
 
-.slot-controls {
-  position: absolute;
-  z-index: 4;
+/* The selected Slot's tools, rendered into the middle of the command bar. */
+.command-tools,
+.slot-tools {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 4px;
-  padding: 6px;
-  border: 1px solid #b9c3b9;
-  border-radius: 6px;
-  background: #f7f8f4;
-  box-shadow: 0 3px 12px #1e292626;
-  color: #242a27;
+}
+
+.command-tools:empty {
+  display: none;
+}
+
+.slot-tools .command {
+  min-width: 28px;
+  padding: 0 8px;
+}
+
+.text-slot-tools select,
+.text-slot-tools input {
+  height: 28px;
+  padding: 0 4px;
+  font: inherit;
   font-size: 12px;
 }
 
-.slot-controls {
-  flex-wrap: wrap;
-  /* Intrinsic width keeps wrapping independent of the computed left offset. */
-  width: max-content;
-  max-width: calc(100% - 16px);
+.text-slot-tools select[aria-label="Font family"] {
+  width: 135px;
+  min-width: 70px;
+  flex-shrink: 1;
 }
 
-.slot-controls .button-quiet {
-  min-width: 28px;
-  padding: 4px 7px;
-  font-size: 13px;
-}
-
-.slot-controls-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0 4px;
-}
-
-.text-slot-controls select,
-.text-slot-controls input {
-  padding: 4px;
-  font: inherit;
-}
-
-.text-slot-controls select[aria-label="Font family"] {
-  max-width: 135px;
-}
-
-.text-slot-controls input[type="number"] {
+.text-slot-tools input[type="number"] {
   width: 62px;
 }
 
-.text-slot-controls input[type="color"] {
+.text-slot-tools input[type="color"] {
   width: 28px;
-  height: 28px;
   padding: 2px;
 }
 
@@ -1292,19 +1279,28 @@ body {
 }
 
 .text-format-menu summary {
-  padding: 5px;
-  cursor: pointer;
+  display: flex;
+  align-items: center;
+  list-style: none;
+}
+
+.text-format-menu summary::-webkit-details-marker {
+  display: none;
 }
 
 .text-format-options {
   position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
   display: grid;
+  min-width: 160px;
   gap: 10px;
   padding: 12px;
-  border: 1px solid #b9c3b9;
+  border: 1px solid #c5ccc1;
   border-radius: 6px;
-  background: #f7f8f4;
+  background: white;
   box-shadow: 0 3px 12px #1e292626;
+  font-size: 12px;
 }
 
 .text-format-options label {
@@ -1320,9 +1316,9 @@ body {
   font-size: 10px;
 }
 
-.text-controls-error {
-  flex-basis: 100%;
+.slot-tools-error {
   color: #7a4632;
+  font-size: 12px;
 }
 
 .photo-tile[draggable="true"] {

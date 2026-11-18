@@ -5,7 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { createAlbum, deserializeAlbum, serializeAlbum, type Album } from "../core";
-import AlbumWorkspace, { type AlbumCommand, type AlbumCommandName } from "./AlbumWorkspace";
+import AlbumWorkspace, { type AlbumCommand, type AlbumCommandName, type CommandBarLink } from "./AlbumWorkspace";
 import CommandBar, { type BarCommand } from "./CommandBar";
 import type { Mode } from "./modes";
 import PhotoBrowser from "./PhotoBrowser";
@@ -67,16 +67,14 @@ interface DeletionPreferences {
   setConfirmSlotDeletion: (value: boolean) => Promise<void>;
 }
 
-function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, suspended, modes, command, onSlotSelectedChange, onEditableChange, preferences, photoPane, onPhotoPaneChange }: {
+function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, suspended, modes, bar, preferences, photoPane, onPhotoPaneChange }: {
   document: OpenDocument;
   onBusyChange: (busy: boolean) => void;
   onTitleChange: (album: Album | null) => void;
   hidden: boolean;
   suspended: boolean;
   modes: PaneModes;
-  command: AlbumCommand | undefined;
-  onSlotSelectedChange: (selected: boolean) => void;
-  onEditableChange: (editable: boolean) => void;
+  bar: CommandBarLink;
   preferences: DeletionPreferences;
   photoPane: PhotoPaneSettings;
   onPhotoPaneChange: (change: Partial<PhotoPaneSettings>) => void;
@@ -95,9 +93,8 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
       </PhotoPane>
       {/* Hidden rather than unmounted, so Album mode keeps its Spread and Slot selection. */}
       <div className="mode-view" hidden={mode !== "album"}>
-        <AlbumWorkspace root={document.root} document={document} suspended={suspended} active={mode === "album"}
-          onBusyChange={onBusyChange} onAlbumChange={reportAlbum} command={command}
-          onSlotSelectedChange={onSlotSelectedChange} onEditableChange={onEditableChange} {...preferences} />
+        <AlbumWorkspace root={document.root} document={document} suspended={suspended} active={mode === "album" && !hidden}
+          onBusyChange={onBusyChange} onAlbumChange={reportAlbum} bar={bar} {...preferences} />
       </div>
       {mode === "layouts" && <section className="workspace mode-placeholder" aria-label="Layouts">
         <h2>Layouts</h2><p>Creating and editing Layouts arrives with issue 010.</p>
@@ -124,6 +121,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
   const photoPaneRef = useRef(DEFAULT_PHOTO_PANE);
   const [command, setCommand] = useState<AlbumCommand | undefined>();
   const [slotSelected, setSlotSelected] = useState(false);
+  const [toolsHost, setToolsHost] = useState<HTMLElement | null>(null);
   const [albumEditable, setAlbumEditable] = useState(false);
   const [modeState, setModeState] = useState<{ documentId: number | undefined; mode: Mode }>({ documentId: undefined, mode: "album" });
   const commandSerial = useRef(0);
@@ -423,10 +421,9 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
   const albumCommandsEnabled = albumOpen && albumEditable && !transitioning && !restoring && !preferencesOpen;
   const albumCommand = (name: AlbumCommandName, label: string, extra: Partial<BarCommand> = {}): BarCommand =>
     ({ id: name, label, disabled: !albumCommandsEnabled, run: () => actions.current.albumCommand(name), ...extra });
-  const contextCommands: BarCommand[] = albumOpen && mode === "album" ? [
-    ...(slotSelected
-      ? [albumCommand("delete-slot", "Delete", { shortcut: "Delete" })]
-      : [albumCommand("add-photo-slot", "Add Photo Slot"), albumCommand("add-text-slot", "Add Text Slot")]),
+  const contextCommands: BarCommand[] = albumOpen && mode === "album" && !slotSelected ? [
+    albumCommand("add-photo-slot", "Add Photo Slot"),
+    albumCommand("add-text-slot", "Add Text Slot"),
     albumCommand("add-spread", "Add Spread", { overflow: 1 }),
   ] : [];
   const documentCommands: BarCommand[] = albumOpen ? [
@@ -438,7 +435,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
 
   return (
     <main className="app-shell">
-      <CommandBar context={contextCommands} document={documentCommands} />
+      <CommandBar context={contextCommands} document={documentCommands} toolsRef={setToolsHost} />
       {error && <p className="error-banner" role="alert">{error}</p>}
       {preferencesOpen && <ModalDialog label="Preferences" closeDisabled={preferenceSaving} onClose={() => setPreferencesOpen(false)}>
           <h1>Preferences</h1>
@@ -486,7 +483,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
       {document && <DocumentWorkspace key={document.id} document={document} onBusyChange={reportBusy}
         onTitleChange={reportTitle} hidden={draft !== null} suspended={transitioning}
         modes={{ current: mode, onChange: setMode, disabled: preferencesOpen }}
-        command={command} onSlotSelectedChange={setSlotSelected} onEditableChange={setAlbumEditable}
+        bar={{ command, toolsHost, onSlotSelectedChange: setSlotSelected, onEditableChange: setAlbumEditable }}
         preferences={{ confirmSpreadDeletion, setConfirmSpreadDeletion, confirmSlotDeletion, setConfirmSlotDeletion }}
         photoPane={photoPane} onPhotoPaneChange={changePhotoPane} />}
     </main>
