@@ -3,16 +3,17 @@ import { createPortal } from "react-dom";
 import { Group, Layer, Rect, Stage } from "react-konva";
 import {
   addPhotoSlot, addTextSlot, deleteLayout, deleteSlot, duplicateLayout, madeForOtherAspectRatio, newLayout, pageAspectRatio, pageDimensions,
-  readLayoutLibrary, rotateSlot, serializeLayoutLibrary, setLayoutSlots, setSlotPlaceholder, setTextStyle, POINTS_PER_MM, TEXT_LINE_HEIGHT,
-  type Album, type Layout, type LayoutLibrary, type LayoutPorts, type PageFormat, type Slot, type TextStyle,
+  rotateSlot, setLayoutSlots, setSlotPlaceholder, setTextStyle, POINTS_PER_MM, TEXT_LINE_HEIGHT,
+  type Album, type Layout, type PageFormat, type Slot, type TextStyle,
 } from "../core";
+import LayoutLibraryPane from "./LayoutLibraryPane";
 import ModalDialog from "./ModalDialog";
 import { applySlotDrag, LayerPage, SnapGuides, TextContent, type SlotDrag } from "./pageCanvas";
 import { PhotoSlotTools, SlotActions } from "./SlotTools";
 import { tauriFontPorts, type FontPorts } from "./tauriFontPorts";
-import { tauriLayoutPorts } from "./tauriLayoutPorts";
 import { fitTextSlots } from "./textLayout";
 import TextSlotTools from "./TextSlotTools";
+import type { LayoutLibraryState } from "./useLayoutLibrary";
 
 export type LayoutCommandName = "new-layout" | "duplicate-layout" | "delete-layout" | "add-photo-slot" | "add-text-slot";
 
@@ -38,17 +39,16 @@ export interface LayoutBarLink {
 }
 
 interface Props {
-  root: string;
   /** The open Album's Page Format: the canvas uses its aspect ratio, Bleed and Safe Zone. */
   format: PageFormat;
-  ports?: LayoutPorts;
+  /** The Layout Library, shared with Album mode. */
+  layouts: LayoutLibraryState;
   fontPorts?: FontPorts;
-  /** Where the Layout Library is listed: the Photo pane. */
+  /** Where the Layout Library is listed: the Side pane. */
   paneHost: HTMLElement | null;
   /** False while another mode is shown; the hidden workspace then leaves keyboard shortcuts and the bar alone. */
   active: boolean;
   bar?: LayoutBarLink;
-  onBusyChange?: (busy: boolean) => void;
   confirmSlotDeletion?: boolean;
   setConfirmSlotDeletion?: (value: boolean) => Promise<void>;
 }
@@ -60,47 +60,9 @@ function layoutAlbum(layout: Layout, format: PageFormat): Album {
   return { schemaVersion: 2, title: "", pageFormat: format, pages: [{ id: LAYOUT_PAGE, background: "#ffffff", slots: layout.slots }] };
 }
 
-function plural(count: number, noun: string) {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
-}
-
-function layoutLabel(layout: Layout, index: number) {
-  const photos = layout.slots.filter((slot) => slot.type === "photo").length;
-  const texts = layout.slots.length - photos;
-  const parts = [photos && plural(photos, "Photo Slot"), texts && plural(texts, "Text Slot")].filter(Boolean);
-  return `Layout ${index + 1}: ${parts.length ? parts.join(", ") : "empty"}`;
-}
-
-function LayoutPreview({ layout }: { layout: Layout }) {
-  const width = 100 * layout.aspectRatio;
-  return (
-    <svg className="layout-preview" viewBox={`0 0 ${width} 100`} preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-      <rect className="layout-preview-page" x={0} y={0} width={width} height={100} />
-      {layout.slots.map((slot) => {
-        const rect = { x: slot.x * width, y: slot.y * 100, width: slot.width * width, height: slot.height * 100 };
-        return slot.type === "photo"
-          ? <rect key={slot.id} className="layout-preview-photo" {...rect} />
-          : <g key={slot.id}>
-            <rect className="layout-preview-text" {...rect} />
-            <line className="layout-preview-text-line" x1={rect.x + rect.width * 0.2} x2={rect.x + rect.width * 0.8}
-              y1={rect.y + rect.height / 2} y2={rect.y + rect.height / 2} />
-          </g>;
-      })}
-    </svg>
-  );
-}
-
-export default function LayoutWorkspace({ root, format, ports = tauriLayoutPorts, fontPorts = tauriFontPorts, paneHost, active, bar = {}, onBusyChange, confirmSlotDeletion = true, setConfirmSlotDeletion }: Props) {
+export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFontPorts, paneHost, active, bar = {}, confirmSlotDeletion = true, setConfirmSlotDeletion }: Props) {
   const { command, toolsHost, onStateChange } = bar;
-  const [library, setLibraryState] = useState<LayoutLibrary | null>(null);
-  const libraryRef = useRef<LayoutLibrary | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [reload, setReload] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [saveStatus, setSaveStatus] = useState<"saved" | "pending" | "saving" | "error">("saved");
-  const [retry, setRetry] = useState(0);
-  const savedJson = useRef<string | null>(null);
-  const saveInFlight = useRef(false);
+  const { library, disabled, error, change: changeLibrary } = layouts;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
   /** The Text Slot whose placeholder is being edited. */
@@ -121,8 +83,12 @@ export default function LayoutWorkspace({ root, format, ports = tauriLayoutPorts
   const viewportRef = useRef<HTMLDivElement>(null);
   const stopSlotDrag = useRef<(() => void) | null>(null);
   const handledCommand = useRef(command?.serial);
-  const formatRef = useRef(format);
-  formatRef.current = format;
+  // Layout mode opens on the first Layout, once the Layout Library is loaded.
+  const [selectionStarted, setSelectionStarted] = useState(false);
+  if (library && !selectionStarted) {
+    setSelectionStarted(true);
+    setSelectedId(library.layouts[0]?.id ?? null);
+  }
 
   /** Selecting another Slot, or none, ends editing a placeholder. */
   function selectSlot(slotId: string | null) {
@@ -130,57 +96,6 @@ export default function LayoutWorkspace({ root, format, ports = tauriLayoutPorts
     setSelectedSlotId(slotId);
   }
 
-  function setLibrary(next: LayoutLibrary | null) {
-    libraryRef.current = next;
-    setLibraryState(next);
-  }
-
-  useEffect(() => {
-    let current = true;
-    setLoadError(null);
-    ports.read(root).then((json) => {
-      if (!current) return;
-      const loaded = readLayoutLibrary(json ?? null, formatRef.current);
-      // A seeded Library is only written once it is edited, so `.phalbummakr/` is not created just by looking.
-      savedJson.current = serializeLayoutLibrary(loaded);
-      setLibrary(loaded);
-      setSelectedId(loaded.layouts[0]?.id ?? null);
-    }).catch((cause: unknown) => {
-      if (current) setLoadError(`Could not load the Layout Library: ${String(cause)}`);
-    });
-    return () => { current = false; };
-  }, [root, ports, reload]);
-
-  useEffect(() => {
-    if (!library || saveInFlight.current || saveStatus === "error") return;
-    const json = serializeLayoutLibrary(library);
-    if (json === savedJson.current) {
-      setSaveStatus("saved");
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      saveInFlight.current = true;
-      setSaveStatus("saving");
-      ports.write(root, json).then(() => {
-        saveInFlight.current = false;
-        savedJson.current = json;
-        const latest = libraryRef.current;
-        setSaveStatus(latest && serializeLayoutLibrary(latest) === json ? "saved" : "pending");
-      }).catch((cause: unknown) => {
-        saveInFlight.current = false;
-        setError(`Could not save the Layout Library: ${String(cause)}`);
-        setSaveStatus("error");
-      });
-    }, 500);
-    return () => window.clearTimeout(timer);
-  }, [library, root, ports, retry, saveStatus]);
-
-  useEffect(() => {
-    onBusyChange?.(saveStatus !== "saved");
-  }, [saveStatus, onBusyChange]);
-  useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
-
-  const disabled = library === null || saveStatus === "saving" || saveStatus === "error";
   const layoutIndex = library?.layouts.findIndex((layout) => layout.id === selectedId) ?? -1;
   const layout = layoutIndex >= 0 ? library!.layouts[layoutIndex] : null;
   const savedAlbum = useMemo(() => layout ? layoutAlbum(layout, format) : null, [layout, format]);
@@ -235,22 +150,6 @@ export default function LayoutWorkspace({ root, format, ports = tauriLayoutPorts
     onStateChange?.({ editable, layoutSelected, slotSelected });
   }, [editable, layoutSelected, slotSelected, onStateChange]);
   useEffect(() => () => onStateChange?.({ editable: false, layoutSelected: false, slotSelected: false }), [onStateChange]);
-
-  function changeLibrary(update: (library: LayoutLibrary) => LayoutLibrary): boolean {
-    const previous = libraryRef.current;
-    if (!previous || disabled) return false;
-    try {
-      const next = update(previous);
-      serializeLayoutLibrary(next);
-      setError(null);
-      setSaveStatus(saveInFlight.current ? "saving" : "pending");
-      setLibrary(next);
-      return true;
-    } catch (cause) {
-      setError(`Could not update the Layout Library: ${String(cause)}`);
-      return false;
-    }
-  }
 
   function changeLayout(update: (album: Album) => Album) {
     const id = selectedId;
@@ -313,7 +212,7 @@ export default function LayoutWorkspace({ root, format, ports = tauriLayoutPorts
 
   function confirmDeleteLayout() {
     const id = layoutDeleteTarget;
-    const current = libraryRef.current;
+    const current = library;
     setLayoutDeleteTarget(null);
     if (!id || !current) return;
     const index = current.layouts.findIndex((item) => item.id === id);
@@ -407,7 +306,7 @@ export default function LayoutWorkspace({ root, format, ports = tauriLayoutPorts
   useEffect(() => {
     if (!command || handledCommand.current === command.serial) return;
     handledCommand.current = command.serial;
-    const current = libraryRef.current;
+    const current = library;
     if (!current || disabled) return;
     if (command.name === "new-layout") {
       const created = newLayout(current, pageAspectRatio(format));
@@ -444,43 +343,16 @@ export default function LayoutWorkspace({ root, format, ports = tauriLayoutPorts
   }, [canvasMenu]);
 
   const pane = (
-    <div className="layout-pane">
-      <div className="photo-browser-header">
-        <h2 className="layout-pane-title">Layouts</h2>
-        {library && <span className="photo-count">{plural(library.layouts.length, "Layout")}</span>}
-      </div>
-      {loadError ? (
-        <div className="photo-empty" role="alert">
-          {loadError}{" "}
-          <button type="button" className="button-quiet" onClick={() => setReload((value) => value + 1)}>Retry</button>
-        </div>
-      ) : !library ? <p className="photo-empty">Loading Layouts…</p>
-        : library.layouts.length === 0 ? <p className="photo-empty">No Layouts yet. Use New Layout in the command bar.</p>
-          : <ul className="layout-grid" aria-label="Layout Library">
-            {library.layouts.map((item, index) => (
-              <li key={item.id}>
-                <button type="button" className="layout-card" aria-label={layoutLabel(item, index)}
-                  aria-pressed={item.id === selectedId} title={layoutLabel(item, index)}
-                  onClick={() => selectLayout(item.id)}>
-                  <LayoutPreview layout={item} />
-                  {madeForOtherAspectRatio(item, format) && <span className="layout-badge">Other aspect ratio</span>}
-                </button>
-              </li>
-            ))}
-          </ul>}
-    </div>
+    <LayoutLibraryPane layouts={layouts} format={format} selectedId={selectedId}
+      emptyText="No Layouts yet. Use New Layout in the command bar." onClick={(item) => selectLayout(item.id)} />
   );
 
   return (
     <section className="workspace layout-workspace" aria-label="Layouts">
       {paneHost && createPortal(pane, paneHost)}
       {error && <p className="error-banner" role="alert">{error}</p>}
-      {saveStatus === "error" && (
-        <button type="button" className="button-quiet" onClick={() => {
-          setError(null);
-          setSaveStatus("pending");
-          setRetry((value) => value + 1);
-        }}>Retry save</button>
+      {layouts.saveStatus === "error" && (
+        <button type="button" className="button-quiet" onClick={layouts.retrySave}>Retry save</button>
       )}
       {layout && madeForOtherAspectRatio(layout, format) && (
         <p className="usage-warning" role="status">This Layout was made for Pages with a different aspect ratio.</p>

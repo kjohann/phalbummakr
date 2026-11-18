@@ -71,7 +71,7 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 026 | [Sorting core: send Photos to a Folder](026-sorting-core.md)   | 023        | todo   |
 | 027 | [Create and rename Folders](027-create-and-rename-folders.md)  | 026        | todo   |
 | 028 | [Sort mode](028-sort-mode.md)                                  | 023, 026   | todo   |
-| 029 | [Applying Layouts in Album mode](029-apply-layouts.md)         | 010, 023   | todo   |
+| 029 | [Applying Layouts in Album mode](029-apply-layouts.md)         | 010, 023   | done   |
 | 030 | [Slot shortcuts and inline text formatting](030-slot-shortcuts-and-inline-format.md) | 024 | todo   |
 
 Work order for the layout rework: 016, 017, 018, 019, 020, then 011.

@@ -10,22 +10,23 @@ import CommandBar, { type BarCommand } from "./CommandBar";
 import LayoutWorkspace, { type LayoutBarLink, type LayoutBarState, type LayoutCommand, type LayoutCommandName } from "./LayoutWorkspace";
 import type { Mode } from "./modes";
 import PhotoBrowser from "./PhotoBrowser";
-import PhotoPane, { clampPaneWidth, DEFAULT_PHOTO_PANE, type PaneModes, type PhotoPaneSettings } from "./PhotoPane";
+import SidePane, { clampPaneWidth, DEFAULT_SIDE_PANE, type PaneModes, type SidePaneSettings } from "./SidePane";
 import ModalDialog from "./ModalDialog";
+import { useLayoutLibrary } from "./useLayoutLibrary";
 
 interface Settings {
   lastAlbum: string | null;
   recentAlbums: string[];
   confirmSpreadDeletion: boolean;
   confirmSlotDeletion: boolean;
-  photoPane?: PhotoPaneSettings;
+  sidePane?: SidePaneSettings;
 }
 
 export interface DocumentPorts {
   settings(): Promise<Settings>;
   setConfirmSpreadDeletion(value: boolean): Promise<void>;
   setConfirmSlotDeletion(value: boolean): Promise<void>;
-  setPhotoPane(pane: PhotoPaneSettings): Promise<void>;
+  setSidePane(pane: SidePaneSettings): Promise<void>;
   exists(path: string): Promise<boolean>;
   read(path: string): Promise<string>;
   write(path: string, json: string, create: boolean): Promise<void>;
@@ -42,7 +43,7 @@ const desktopPorts: DocumentPorts = {
   settings: () => invoke("album_settings"),
   setConfirmSpreadDeletion: (value) => invoke("set_confirm_spread_deletion", { value }),
   setConfirmSlotDeletion: (value) => invoke("set_confirm_slot_deletion", { value }),
-  setPhotoPane: (pane) => invoke("set_photo_pane", { pane }),
+  setSidePane: (pane) => invoke("set_side_pane", { pane }),
   exists: (path) => invoke("album_exists", { path }),
   read: (path) => invoke("read_album_file", { path }),
   write: (path, json, create) => invoke("write_album_file", { path, json, create }),
@@ -68,7 +69,31 @@ interface DeletionPreferences {
   setConfirmSlotDeletion: (value: boolean) => Promise<void>;
 }
 
-function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, suspended, modes, bar, layoutBar, layoutPorts, preferences, photoPane, onPhotoPaneChange }: {
+const PANE_TABS = [{ id: "photos", label: "Photos" }, { id: "layouts", label: "Layouts" }] as const;
+type PaneTab = typeof PANE_TABS[number]["id"];
+
+/** Switches Album mode's Side pane between the Photo browser and the Layout Library. */
+function PaneTabs({ current, onChange }: { current: PaneTab; onChange: (tab: PaneTab) => void }) {
+  return (
+    <div className="pane-tabs" role="tablist" aria-label="Side pane content">
+      {PANE_TABS.map(({ id, label }, index) => (
+        <button key={id} type="button" role="tab" className="pane-tab" id={`pane-tab-${id}`} aria-controls={`pane-panel-${id}`}
+          aria-selected={current === id} tabIndex={current === id ? 0 : -1}
+          onClick={() => onChange(id)}
+          onKeyDown={(event) => {
+            const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+            if (!step) return;
+            event.preventDefault();
+            const next = PANE_TABS[(index + step + PANE_TABS.length) % PANE_TABS.length].id;
+            onChange(next);
+            window.document.getElementById(`pane-tab-${next}`)?.focus();
+          }}>{label}</button>
+      ))}
+    </div>
+  );
+}
+
+function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, suspended, modes, bar, layoutBar, layoutPorts, preferences, sidePane, onSidePaneChange, onLayoutLibraryReadyChange }: {
   document: OpenDocument;
   onBusyChange: (busy: boolean) => void;
   onTitleChange: (album: Album | null) => void;
@@ -79,8 +104,10 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
   layoutBar: LayoutBarLink;
   layoutPorts?: LayoutPorts;
   preferences: DeletionPreferences;
-  photoPane: PhotoPaneSettings;
-  onPhotoPaneChange: (change: Partial<PhotoPaneSettings>) => void;
+  sidePane: SidePaneSettings;
+  onSidePaneChange: (change: Partial<SidePaneSettings>) => void;
+  /** Whether the shared Layout Library can take a new Layout, for Save as Layout. */
+  onLayoutLibraryReadyChange: (ready: boolean) => void;
 }) {
   const [album, setAlbum] = useState<Album | null>(document.album);
   const reportAlbum = useCallback((next: Album | null) => {
@@ -88,10 +115,12 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
     onTitleChange(next);
   }, [onTitleChange]);
   const mode = modes.current;
-  // The Layout Library is loaded the first time Layout mode opens, then kept, like Album mode's state.
+  // Layout mode mounts the first time it opens, then is kept, like Album mode's state.
   const [layoutsOpened, setLayoutsOpened] = useState(false);
   if (mode === "layouts" && !layoutsOpened) setLayoutsOpened(true);
   const [layoutPaneHost, setLayoutPaneHost] = useState<HTMLElement | null>(null);
+  const [albumLayoutsHost, setAlbumLayoutsHost] = useState<HTMLElement | null>(null);
+  const [paneTab, setPaneTab] = useState<PaneTab>("photos");
   const busy = useRef({ album: false, layouts: false });
   const reportAlbumBusy = useCallback((value: boolean) => {
     busy.current.album = value;
@@ -101,24 +130,37 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
     busy.current.layouts = value;
     onBusyChange(busy.current.album || busy.current.layouts);
   }, [onBusyChange]);
+  const format = (album ?? document.album).pageFormat;
+  // Loaded with the Album, as both Album mode and Layout mode use it.
+  const layouts = useLayoutLibrary({ root: document.root, format, ports: layoutPorts, onBusyChange: reportLayoutsBusy });
+  const layoutLibraryReady = !layouts.disabled;
+  useEffect(() => onLayoutLibraryReadyChange(layoutLibraryReady), [layoutLibraryReady, onLayoutLibraryReadyChange]);
+  useEffect(() => () => onLayoutLibraryReadyChange(false), [onLayoutLibraryReadyChange]);
   return (
     <div className="library-workspace" style={{ display: hidden ? "none" : undefined }}>
-      <PhotoPane modes={modes} settings={photoPane} onChange={onPhotoPaneChange}>
-        <div className="pane-view" hidden={mode === "layouts"}>
-          <PhotoBrowser root={document.root} album={album} compact={photoPane.compact}
-            onCompactChange={(compact) => onPhotoPaneChange({ compact })} />
+      <SidePane modes={modes} settings={sidePane} onChange={onSidePaneChange}>
+        <div className="pane-view pane-view--stacked" hidden={mode === "layouts"}>
+          {mode === "album" && <PaneTabs current={paneTab} onChange={setPaneTab} />}
+          <div className="pane-view" hidden={mode === "album" && paneTab !== "photos"}
+            {...mode === "album" ? { role: "tabpanel", id: "pane-panel-photos", "aria-labelledby": "pane-tab-photos" } : {}}>
+            <PhotoBrowser root={document.root} album={album} compact={sidePane.compact}
+              onCompactChange={(compact) => onSidePaneChange({ compact })} />
+          </div>
+          <div className="pane-view" hidden={mode !== "album" || paneTab !== "layouts"} ref={setAlbumLayoutsHost}
+            role="tabpanel" id="pane-panel-layouts" aria-labelledby="pane-tab-layouts" />
         </div>
         {layoutsOpened && <div className="pane-view" hidden={mode !== "layouts"} ref={setLayoutPaneHost} />}
-      </PhotoPane>
+      </SidePane>
       {/* Hidden rather than unmounted, so Album mode keeps its Spread and Slot selection. */}
       <div className="mode-view" hidden={mode !== "album"}>
         <AlbumWorkspace root={document.root} document={document} suspended={suspended} active={mode === "album" && !hidden}
-          onBusyChange={reportAlbumBusy} onAlbumChange={reportAlbum} bar={bar} {...preferences} />
+          onBusyChange={reportAlbumBusy} onAlbumChange={reportAlbum} bar={bar} {...preferences}
+          layouts={{ state: layouts, paneHost: albumLayoutsHost }} />
       </div>
       {layoutsOpened && <div className="mode-view" hidden={mode !== "layouts"}>
-        <LayoutWorkspace root={document.root} format={(album ?? document.album).pageFormat} ports={layoutPorts}
+        <LayoutWorkspace format={format} layouts={layouts}
           paneHost={layoutPaneHost} active={mode === "layouts" && !hidden && !suspended} bar={layoutBar}
-          onBusyChange={reportLayoutsBusy} confirmSlotDeletion={preferences.confirmSlotDeletion}
+          confirmSlotDeletion={preferences.confirmSlotDeletion}
           setConfirmSlotDeletion={preferences.setConfirmSlotDeletion} />
       </div>}
       {mode === "sort" && <section className="workspace mode-placeholder" aria-label="Sort">
@@ -139,12 +181,13 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
   const [error, setError] = useState<string | null>(null);
   const [confirmSpreadDeletion, setConfirmSpreadDeletionState] = useState(true);
   const [confirmSlotDeletion, setConfirmSlotDeletionState] = useState(true);
-  const [photoPane, setPhotoPaneState] = useState(DEFAULT_PHOTO_PANE);
-  const photoPaneRef = useRef(DEFAULT_PHOTO_PANE);
+  const [sidePane, setSidePaneState] = useState(DEFAULT_SIDE_PANE);
+  const sidePaneRef = useRef(DEFAULT_SIDE_PANE);
   const [command, setCommand] = useState<AlbumCommand | undefined>();
   const [slotSelected, setSlotSelected] = useState(false);
   const [toolsHost, setToolsHost] = useState<HTMLElement | null>(null);
   const [albumEditable, setAlbumEditable] = useState(false);
+  const [layoutLibraryReady, setLayoutLibraryReady] = useState(false);
   const [layoutCommand, setLayoutCommand] = useState<LayoutCommand | undefined>();
   const [layoutState, setLayoutState] = useState<LayoutBarState>({ editable: false, layoutSelected: false, slotSelected: false });
   const [modeState, setModeState] = useState<{ documentId: number | undefined; mode: Mode }>({ documentId: undefined, mode: "album" });
@@ -172,11 +215,11 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
     await ports.setConfirmSlotDeletion(value);
     setConfirmSlotDeletionState(value);
   }, [ports]);
-  const changePhotoPane = useCallback((change: Partial<PhotoPaneSettings>) => {
-    const next = { ...photoPaneRef.current, ...change };
-    photoPaneRef.current = next;
-    setPhotoPaneState(next);
-    ports.setPhotoPane(next).catch((cause: unknown) => setError(`Could not save the Photo pane layout: ${String(cause)}`));
+  const changeSidePane = useCallback((change: Partial<SidePaneSettings>) => {
+    const next = { ...sidePaneRef.current, ...change };
+    sidePaneRef.current = next;
+    setSidePaneState(next);
+    ports.setSidePane(next).catch((cause: unknown) => setError(`Could not save the Side pane layout: ${String(cause)}`));
   }, [ports]);
 
   async function refreshRecent() {
@@ -230,9 +273,9 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
         setRecent(settings.recentAlbums);
         setConfirmSpreadDeletionState(settings.confirmSpreadDeletion);
         setConfirmSlotDeletionState(settings.confirmSlotDeletion);
-        const pane = { ...DEFAULT_PHOTO_PANE, ...settings.photoPane };
-        photoPaneRef.current = { ...pane, width: clampPaneWidth(pane.width) };
-        setPhotoPaneState(photoPaneRef.current);
+        const pane = { ...DEFAULT_SIDE_PANE, ...settings.sidePane };
+        sidePaneRef.current = { ...pane, width: clampPaneWidth(pane.width) };
+        setSidePaneState(sidePaneRef.current);
         const path = settings.lastAlbum;
         if (!path) return;
         if (!(await ports.exists(path))) {
@@ -268,14 +311,14 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
   const actions = useRef<{ newAlbum: () => void; openAlbum: () => void; openRecent: (path: string) => void; closeAlbum: () => void; preferences: () => void; exit: () => void;   albumCommand: (name: AlbumCommandName) => void; layoutCommand: (name: LayoutCommandName) => void; togglePhotos: () => void }>(
       { newAlbum: () => {}, openAlbum: () => {}, openRecent: () => {}, closeAlbum: () => {}, preferences: () => {}, exit: () => {}, albumCommand: () => {}, layoutCommand: () => {}, togglePhotos: () => {} },
   );
-  const photoPaneAvailable = document !== null && draft === null && !preferencesOpen;
+  const sidePaneAvailable = document !== null && draft === null && !preferencesOpen;
   const fileEnabled = !busy && !restoring && !preferencesOpen;
   // Keyed by document, so every newly opened Album starts in Album mode.
   const mode = modeState.documentId === document?.id ? modeState.mode : "album";
   const setMode = (next: Mode) => setModeState({ documentId: document?.id, mode: next });
   actions.current = {
     togglePhotos: () => {
-      if (photoPaneAvailable) changePhotoPane({ collapsed: !photoPaneRef.current.collapsed });
+      if (sidePaneAvailable) changeSidePane({ collapsed: !sidePaneRef.current.collapsed });
     },
     albumCommand: (name) => {
       if (document && !draft) setCommand({ name, serial: ++commandSerial.current });
@@ -466,6 +509,7 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
     albumCommand("add-photo-slot", "Add Photo Slot"),
     albumCommand("add-text-slot", "Add Text Slot"),
     albumCommand("add-spread", "Add Spread", { overflow: 1 }),
+    albumCommand("save-as-layout", "Save as Layout", { overflow: 2, disabled: !(albumCommandsEnabled && layoutLibraryReady) }),
   ] : albumOpen && mode === "layouts" ? layoutCommands() : [];
   const documentCommands: BarCommand[] = albumOpen ? [
     albumCommand("album-settings", "Album Settings…", { overflow: 2 }),
@@ -527,7 +571,7 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
         bar={{ command, toolsHost, onSlotSelectedChange: setSlotSelected, onEditableChange: setAlbumEditable }}
         layoutBar={{ command: layoutCommand, toolsHost, onStateChange: setLayoutState }} layoutPorts={layoutPorts}
         preferences={{ confirmSpreadDeletion, setConfirmSpreadDeletion, confirmSlotDeletion, setConfirmSlotDeletion }}
-        photoPane={photoPane} onPhotoPaneChange={changePhotoPane} />}
+        sidePane={sidePane} onSidePaneChange={changeSidePane} onLayoutLibraryReadyChange={setLayoutLibraryReady} />}
     </main>
   );
 }

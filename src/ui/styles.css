@@ -116,7 +116,7 @@ body {
   min-height: 0;
 }
 
-.photo-pane {
+.side-pane {
   position: relative;
   display: flex;
   flex-direction: column;
@@ -125,15 +125,15 @@ body {
   min-height: 0;
   border-right: 1px solid #d9dcd5;
   background: #f7f8f4;
-  container: photo-pane / inline-size;
+  container: side-pane / inline-size;
 }
 
-.photo-pane[hidden] {
+.side-pane[hidden] {
   display: none;
 }
 
 /* Too narrow for labels: the mode switch shows icons only, with tooltips. */
-@container photo-pane (max-width: 279px) {
+@container side-pane (max-width: 279px) {
   .pane-mode span {
     display: none;
   }
@@ -144,7 +144,7 @@ body {
   background: #e2e8df;
 }
 
-/* The mode switch heads the Photo pane, and becomes a vertical icon rail when the pane is collapsed. */
+/* The mode switch heads the Side pane, and becomes a vertical icon rail when the pane is collapsed. */
 .pane-modes {
   display: flex;
   gap: 2px;
@@ -197,7 +197,7 @@ body {
   background: #fff;
 }
 
-.photo-pane-rail {
+.side-pane-rail {
   display: flex;
   flex: 0 0 auto;
   border-right: 1px solid #d9dcd5;
@@ -217,7 +217,7 @@ body {
   padding: 0;
 }
 
-.photo-pane-content {
+.side-pane-content {
   display: flex;
   flex: 1;
   min-height: 0;
@@ -235,7 +235,42 @@ body {
   display: none;
 }
 
-.photo-pane-resizer {
+.pane-view--stacked {
+  flex-direction: column;
+}
+
+/* Album mode's Side pane switches between Photos and Layouts. */
+.pane-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 8px 10px 0;
+  border-bottom: 1px solid #d9dcd5;
+}
+
+.pane-tab {
+  flex: 1;
+  height: 30px;
+  margin-bottom: -1px;
+  padding: 0 8px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #2f4a3e;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pane-tab:hover {
+  background: #eef0ea;
+}
+
+.pane-tab[aria-selected="true"] {
+  border-bottom-color: #415d50;
+}
+
+.side-pane-resizer {
   position: absolute;
   top: 0;
   right: -4px;
@@ -245,8 +280,8 @@ body {
   cursor: col-resize;
 }
 
-.photo-pane-resizer:hover,
-.photo-pane-resizer:focus-visible {
+.side-pane-resizer:hover,
+.side-pane-resizer:focus-visible {
   outline: none;
   background: linear-gradient(to right, transparent 3px, #8ea597 3px, #8ea597 5px, transparent 5px);
 }
@@ -765,6 +800,13 @@ body {
 .canvas-page-hit[aria-pressed="true"] {
   outline: 2px solid #415d50;
   outline-offset: 4px;
+}
+
+/* The Page a dragged Layout would be applied to. */
+.canvas-page-hit[data-layout-target] {
+  outline: 3px dashed #415d50;
+  outline-offset: 4px;
+  background: #415d5014;
 }
 
 .canvas-page-number {

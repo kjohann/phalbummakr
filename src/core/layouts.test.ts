@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createAlbum } from "./album";
-import { applyLayout, deleteLayout, duplicateLayout, newLayout, predefinedLayoutLibrary, readLayoutLibrary, serializeLayoutLibrary, setLayoutSlots, type Layout, type LayoutSlot } from "./layouts";
-import { addPhotoSlot, addTextSlot, placePhoto, setSlotText } from "./slots";
+import { applyLayout, deleteLayout, duplicateLayout, newLayout, predefinedLayoutLibrary, readLayoutLibrary, saveLayoutFromPage, serializeLayoutLibrary, setLayoutSlots, type Layout, type LayoutSlot } from "./layouts";
+import { addPhotoSlot, addTextSlot, placePhoto, rotateSlot, setSlotText } from "./slots";
 
 const format = createAlbum({ name: "Summer" }).pageFormat;
 
@@ -156,6 +156,27 @@ describe("Layout Library", () => {
     expect(edited.layouts[0].slots[0]).toMatchObject({ type: "photo", placement: null });
     expect(edited.layouts[0].slots[1]).toMatchObject({ type: "text", text: "", style: { fontFamily: "Arial", fontSize: 18 } });
     expect(edited.layouts[0].aspectRatio).toBe(297 / 210);
+  });
+
+  it("saves a Page as a new Layout at the end, keeping geometry, orientation and Text Slot styles but no content", () => {
+    let album = addTextSlot(addPhotoSlot(createAlbum({ name: "A" }), "page-2"), "page-2");
+    album = placePhoto(album, "page-2", "slot-1", { path: "a.jpg", width: 300, height: 200, orientation: 1 });
+    album = setSlotText(rotateSlot(album, "page-2", "slot-1", 90), "page-2", "slot-2", "Hello");
+    const page = album.pages[1];
+    const library = predefinedLayoutLibrary(format);
+    const { library: saved, id } = saveLayoutFromPage(library, album, "page-2");
+    expect(saved.layouts.slice(0, -1)).toEqual(library.layouts);
+    const layout = saved.layouts.at(-1)!;
+    expect(layout.id).toBe(id);
+    expect(id).toMatch(/^layout-/);
+    expect(layout.aspectRatio).toBeCloseTo(297 / 210);
+    const [photoSlot, textSlot] = layout.slots;
+    const [pagePhoto, pageText] = page.slots;
+    expect(photoSlot).toEqual({ ...pagePhoto, placement: null });
+    expect(photoSlot.rotation).toBe(90);
+    expect(textSlot).toEqual({ ...pageText, text: "" });
+    expect(album.pages[1]).toBe(page);
+    expect(() => serializeLayoutLibrary(saved)).not.toThrow();
   });
 
   it("reads a missing Layout Library as the predefined Layouts, and saved Libraries as they were", () => {

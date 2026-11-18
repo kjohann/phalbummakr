@@ -36,7 +36,7 @@ exists; otherwise, it returns to the nearest available ancestor and shows a noti
 Opening a folder resets the grid to the top. Folders and Photos are referenced
 where they live on disk; browsing never moves or copies originals.
 
-Drag the Photo pane's inner edge to resize it (200–640 px, at most 60% of the
+Drag the Side pane's inner edge to resize it (200–640 px, at most 60% of the
 window; with the separator
 focused, the arrow keys resize it too). The ‹ tab on its edge collapses it and the
 › tab at the window edge opens it again. **View → Toggle Photos** (Ctrl+B) does the
@@ -164,6 +164,30 @@ are fitted to their content when an Album opens; old Albums default underline
 to off. A Layout can later reuse the Slot's style without copying its Page text.
 If font discovery fails, the existing font remains selected and **Retry fonts**
 is available.
+
+## Layouts
+
+A Layout is a reusable arrangement of Slots on one Page. The Library's Layout
+Library is stored in `.phalbummakr/layouts.json` and is shared by every Album in
+that folder. A new Library starts with predefined Layouts. The file is only
+written once something changes. Edit Layouts in **Layouts** mode.
+
+In Album mode, the **Layouts** tab of the Side pane lists the Layout Library.
+Drag a Layout onto a Page, or onto one of its Slots, to apply it to that Page.
+You can also right-click or click a Layout and choose **Apply to left Page** or
+**Apply to right Page** for the current Spread. On a Spread with an Inside
+Cover, only the real Page is offered.
+
+Applying replaces the Page's Slots with a copy of the Layout's. Photos and text
+move into the new Slots in Page order, and each Photo is refitted to its new
+Slot. Anything that does not fit is removed, and a notice says what was removed.
+A notice also warns when the Layout was made for Pages with a different aspect
+ratio. The Page and the Layout are unlinked from then on, so editing or
+deleting the Layout later never changes the Page.
+
+**Save as Layout** in the command bar adds the selected Page's Slots to the end
+of the Layout Library as a new Layout. It keeps their geometry, rotation and
+Text Slot styles, but not their Photos or text.
 
 ## Test and build
 

@@ -2,11 +2,12 @@
 import { useState, type ComponentProps, type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { addPhotoSlot, addTextSlot, createAlbum, deserializeAlbum, photoUsage, placePhoto, serializeAlbum, setSlotPlaceholder, setSlotText, type Album, type AlbumPorts } from "../core";
+import { addPhotoSlot, addTextSlot, createAlbum, deserializeAlbum, photoUsage, placePhoto, readLayoutLibrary, rotateSlot, serializeAlbum, serializeLayoutLibrary, setSlotPlaceholder, setSlotText, type Album, type AlbumPorts, type Layout, type LayoutPorts } from "../core";
 import Workspace, { type AlbumCommand, type AlbumCommandName } from "./AlbumWorkspace";
 import PhotoBrowser from "./PhotoBrowser";
 import { PhotoSlotTools } from "./SlotTools";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
+import { useLayoutLibrary } from "./useLayoutLibrary";
 vi.mock("react-konva", () => ({
   Stage: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   Layer: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -62,7 +63,7 @@ function AlbumWorkspace(props: ComponentProps<typeof Workspace>) {
       <div ref={setToolsHost} />
       <button type="button" onClick={() => send("add-photo-slot")}>Add Photo Slot</button>
       <button type="button" onClick={() => send("add-text-slot")}>Add Text Slot</button>
-      {(["album-settings", "add-spread"] as const).map((name) => (
+      {(["album-settings", "add-spread", "save-as-layout"] as const).map((name) => (
         <button key={name} type="button" onClick={() => send(name)}>Bar {name}</button>
       ))}
     </div>
@@ -1943,4 +1944,147 @@ it("keeps Crop local during a pan gesture, commits at release, and persists Fit"
   await act(() => vi.advanceTimersByTimeAsync(500));
   expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.fit).toBe(true);
   expect(screen.queryByRole("button", { name: "Pan Photo in Page 1 Photo Slot 1" })).toBeNull();
+});
+
+
+/** Adds the Side pane and the shared Layout Library that DocumentWorkspace provides around Album mode. */
+function WithLayouts({ layoutPorts, ...props }: ComponentProps<typeof Workspace> & { layoutPorts: LayoutPorts }) {
+  const [paneHost, setPaneHost] = useState<HTMLElement | null>(null);
+  const state = useLayoutLibrary({ root: "D:\\Photos", format: props.document!.album.pageFormat, ports: layoutPorts });
+  return <>
+    <section aria-label="Side pane" ref={setPaneHost} />
+    <AlbumWorkspace {...props} layouts={{ state, paneHost }} />
+  </>;
+}
+
+function layoutDisk(layouts: Layout[]) {
+  const store = { json: serializeLayoutLibrary({ schemaVersion: 1, layouts }) as string | null };
+  const ports: LayoutPorts = {
+    read: vi.fn(async () => store.json),
+    write: vi.fn(async (_root: string, json: string) => { store.json = json; }),
+  };
+  return { ports, store };
+}
+
+const onePhotoLayout: Layout = { id: "layout-one", aspectRatio: 297 / 210, slots: [
+  { id: "slot-1", type: "photo", x: 0.1, y: 0.1, width: 0.8, height: 0.8, placement: null },
+] };
+const squareLayout: Layout = { id: "layout-square", aspectRatio: 1, slots: [
+  { id: "slot-1", type: "photo", x: 0.1, y: 0.1, width: 0.3, height: 0.3, placement: null },
+  { id: "slot-2", type: "photo", x: 0.5, y: 0.1, width: 0.3, height: 0.3, placement: null },
+] };
+
+function albumWithContent() {
+  let album = createAlbum({ name: "Existing", pageCount: 4 });
+  for (const path of ["a.jpg", "b.jpg"]) {
+    album = addPhotoSlot(album, "page-1");
+    album = placePhoto(album, "page-1", album.pages[0].slots.at(-1)!.id, { path, width: 6000, height: 4000, orientation: 1 });
+  }
+  album = addTextSlot(album, "page-1");
+  return setSlotText(album, "page-1", album.pages[0].slots.at(-1)!.id, "Hello");
+}
+
+const layoutCards = () => within(within(screen.getByRole("region", { name: "Side pane" })).getByRole("list", { name: "Layout Library" }));
+
+it("applies a Layout from its menu in the Side pane to a Page of the current Spread, with notices", async () => {
+  const { ports, files } = disk();
+  render(<WithLayouts root="D:\\Photos" ports={ports} photoPorts={previews()} layoutPorts={layoutDisk([onePhotoLayout, squareLayout]).ports}
+    document={{ path: "Existing", album: albumWithContent() }} />);
+  const [first, square] = await waitFor(() => layoutCards().getAllByRole("button"));
+
+  fireEvent.contextMenu(first);
+  const menu = within(screen.getByRole("menu", { name: "Apply Layout" }));
+  expect(menu.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Apply to right Page"]);
+  fireEvent.click(menu.getByRole("menuitem", { name: "Apply to right Page" }));
+  expect(screen.queryByRole("menu", { name: "Apply Layout" })).toBeNull();
+  expect(screen.getByText("1 Photo and 1 text did not fit the Layout on Page 1 and were removed.").closest("[role=status]")).not.toBeNull();
+  await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages[0].slots)
+    .toMatchObject([{ type: "photo", x: 0.1, width: 0.8, placement: { photoPath: "a.jpg" } }]));
+
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Spreads" })).getByRole("button", { name: "Select Page 2" }));
+  fireEvent.contextMenu(square);
+  const spreadMenu = within(screen.getByRole("menu", { name: "Apply Layout" }));
+  expect(spreadMenu.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Apply to left Page", "Apply to right Page"]);
+  fireEvent.click(spreadMenu.getByRole("menuitem", { name: "Apply to right Page" }));
+  expect(screen.getByText(/made for Pages with a different aspect ratio/).closest("[role=status]")).not.toBeNull();
+  expect(screen.queryByText(/did not fit the Layout/)).toBeNull();
+  await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages[2].slots)
+    .toMatchObject([{ type: "photo", x: 0.1, placement: null }, { type: "photo", x: 0.5, placement: null }]));
+  expect(deserializeAlbum(files.get("Existing")!).pages[1].slots).toEqual([]);
+});
+
+const canvasPage = (number: number) =>
+  within(screen.getByRole("group", { name: "Spread editor" })).getByRole("button", { name: `Select Page ${number}` });
+
+function layoutTransfer() {
+  const data = new Map<string, string>();
+  return {
+    get types() { return [...data.keys()]; },
+    setData: (type: string, value: string) => data.set(type, value),
+    getData: (type: string) => data.get(type) ?? "",
+    effectAllowed: "none", dropEffect: "none",
+  };
+}
+
+it("applies a Layout dragged from the Side pane onto a Page, also when dropped on one of its Slots", async () => {
+  const { ports, files } = disk();
+  render(<WithLayouts root="D:\\Photos" ports={ports} photoPorts={previews()} layoutPorts={layoutDisk([onePhotoLayout, squareLayout]).ports}
+    document={{ path: "Existing", album: albumWithContent() }} />);
+  const [first, square] = await waitFor(() => layoutCards().getAllByRole("button"));
+  expect(square.getAttribute("draggable")).toBe("true");
+
+  const toSlot = layoutTransfer();
+  fireEvent.dragStart(square, { dataTransfer: toSlot });
+  const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  fireEvent.dragOver(slot, { dataTransfer: toSlot });
+  expect(canvasPage(1).hasAttribute("data-layout-target")).toBe(true);
+  fireEvent.drop(slot, { dataTransfer: toSlot });
+  expect(canvasPage(1).hasAttribute("data-layout-target")).toBe(false);
+  await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages[0].slots)
+    .toMatchObject([{ x: 0.1, width: 0.3, placement: { photoPath: "a.jpg" } }, { x: 0.5, width: 0.3, placement: { photoPath: "b.jpg" } }]));
+
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Spreads" })).getByRole("button", { name: "Select Page 2" }));
+  const toPage = layoutTransfer();
+  fireEvent.dragStart(first, { dataTransfer: toPage });
+  const page = canvasPage(2);
+  fireEvent.dragOver(page, { dataTransfer: toPage });
+  fireEvent.drop(page, { dataTransfer: toPage });
+  await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages[1].slots).toMatchObject([{ x: 0.1, width: 0.8, placement: null }]));
+  expect(deserializeAlbum(files.get("Existing")!).pages[2].slots).toEqual([]);
+});
+
+it("saves the selected Page as a new Layout in the Layout Library, without its Photos or text", async () => {
+  const { ports } = disk();
+  const library = layoutDisk([onePhotoLayout]);
+  const album = rotateSlot(albumWithContent(), "page-1", "slot-1", 90);
+  render(<WithLayouts root="D:\\Photos" ports={ports} photoPorts={previews()} layoutPorts={library.ports}
+    document={{ path: "Existing", album }} />);
+  await waitFor(() => expect(layoutCards().getAllByRole("button")).toHaveLength(1));
+  fireEvent.click(canvasPage(1));
+  fireEvent.click(bar().getByRole("button", { name: "Bar save-as-layout" }));
+  expect(screen.getByText("Saved Page 1 as a new Layout.").closest("[role=status]")).not.toBeNull();
+  expect(layoutCards().getAllByRole("button").map((card) => card.getAttribute("aria-label")))
+    .toEqual(["Layout 1: 1 Photo Slot", "Layout 2: 2 Photo Slots, 1 Text Slot"]);
+  await waitFor(() => expect(library.ports.write).toHaveBeenCalled());
+  const saved = readLayoutLibrary(library.store.json, album.pageFormat).layouts[1];
+  const [photo, , text] = album.pages[0].slots;
+  expect(saved.slots).toHaveLength(3);
+  expect(saved.slots[0]).toEqual({ ...photo, placement: null });
+  expect(saved.slots[0].rotation).toBe(90);
+  expect(saved.slots[2]).toEqual({ ...text, text: "" });
+});
+
+it("shows a failed Layout Library save in Album mode and retries it", async () => {
+  const { ports } = disk();
+  const library = layoutDisk([onePhotoLayout]);
+  vi.mocked(library.ports.write).mockRejectedValueOnce(new Error("Disk full"));
+  render(<WithLayouts root="D:\\Photos" ports={ports} photoPorts={previews()} layoutPorts={library.ports}
+    document={{ path: "Existing", album: albumWithContent() }} />);
+  await waitFor(() => expect(layoutCards().getAllByRole("button")).toHaveLength(1));
+  fireEvent.click(bar().getByRole("button", { name: "Bar save-as-layout" }));
+  expect((await screen.findByRole("alert")).textContent).toContain("Could not save the Layout Library: Error: Disk full");
+  expect(screen.queryByText("Saved Page 1 as a new Layout.")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Retry Layout Library save" }));
+  await waitFor(() => expect(readLayoutLibrary(library.store.json, albumWithContent().pageFormat).layouts).toHaveLength(2));
+  expect(screen.queryByRole("alert")).toBeNull();
 });

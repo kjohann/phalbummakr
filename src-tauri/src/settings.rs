@@ -9,7 +9,8 @@ pub struct AlbumSettings {
     pub recent_albums: Vec<PathBuf>,
     pub confirm_spread_deletion: bool,
     pub confirm_slot_deletion: bool,
-    pub photo_pane: PhotoPane,
+    #[serde(alias = "photoPane")]
+    pub side_pane: SidePane,
 }
 
 impl Default for AlbumSettings {
@@ -19,20 +20,20 @@ impl Default for AlbumSettings {
             recent_albums: Vec::new(),
             confirm_spread_deletion: true,
             confirm_slot_deletion: true,
-            photo_pane: PhotoPane::default(),
+            side_pane: SidePane::default(),
         }
     }
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
-pub struct PhotoPane {
+pub struct SidePane {
     pub width: f64,
     pub collapsed: bool,
     pub compact: bool,
 }
 
-impl Default for PhotoPane {
+impl Default for SidePane {
     fn default() -> Self {
         Self {
             width: 340.0,
@@ -98,9 +99,9 @@ pub fn set_confirm_slot_deletion(path: &Path, value: bool) -> io::Result<()> {
     write_album_settings(path, &settings)
 }
 
-pub fn set_photo_pane(path: &Path, pane: PhotoPane) -> io::Result<()> {
+pub fn set_side_pane(path: &Path, pane: SidePane) -> io::Result<()> {
     let mut settings = read_album_settings(path)?;
-    settings.photo_pane = pane;
+    settings.side_pane = pane;
     write_album_settings(path, &settings)
 }
 
@@ -136,18 +137,18 @@ mod tests {
     }
 
     #[test]
-    fn photo_pane_defaults_to_open_and_persists_across_other_updates() {
+    fn side_pane_defaults_to_open_and_persists_across_other_updates() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
         std::fs::write(&path, r#"{"lastAlbum":null,"recentAlbums":[]}"#).unwrap();
-        let pane = read_album_settings(&path).unwrap().photo_pane;
+        let pane = read_album_settings(&path).unwrap().side_pane;
         assert_eq!(
             (pane.width, pane.collapsed, pane.compact),
             (340.0, false, false)
         );
-        set_photo_pane(
+        set_side_pane(
             &path,
-            PhotoPane {
+            SidePane {
                 width: 512.0,
                 collapsed: true,
                 compact: true,
@@ -155,11 +156,30 @@ mod tests {
         )
         .unwrap();
         remember_album(&path, Path::new("first.phalbum")).unwrap();
-        let pane = read_album_settings(&path).unwrap().photo_pane;
+        let pane = read_album_settings(&path).unwrap().side_pane;
         assert_eq!(
             (pane.width, pane.collapsed, pane.compact),
             (512.0, true, true)
         );
+    }
+
+    #[test]
+    fn side_pane_keeps_the_layout_saved_under_its_old_photo_pane_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(
+            &path,
+            r#"{"lastAlbum":null,"recentAlbums":[],"photoPane":{"width":420.0,"collapsed":true,"compact":true}}"#,
+        )
+        .unwrap();
+        let pane = read_album_settings(&path).unwrap().side_pane;
+        assert_eq!(
+            (pane.width, pane.collapsed, pane.compact),
+            (420.0, true, true)
+        );
+        remember_album(&path, Path::new("first.phalbum")).unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(saved.contains("\"sidePane\"") && !saved.contains("photoPane"));
     }
 
     #[test]

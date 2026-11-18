@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createAlbum, readLayoutLibrary, serializeLayoutLibrary, type LayoutPorts } from "../core";
 import LayoutWorkspace, { type LayoutCommand, type LayoutCommandName } from "./LayoutWorkspace";
+import { useLayoutLibrary } from "./useLayoutLibrary";
 
 vi.mock("react-konva", () => ({
   Stage: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -53,26 +54,27 @@ function disk(json: string | null = null) {
   return { ports, store };
 }
 
-/** Stands in for the Photo pane and the command bar around Layout mode. */
-function Harness(props: Omit<ComponentProps<typeof LayoutWorkspace>, "paneHost" | "active" | "format" | "root"> & { active?: boolean }) {
+/** Stands in for the Side pane, the command bar and the shared Layout Library around Layout mode. */
+function Harness({ ports, ...props }: Omit<ComponentProps<typeof LayoutWorkspace>, "paneHost" | "active" | "format" | "layouts"> & { active?: boolean; ports: LayoutPorts }) {
   const [command, setCommand] = useState<LayoutCommand>();
   const [toolsHost, setToolsHost] = useState<HTMLElement | null>(null);
   const [paneHost, setPaneHost] = useState<HTMLElement | null>(null);
+  const layouts = useLayoutLibrary({ root: "D:\\Photos", format, ports });
   const send = (name: LayoutCommandName) => setCommand((current) => ({ name, serial: (current?.serial ?? 0) + 1 }));
   return <>
-    <section aria-label="Photo pane" ref={setPaneHost} />
+    <section aria-label="Side pane" ref={setPaneHost} />
     <div role="toolbar" aria-label="Commands">
       <div ref={setToolsHost} />
       {(["new-layout", "duplicate-layout", "delete-layout", "add-photo-slot", "add-text-slot"] as const).map((name) => (
         <button key={name} type="button" onClick={() => send(name)}>Bar {name}</button>
       ))}
     </div>
-    <LayoutWorkspace root="D:\\Photos" format={format} paneHost={paneHost} active={props.active ?? true}
+    <LayoutWorkspace format={format} layouts={layouts} paneHost={paneHost} active={props.active ?? true}
       {...props} bar={{ ...props.bar, command, toolsHost }} />
   </>;
 }
 
-const pane = () => within(screen.getByRole("region", { name: "Photo pane" }));
+const pane = () => within(screen.getByRole("region", { name: "Side pane" }));
 const bar = () => within(screen.getByRole("toolbar", { name: "Commands" }));
 const library = () => within(pane().getByRole("list", { name: "Layout Library" }));
 

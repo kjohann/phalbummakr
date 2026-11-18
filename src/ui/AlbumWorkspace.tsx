@@ -6,8 +6,9 @@ import { tauriAlbumPorts } from "./tauriAlbumPorts";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
 import { tauriFontPorts, type FontPorts } from "./tauriFontPorts";
 import { fitTextSlots } from "./textLayout";
+import type { LayoutLibraryState } from "./useLayoutLibrary";
 
-export type AlbumCommandName = "album-settings" | "add-spread" | "add-photo-slot" | "add-text-slot";
+export type AlbumCommandName = "album-settings" | "add-spread" | "add-photo-slot" | "add-text-slot" | "save-as-layout";
 
 /** A command bar command for the open Album; `serial` makes repeated commands distinct. */
 export interface AlbumCommand {
@@ -41,9 +42,16 @@ interface Props {
   bar?: CommandBarLink;
   /** False while another mode is shown; the hidden workspace then leaves keyboard shortcuts alone. */
   active?: boolean;
+  layouts?: AlbumLayouts;
 }
 
-export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document, suspended = false, confirmSpreadDeletion = true, setConfirmSpreadDeletion, confirmSlotDeletion = true, setConfirmSlotDeletion, bar = {}, active = true }: Props) {
+/** The shared Layout Library, and where Album mode lists it: the Layouts tab of the Side pane. */
+export interface AlbumLayouts {
+  state: LayoutLibraryState;
+  paneHost: HTMLElement | null;
+}
+
+export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document, suspended = false, confirmSpreadDeletion = true, setConfirmSpreadDeletion, confirmSlotDeletion = true, setConfirmSlotDeletion, bar = {}, active = true, layouts }: Props) {
   const { command, onEditableChange } = bar;
   const [names, setNames] = useState<string[]>([]);
   const [current, setCurrent] = useState<{ filename: string; album: Album } | null>(
@@ -54,6 +62,12 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  // A failed Layout Library save makes "Saved … as a new Layout" untrue.
+  const layoutSaveFailed = layouts?.state.saveStatus === "error";
+  useEffect(() => {
+    if (layoutSaveFailed) setNotice(null);
+  }, [layoutSaveFailed]);
   const [saveStatus, setSaveStatus] = useState<"saved" | "pending" | "saving" | "error">(
     () => document && current && serializeAlbum(current.album) !== serializeAlbum(document.album) ? "pending" : "saved",
   );
@@ -230,6 +244,16 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
           <button type="button" className="button-quiet" onClick={() => setDuplicateWarning(null)}>Dismiss</button>
         </div>
       )}
+      {notice && (
+        <div className="usage-warning" role="status">
+          <span>{notice}</span>
+          <button type="button" className="button-quiet" onClick={() => setNotice(null)}>Dismiss</button>
+        </div>
+      )}
+      {layouts?.state.error && <p className="error-banner" role="alert">{layouts.state.error}</p>}
+      {layouts?.state.saveStatus === "error" && (
+        <button type="button" className="button-quiet" onClick={layouts.state.retrySave}>Retry Layout Library save</button>
+      )}
       {saveStatus === "error" && (
         <button type="button" className="button-quiet" onClick={() => {
           setError(null);
@@ -290,7 +314,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
             root={root} photoPorts={photoPorts} fontPorts={fontPorts}
             confirmSpreadDeletion={confirmSpreadDeletion} setConfirmSpreadDeletion={setConfirmSpreadDeletion}
             confirmSlotDeletion={confirmSlotDeletion} setConfirmSlotDeletion={setConfirmSlotDeletion}
-            bar={bar} active={active}
+            bar={bar} active={active} layouts={layouts} onNotice={setNotice}
             onDuplicatePhoto={setDuplicateWarning}
             onCropPendingChange={setCropPending}
             onDialogChange={setDialogOpen}

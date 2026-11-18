@@ -72,6 +72,15 @@ export function setLayoutSlots(library: LayoutLibrary, id: string, slots: Slot[]
   return { ...library, layouts };
 }
 
+/** Adds a new Layout at the end with a copy of a Page's Slots, keeping their geometry and styles but not their content. */
+export function saveLayoutFromPage(library: LayoutLibrary, album: Album, pageId: string): { library: LayoutLibrary; id: string } {
+  const page = album.pages.find((item) => item.id === pageId);
+  if (!page) throw new Error("Page not found in Album.");
+  const id = newLayoutId();
+  const layout: Layout = { id, aspectRatio: pageAspectRatio(album.pageFormat), slots: layoutSlots(structuredClone(page.slots)) };
+  return { library: { ...library, layouts: [...library.layouts, layout] }, id };
+}
+
 export interface AppliedLayout {
   album: Album;
   /** Content that did not fit into the Layout's Slots, in Page order. */

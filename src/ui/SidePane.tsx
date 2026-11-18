@@ -1,20 +1,20 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { MODES, type Mode } from "./modes";
 
-export interface PhotoPaneSettings {
+export interface SidePaneSettings {
   width: number;
   collapsed: boolean;
   compact: boolean;
 }
 
-export const DEFAULT_PHOTO_PANE: PhotoPaneSettings = { width: 340, collapsed: false, compact: false };
+export const DEFAULT_SIDE_PANE: SidePaneSettings = { width: 340, collapsed: false, compact: false };
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 640;
 const MAX_WINDOW_SHARE = 0.6;
 const KEY_STEP = 16;
 
 export function clampPaneWidth(width: number, maxWidth = MAX_WIDTH) {
-  return Number.isFinite(width) ? Math.round(Math.min(maxWidth, Math.max(MIN_WIDTH, width))) : DEFAULT_PHOTO_PANE.width;
+  return Number.isFinite(width) ? Math.round(Math.min(maxWidth, Math.max(MIN_WIDTH, width))) : DEFAULT_SIDE_PANE.width;
 }
 
 function windowMaxWidth() {
@@ -48,7 +48,7 @@ function ModeSwitch({ modes, collapsed, onToggle, focusOnMount }: {
           <button key={id} type="button" className="pane-mode" aria-label={label}
             aria-pressed={selected} aria-expanded={selected ? !collapsed : undefined}
             aria-keyshortcuts={selected ? "Control+B" : undefined} disabled={modes.disabled}
-            title={selected ? `${label} · ${collapsed ? "Show" : "Hide"} the Photo pane (Ctrl+B)` : label}
+            title={selected ? `${label} · ${collapsed ? "Show" : "Hide"} the Side pane (Ctrl+B)` : label}
             ref={(button) => {
               if (button && focusOnMount.current === id) {
                 focusOnMount.current = null;
@@ -71,10 +71,10 @@ function ModeSwitch({ modes, collapsed, onToggle, focusOnMount }: {
 }
 
 /** The left pane. It always shows the mode switch, and collapses to an icon-only rail of it, as in VS Code. */
-export default function PhotoPane({ modes, settings, onChange, children }: {
+export default function SidePane({ modes, settings, onChange, children }: {
   modes: PaneModes;
-  settings: PhotoPaneSettings;
-  onChange: (change: Partial<PhotoPaneSettings>) => void;
+  settings: SidePaneSettings;
+  onChange: (change: Partial<SidePaneSettings>) => void;
   children: ReactNode;
 }) {
   const toggle = () => onChange({ collapsed: !settings.collapsed });
@@ -118,15 +118,15 @@ export default function PhotoPane({ modes, settings, onChange, children }: {
 
   return (
     <>
-      <section className="photo-pane" aria-label="Photo pane" hidden={settings.collapsed} style={{ width }}>
+      <section className="side-pane" aria-label="Side pane" hidden={settings.collapsed} style={{ width }}>
         {!settings.collapsed && <ModeSwitch modes={modes} collapsed={false} onToggle={toggle} focusOnMount={focusOnMount} />}
-        <div className="photo-pane-content">{children}</div>
-        <div className="photo-pane-resizer" role="separator" aria-orientation="vertical" aria-label="Resize Photos"
+        <div className="side-pane-content">{children}</div>
+        <div className="side-pane-resizer" role="separator" aria-orientation="vertical" aria-label="Resize the Side pane"
           aria-valuenow={width} aria-valuemin={MIN_WIDTH} aria-valuemax={maxWidth} tabIndex={0}
           onMouseDown={startResize} onKeyDown={resizeWithKeys} />
       </section>
       {settings.collapsed && (
-        <nav className="photo-pane-rail" aria-label="Modes">
+        <nav className="side-pane-rail" aria-label="Modes">
           <ModeSwitch modes={modes} collapsed onToggle={toggle} focusOnMount={focusOnMount} />
         </nav>
       )}

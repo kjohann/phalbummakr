@@ -1,20 +1,21 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { Group, Image as KonvaImage, Layer, Rect, Stage } from "react-konva";
 import {
-  addPage, addPhotoSlot, addTextSlot, albumSpreads, deletePage, deleteSlot, duplicatePage, movePage, pageDimensions,
-  fitPhotoRect, panCrop, placePhoto, placePhotoOnPage, placementDisplayCrop, photoUsage, rotateSlot, setPlacementCrop,
+  addPage, addPhotoSlot, addTextSlot, albumSpreads, applyLayout, deletePage, deleteSlot, duplicatePage, movePage, pageDimensions,
+  fitPhotoRect, panCrop, placePhoto, placePhotoOnPage, placementDisplayCrop, photoUsage, rotateSlot, saveLayoutFromPage, setPlacementCrop,
   setPlacementFit, setSlotText, setTextStyle, swapPlacements, zoomCrop, POINTS_PER_MM, TEXT_LINE_HEIGHT,
-  type Album, type Crop, type Page, type PageFormat, type PhotoPreviewPorts, type Slot, type SlotAddress, type TextStyle,
+  type Album, type AppliedLayout, type Crop, type Page, type PageFormat, type PhotoPreviewPorts, type Slot, type SlotAddress, type TextStyle,
 } from "../core";
-import { hasPhotoDrag, readPhotoDrag } from "./photoDrag";
+import { hasLayoutDrag, hasPhotoDrag, readLayoutDrag, readPhotoDrag, writeLayoutDrag } from "./photoDrag";
+import LayoutLibraryPane, { plural } from "./LayoutLibraryPane";
 import { applySlotDrag, LayerPage, SnapGuides, TextContent, type SlotDrag } from "./pageCanvas";
 import type { FontPorts } from "./tauriFontPorts";
 import { fitTextSlots } from "./textLayout";
 import TextSlotTools from "./TextSlotTools";
 import { PhotoSlotTools, SlotActions } from "./SlotTools";
 import ModalDialog from "./ModalDialog";
-import type { CommandBarLink } from "./AlbumWorkspace";
+import type { AlbumLayouts, CommandBarLink } from "./AlbumWorkspace";
 
 const PLACEMENT_DRAG_TYPE = "application/x-phalbummakr-placement";
 
@@ -39,9 +40,25 @@ interface Props {
   bar: CommandBarLink;
   onDialogChange: (open: boolean) => void;
   active?: boolean;
+  layouts?: AlbumLayouts;
+  /** Reports what happened when a Layout was applied or saved; `null` clears the notice. */
+  onNotice?: (message: string | null) => void;
 }
 
-export default function AlbumView({ album: savedAlbum, onChange, disabled, textDisabled, root, photoPorts, fontPorts, onDuplicatePhoto, onCropPendingChange, confirmSpreadDeletion, setConfirmSpreadDeletion, confirmSlotDeletion, setConfirmSlotDeletion, bar, onDialogChange, active = true }: Props) {
+/** Tells the user what applying a Layout dropped, and when it was made for another Page shape. */
+function appliedLayoutNotice({ dropped, aspectMismatch }: AppliedLayout, pageNumber: number | undefined): string | null {
+  const photos = dropped.placements.length;
+  const texts = dropped.texts.length;
+  const parts = [photos && plural(photos, "Photo"), texts && plural(texts, "text")].filter(Boolean);
+  const messages: string[] = [];
+  if (parts.length) {
+    messages.push(`${parts.join(" and ")} did not fit the Layout on Page ${pageNumber} and ${photos + texts === 1 ? "was" : "were"} removed.`);
+  }
+  if (aspectMismatch) messages.push("The Layout was made for Pages with a different aspect ratio, so its Slots may not sit as intended.");
+  return messages.length ? messages.join(" ") : null;
+}
+
+export default function AlbumView({ album: savedAlbum, onChange, disabled, textDisabled, root, photoPorts, fontPorts, onDuplicatePhoto, onCropPendingChange, confirmSpreadDeletion, setConfirmSpreadDeletion, confirmSlotDeletion, setConfirmSlotDeletion, bar, onDialogChange, active = true, layouts, onNotice }: Props) {
   const { command, toolsHost, onSlotSelectedChange } = bar;
   const viewportRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLElement>(null);
@@ -72,6 +89,9 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
     { kind: "page"; centre: { x: number; y: number } } | { kind: "slot"; slotId: string }
   ) | null>(null);
   const [pageDropId, setPageDropId] = useState<string | null>(null);
+  const [layoutMenu, setLayoutMenu] = useState<{ x: number; y: number; layoutId: string } | null>(null);
+  /** The Page a dragged Layout would be applied to. */
+  const [layoutDropPageId, setLayoutDropPageId] = useState<string | null>(null);
   const handledCommand = useRef(command?.serial);
   useEffect(() => {
     onDialogChange(deleteTarget !== null || slotDeleteTarget !== null);
@@ -183,13 +203,13 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
   }
 
   useEffect(() => {
-    if (!stripMenu && !canvasMenu) return;
-    const close = () => { setStripMenu(null); setCanvasMenu(null); };
+    if (!stripMenu && !canvasMenu && !layoutMenu) return;
+    const close = () => { setStripMenu(null); setCanvasMenu(null); setLayoutMenu(null); };
     const escape = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
     window.addEventListener("click", close);
     window.addEventListener("keydown", escape);
     return () => { window.removeEventListener("click", close); window.removeEventListener("keydown", escape); };
-  }, [stripMenu, canvasMenu]);
+  }, [stripMenu, canvasMenu, layoutMenu]);
 
   useEffect(() => () => {
     stopSlotDrag.current?.();
@@ -223,6 +243,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
     const clearPhotoDrag = () => {
       setPhotoDragActive(false);
       setDropTargetId(null);
+      setLayoutDropPageId(null);
       draggedPlacement.current = null;
     };
     window.addEventListener("dragstart", startPhotoDrag);
@@ -461,6 +482,43 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
     }
   }
 
+  function applyLayoutTo(pageId: string, layoutId: string) {
+    const layout = layouts?.state.library?.layouts.find((item) => item.id === layoutId);
+    if (disabled || !layout) return;
+    const result = applyLayout(savedAlbum, pageId, layout);
+    changeAlbum((current) => applyLayout(current, pageId, layout).album);
+    setSelectedId(pageId);
+    setSelectedSlotId(null);
+    setEditingText(null);
+    onNotice?.(appliedLayoutNotice(result, pageNumbers.get(pageId)));
+  }
+
+  /** Lets a dragged Layout land anywhere on a Page, including on its Slots. Returns whether the drag was a Layout. */
+  function layoutDragOver(event: ReactDragEvent, pageId: string): boolean {
+    if (disabled || !hasLayoutDrag(event.dataTransfer)) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+    setLayoutDropPageId(pageId);
+    return true;
+  }
+
+  function layoutDrop(event: ReactDragEvent, pageId: string): boolean {
+    const layoutId = readLayoutDrag(event.dataTransfer);
+    if (!layoutId) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    setLayoutDropPageId(null);
+    applyLayoutTo(pageId, layoutId);
+    return true;
+  }
+
+  function saveAsLayout() {
+    const pageId = selectedPage.id;
+    if (!layouts?.state.change((library) => saveLayoutFromPage(library, savedAlbum, pageId).library)) return;
+    onNotice?.(`Saved Page ${pageNumbers.get(pageId)} as a new Layout.`);
+  }
+
   function addSpreadAtEnd() {
     if (disabled || album.pages.length >= 10000) return;
     editPages((current) => addPage(current, current.pages.at(-1)!.id), album.pages.length - 1);
@@ -478,6 +536,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
     if (command.name === "add-spread") addSpreadAtEnd();
     else if (command.name === "add-photo-slot") addSlot("photo", selectedPage.id);
     else if (command.name === "add-text-slot") addSlot("text", selectedPage.id);
+    else if (command.name === "save-as-layout") saveAsLayout();
   });
 
   useEffect(() => {
@@ -573,7 +632,9 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
           return page ? (
             <button type="button" className="canvas-page-hit" key={page.id} style={style}
               aria-label={`Select Page ${pageNumbers.get(page.id)}`} aria-pressed={page.id === selectedPage.id}
+              data-layout-target={layoutDropPageId === page.id || undefined}
               onDragOver={(event) => {
+                if (layoutDragOver(event, page.id)) return;
                 if (disabled || !hasPhotoDrag(event.dataTransfer)) return;
                 event.preventDefault();
                 event.dataTransfer.dropEffect = "copy";
@@ -581,6 +642,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
                 setDropTargetId(null);
               }}
               onDrop={(event) => {
+                if (layoutDrop(event, page.id)) return;
                 const photo = readPhotoDrag(event.dataTransfer);
                 if (disabled || !photo || scale <= 0) return;
                 event.preventDefault();
@@ -665,6 +727,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
                 }
               }}
               onDragOver={(event) => {
+                if (layoutDragOver(event, page.id)) return;
                 if (disabled || slot.type !== "photo"
                   || (!hasPhotoDrag(event.dataTransfer) && !(hasPlacementDrag(event.dataTransfer) && draggedPlacement.current))) return;
                 event.preventDefault();
@@ -673,6 +736,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
                 setDropTargetId(targetId);
               }}
               onDrop={(event) => {
+                if (layoutDrop(event, page.id)) return;
                 if (disabled || slot.type !== "photo") return;
                 if (hasPlacementDrag(event.dataTransfer) && draggedPlacement.current) {
                   event.preventDefault();
@@ -969,6 +1033,29 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
           <button role="menuitem" type="button" onClick={() => { requestDeleteSlot(pageId, slotId); close(); }}>Delete</button>
         </div>;
       })()}
+      {layouts?.paneHost && createPortal(
+        <LayoutLibraryPane layouts={layouts.state} format={album.pageFormat}
+          emptyText="No Layouts yet. Create them in Layout mode, or use Save as Layout."
+          title={(label) => `${label}. Drag onto a Page, or click to apply it to the current Spread.`}
+          onDragStart={(layout, event) => writeLayoutDrag(event.dataTransfer, layout.id)}
+          onClick={(layout, event) => {
+            event.stopPropagation();
+            const bounds = event.currentTarget.getBoundingClientRect();
+            setLayoutMenu({ x: bounds.left, y: bounds.bottom, layoutId: layout.id });
+          }}
+          onContextMenu={(layout, event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setLayoutMenu({ x: event.clientX, y: event.clientY, layoutId: layout.id });
+          }} />, layouts.paneHost)}
+      {/* On the body, as it opens over the Side pane rather than the canvas. */}
+      {layoutMenu && createPortal(<div role="menu" className="strip-menu" aria-label="Apply Layout"
+        style={{ left: Math.min(layoutMenu.x, window.innerWidth - 220), top: Math.min(layoutMenu.y, window.innerHeight - 100) }}>
+        {([["left", spread.left], ["right", spread.right]] as const).map(([side, page]) => page && (
+          <button key={side} role="menuitem" type="button" disabled={disabled}
+            onClick={() => { applyLayoutTo(page.id, layoutMenu.layoutId); setLayoutMenu(null); }}>Apply to {side} Page</button>
+        ))}
+      </div>, document.body)}
       {deleteTarget && <ModalDialog label="Discard Spread and its content?" closeDisabled={deleting} onClose={() => setDeleteTarget(null)}>
           <h2>Discard Spread and its content?</h2>
           <label><input type="checkbox" checked={neverAsk} onChange={(event) => setNeverAsk(event.target.checked)} /> Never ask again</label>

@@ -36,3 +36,19 @@ export function readPhotoDrag(dataTransfer: DataTransfer): (PlaceablePhoto & { t
     return null;
   }
 }
+
+const LAYOUT_TYPE = "application/x-phalbummakr-layout";
+
+/** A Layout dragged from the Layout Library onto a Page. Only its id travels: the Layout is read from the shared Library on drop. */
+export function writeLayoutDrag(dataTransfer: DataTransfer, layoutId: string) {
+  dataTransfer.effectAllowed = "copy";
+  dataTransfer.setData(LAYOUT_TYPE, layoutId);
+}
+
+export function hasLayoutDrag(dataTransfer: DataTransfer): boolean {
+  return Array.from(dataTransfer.types ?? []).includes(LAYOUT_TYPE);
+}
+
+export function readLayoutDrag(dataTransfer: DataTransfer): string | null {
+  return hasLayoutDrag(dataTransfer) ? dataTransfer.getData(LAYOUT_TYPE) || null : null;
+}
