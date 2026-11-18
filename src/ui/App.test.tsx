@@ -184,10 +184,14 @@ it("keeps Album commands enabled while an autosave is pending but not while edit
   expect(["Delete", "Add Spread", "Album Settings…"].map((name) => barButton(name).disabled)).toEqual([true, true, true]);
 });
 
-it("switches between Album, Layouts and Sort modes, keeping the Album's state", async () => {
+const modeGroup = () => within(screen.getByRole("group", { name: "Mode" }));
+
+it("switches between Album, Layouts and Sort modes from the Photo pane, keeping the Album's state", async () => {
   render(<App ports={openAlbumPorts()} />);
   await screen.findByText("Original");
-  const modes = within(bar().getByRole("group", { name: "Mode" }));
+  expect(bar().queryByRole("group", { name: "Mode" })).toBeNull();
+  const pane = screen.getByRole("region", { name: "Photo pane" });
+  const modes = within(within(pane).getByRole("group", { name: "Mode" }));
   expect(modes.getAllByRole("button").map((button) => [button.textContent, button.getAttribute("aria-pressed")]))
     .toEqual([["Album", "true"], ["Layouts", "false"], ["Sort", "false"]]);
   fireEvent.click(screen.getByRole("button", { name: "Edit mock Album" }));
@@ -198,6 +202,7 @@ it("switches between Album, Layouts and Sort modes, keeping the Album's state", 
   expect(screen.getByText("Album workspace inactive")).toBeTruthy();
   expect(bar().queryByRole("button", { name: "Add Photo Slot" })).toBeNull();
   expect(barButton("Album Settings…")).toBeTruthy();
+  expect(pane.hidden).toBe(false);
 
   fireEvent.click(modes.getByRole("button", { name: "Sort" }));
   expect(screen.getByRole("region", { name: "Sort" }).textContent).toContain("028");
@@ -212,12 +217,12 @@ it("opens every Album in Album mode, whichever mode the previous Album was left 
   native.enabled = true;
   render(<App ports={openAlbumPorts()} />);
   await screen.findByText("Original");
-  fireEvent.click(within(bar().getByRole("group", { name: "Mode" })).getByRole("button", { name: "Sort" }));
+  fireEvent.click(modeGroup().getByRole("button", { name: "Sort" }));
   await waitFor(() => expect(native.items.find((entry) => entry.text === "Close Album")?.enabled).toBe(true));
   await act(async () => native.items.find((entry) => entry.text === "Close Album")!.action!());
   fireEvent.click(await screen.findByRole("button", { name: "D:\\Photos\\album.phalbum" }));
   await screen.findByText("Original");
-  expect(barButton("Album").getAttribute("aria-pressed")).toBe("true");
+  expect(modeGroup().getByRole("button", { name: "Album" }).getAttribute("aria-pressed")).toBe("true");
   expect(native.inactiveMounts).toBe(0);
 });
 
@@ -524,7 +529,7 @@ function photoPanePorts(photoPane?: { width: number; collapsed: boolean; compact
   } satisfies DocumentPorts;
 }
 
-it("unpins and pins the Photo pane from its pin, its edge button and Ctrl+B, compacts it, and remembers it", async () => {
+it("collapses the Photo pane to a mode rail and expands it from the selected mode, another mode or Ctrl+B, and remembers it", async () => {
   const ports = photoPanePorts({ width: 300, collapsed: false, compact: false });
   render(<App ports={ports} />);
   await screen.findByText("Original");
@@ -532,24 +537,34 @@ it("unpins and pins the Photo pane from its pin, its edge button and Ctrl+B, com
   expect(bar().queryByRole("button", { name: "Compact Photos" })).toBeNull();
   const pane = screen.getByRole("region", { name: "Photo pane" });
   expect(pane.style.width).toBe("300px");
-  expect(within(pane).getByRole("heading", { name: "Photos" })).toBeTruthy();
-  const pin = within(pane).getByRole("button", { name: "Pin Photo pane" });
-  expect(pin.getAttribute("aria-pressed")).toBe("true");
-  expect(pin.getAttribute("aria-keyshortcuts")).toBe("Control+B");
-  expect(pin.title).toContain("Ctrl+B");
-  expect(screen.queryByRole("button", { name: "Show Photo pane" })).toBeNull();
+  expect(screen.queryByRole("navigation", { name: "Modes" })).toBeNull();
+  const album = modeGroup().getByRole("button", { name: "Album" });
+  expect(album.getAttribute("aria-expanded")).toBe("true");
+  expect(album.getAttribute("aria-keyshortcuts")).toBe("Control+B");
+  expect(album.title).toBe("Album · Hide the Photo pane (Ctrl+B)");
+  expect(modeGroup().getByRole("button", { name: "Sort" }).title).toBe("Sort");
 
-  fireEvent.click(pin);
+  fireEvent.click(album);
   expect(pane.hidden).toBe(true);
   expect(ports.setPhotoPane).toHaveBeenLastCalledWith({ width: 300, collapsed: true, compact: false });
-  const show = screen.getByRole("button", { name: "Show Photo pane" });
-  expect(show.getAttribute("aria-keyshortcuts")).toBe("Control+B");
-  expect(show.title).toContain("Ctrl+B");
-  fireEvent.click(show);
+  const rail = within(screen.getByRole("navigation", { name: "Modes" }));
+  expect(document.activeElement).toBe(rail.getByRole("button", { name: "Album" }));
+  expect(rail.getAllByRole("button").map((button) => [button.getAttribute("aria-label"), button.textContent, button.title]))
+    .toEqual([["Album", "", "Album · Show the Photo pane (Ctrl+B)"], ["Layouts", "", "Layouts"], ["Sort", "", "Sort"]]);
+  expect(rail.getByRole("button", { name: "Album" }).getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(rail.getByRole("button", { name: "Album" }));
   expect(pane.hidden).toBe(false);
+  expect(screen.queryByRole("navigation", { name: "Modes" })).toBeNull();
+
   fireEvent.keyDown(window, { key: "b", ctrlKey: true });
   expect(pane.hidden).toBe(true);
   expect(screen.getByText("Photo browser")).toBeTruthy();
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Modes" })).getByRole("button", { name: "Layouts" }));
+  expect(pane.hidden).toBe(false);
+  expect(document.activeElement).toBe(modeGroup().getByRole("button", { name: "Layouts" }));
+  expect(screen.getByRole("region", { name: "Layouts" })).toBeTruthy();
+  fireEvent.keyDown(window, { key: "B", ctrlKey: true });
+  expect(pane.hidden).toBe(true);
   fireEvent.keyDown(window, { key: "B", ctrlKey: true });
   expect(pane.hidden).toBe(false);
 
@@ -574,6 +589,7 @@ it("leaves Ctrl+B to text fields, Text Slots that handle it and open dialogs", a
   await act(async () => item("File", "Preferences…")!.action!());
   fireEvent.keyDown(screen.getByRole("button", { name: "Close" }), { key: "b", ctrlKey: true });
   expect(pane.hidden).toBe(false);
+  expect(modeGroup().getAllByRole("button").map((button) => (button as HTMLButtonElement).disabled)).toEqual([true, true, true]);
   expect(ports.setPhotoPane).not.toHaveBeenCalled();
 });
 

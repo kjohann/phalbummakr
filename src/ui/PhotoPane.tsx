@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { MODES, type Mode } from "./modes";
 
 export interface PhotoPaneSettings {
   width: number;
@@ -20,13 +21,64 @@ function windowMaxWidth() {
   return Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.floor(window.innerWidth * MAX_WINDOW_SHARE)));
 }
 
-/** The left pane. Its header and pin stay the same whatever it shows; `title` names the current content. */
-export default function PhotoPane({ title, settings, onChange, children }: {
-  title: string;
+const MODE_ICONS: Record<Mode, ReactNode> = {
+  album: <path d="M3 3.5h4.5a1.5 1.5 0 0 1 1.5 1.5v9a1.5 1.5 0 0 0-1.5-1.5H3zM15 3.5h-4.5A1.5 1.5 0 0 0 9 5v9a1.5 1.5 0 0 1 1.5-1.5H15z" />,
+  layouts: <path d="M3 3h12v12H3zM3 9h7M10 3v12" />,
+  sort: <path d="M2.5 5.5V14a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1H9L7.5 4h-4a1 1 0 0 0-1 1.5zM9 8.5v4M7 10.5l2 2 2-2" />,
+};
+
+export interface PaneModes {
+  current: Mode;
+  onChange: (mode: Mode) => void;
+  disabled?: boolean;
+}
+
+function ModeSwitch({ modes, collapsed, onToggle, focusOnMount }: {
+  modes: PaneModes;
+  collapsed: boolean;
+  onToggle: () => void;
+  /** The expanded switch and the rail are separate elements, so the clicked mode takes focus in the one that replaces it. */
+  focusOnMount: { current: Mode | null };
+}) {
+  return (
+    <div className={collapsed ? "pane-modes pane-modes--rail" : "pane-modes"} role="group" aria-label="Mode">
+      {MODES.map(({ id, label }) => {
+        const selected = modes.current === id;
+        return (
+          <button key={id} type="button" className="pane-mode" aria-label={label}
+            aria-pressed={selected} aria-expanded={selected ? !collapsed : undefined}
+            aria-keyshortcuts={selected ? "Control+B" : undefined} disabled={modes.disabled}
+            title={selected ? `${label} · ${collapsed ? "Show" : "Hide"} the Photo pane (Ctrl+B)` : label}
+            ref={(button) => {
+              if (button && focusOnMount.current === id) {
+                focusOnMount.current = null;
+                button.focus();
+              }
+            }}
+            onClick={() => {
+              if (selected || collapsed) focusOnMount.current = id;
+              if (!selected) modes.onChange(id);
+              if (selected || collapsed) onToggle();
+            }}>
+            <svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor"
+              strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round">{MODE_ICONS[id]}</svg>
+            {!collapsed && <span>{label}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The left pane. It always shows the mode switch, and collapses to an icon-only rail of it, as in VS Code. */
+export default function PhotoPane({ modes, settings, onChange, children }: {
+  modes: PaneModes;
   settings: PhotoPaneSettings;
   onChange: (change: Partial<PhotoPaneSettings>) => void;
   children: ReactNode;
 }) {
+  const toggle = () => onChange({ collapsed: !settings.collapsed });
+  const focusOnMount = useRef<Mode | null>(null);
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const stopDrag = useRef<(() => void) | null>(null);
   useEffect(() => () => stopDrag.current?.(), []);
@@ -67,25 +119,16 @@ export default function PhotoPane({ title, settings, onChange, children }: {
   return (
     <>
       <section className="photo-pane" aria-label="Photo pane" hidden={settings.collapsed} style={{ width }}>
-        <header className="photo-pane-header">
-          <h1>{title}</h1>
-          <button type="button" className="photo-pane-pin" aria-label="Pin Photo pane" aria-pressed={!settings.collapsed}
-            aria-keyshortcuts="Control+B" title="Unpin Photo pane (Ctrl+B)"
-            onClick={() => onChange({ collapsed: true })}>
-            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-              <path d="M5 1.5h6M6 1.5v5L3.5 9.5h9L10 6.5v-5M8 9.5V15" fill="none" stroke="currentColor"
-                strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round" />
-            </svg>
-          </button>
-        </header>
+        {!settings.collapsed && <ModeSwitch modes={modes} collapsed={false} onToggle={toggle} focusOnMount={focusOnMount} />}
         <div className="photo-pane-content">{children}</div>
         <div className="photo-pane-resizer" role="separator" aria-orientation="vertical" aria-label="Resize Photos"
           aria-valuenow={width} aria-valuemin={MIN_WIDTH} aria-valuemax={maxWidth} tabIndex={0}
           onMouseDown={startResize} onKeyDown={resizeWithKeys} />
       </section>
       {settings.collapsed && (
-        <button type="button" className="photo-pane-open" aria-label="Show Photo pane" aria-keyshortcuts="Control+B"
-          title="Show Photo pane (Ctrl+B)" onClick={() => onChange({ collapsed: false })}>›</button>
+        <nav className="photo-pane-rail" aria-label="Modes">
+          <ModeSwitch modes={modes} collapsed onToggle={toggle} focusOnMount={focusOnMount} />
+        </nav>
       )}
     </>
   );

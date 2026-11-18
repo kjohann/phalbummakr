@@ -6,9 +6,10 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { createAlbum, deserializeAlbum, serializeAlbum, type Album } from "../core";
 import AlbumWorkspace, { type AlbumCommand, type AlbumCommandName } from "./AlbumWorkspace";
-import CommandBar, { type BarCommand, type Mode } from "./CommandBar";
+import CommandBar, { type BarCommand } from "./CommandBar";
+import type { Mode } from "./modes";
 import PhotoBrowser from "./PhotoBrowser";
-import PhotoPane, { clampPaneWidth, DEFAULT_PHOTO_PANE, type PhotoPaneSettings } from "./PhotoPane";
+import PhotoPane, { clampPaneWidth, DEFAULT_PHOTO_PANE, type PaneModes, type PhotoPaneSettings } from "./PhotoPane";
 import ModalDialog from "./ModalDialog";
 
 interface Settings {
@@ -66,13 +67,13 @@ interface DeletionPreferences {
   setConfirmSlotDeletion: (value: boolean) => Promise<void>;
 }
 
-function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, suspended, mode, command, onSlotSelectedChange, onEditableChange, preferences, photoPane, onPhotoPaneChange }: {
+function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, suspended, modes, command, onSlotSelectedChange, onEditableChange, preferences, photoPane, onPhotoPaneChange }: {
   document: OpenDocument;
   onBusyChange: (busy: boolean) => void;
   onTitleChange: (album: Album | null) => void;
   hidden: boolean;
   suspended: boolean;
-  mode: Mode;
+  modes: PaneModes;
   command: AlbumCommand | undefined;
   onSlotSelectedChange: (selected: boolean) => void;
   onEditableChange: (editable: boolean) => void;
@@ -85,9 +86,10 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
     setAlbum(next);
     onTitleChange(next);
   }, [onTitleChange]);
+  const mode = modes.current;
   return (
     <div className="library-workspace" style={{ display: hidden ? "none" : undefined }}>
-      <PhotoPane title="Photos" settings={photoPane} onChange={onPhotoPaneChange}>
+      <PhotoPane modes={modes} settings={photoPane} onChange={onPhotoPaneChange}>
         <PhotoBrowser root={document.root} album={album} compact={photoPane.compact}
           onCompactChange={(compact) => onPhotoPaneChange({ compact })} />
       </PhotoPane>
@@ -436,8 +438,7 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
 
   return (
     <main className="app-shell">
-      <CommandBar mode={albumOpen ? { current: mode, onChange: setMode, disabled: preferencesOpen } : undefined}
-        context={contextCommands} document={documentCommands} />
+      <CommandBar context={contextCommands} document={documentCommands} />
       {error && <p className="error-banner" role="alert">{error}</p>}
       {preferencesOpen && <ModalDialog label="Preferences" closeDisabled={preferenceSaving} onClose={() => setPreferencesOpen(false)}>
           <h1>Preferences</h1>
@@ -483,7 +484,8 @@ export default function App({ ports = desktopPorts }: { ports?: DocumentPorts })
         </section>
       )}
       {document && <DocumentWorkspace key={document.id} document={document} onBusyChange={reportBusy}
-        onTitleChange={reportTitle} hidden={draft !== null} suspended={transitioning} mode={mode}
+        onTitleChange={reportTitle} hidden={draft !== null} suspended={transitioning}
+        modes={{ current: mode, onChange: setMode, disabled: preferencesOpen }}
         command={command} onSlotSelectedChange={setSlotSelected} onEditableChange={setAlbumEditable}
         preferences={{ confirmSpreadDeletion, setConfirmSpreadDeletion, confirmSlotDeletion, setConfirmSlotDeletion }}
         photoPane={photoPane} onPhotoPaneChange={changePhotoPane} />}

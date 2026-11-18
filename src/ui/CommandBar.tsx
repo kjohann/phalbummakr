@@ -1,13 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 
-export type Mode = "album" | "layouts" | "sort";
-
-export const MODES: { id: Mode; label: string }[] = [
-  { id: "album", label: "Album" },
-  { id: "layouts", label: "Layouts" },
-  { id: "sort", label: "Sort" },
-];
-
 export interface BarCommand {
   id: string;
   label: string;
@@ -22,8 +14,6 @@ export interface BarCommand {
 }
 
 interface Props {
-  /** Absent while no Album is open. */
-  mode?: { current: Mode; onChange: (mode: Mode) => void; disabled?: boolean };
   context: BarCommand[];
   document: BarCommand[];
 }
@@ -105,7 +95,7 @@ function OverflowMenu({ commands }: { commands: BarCommand[] }) {
   </div>;
 }
 
-export default function CommandBar({ mode, context, document: documentCommands }: Props) {
+export default function CommandBar({ context, document: documentCommands }: Props) {
   const barRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef<HTMLSpanElement>(null);
@@ -113,7 +103,7 @@ export default function CommandBar({ mode, context, document: documentCommands }
   const all = [...context, ...documentCommands];
   const commandsRef = useRef(all);
   commandsRef.current = all;
-  const layoutKey = `${mode ? "modes" : ""}|${all.map((command) => `${command.id}:${command.label}`).join("|")}`;
+  const layoutKey = all.map((command) => `${command.id}:${command.label}`).join("|");
 
   useLayoutEffect(() => {
     const bar = barRef.current;
@@ -134,12 +124,6 @@ export default function CommandBar({ mode, context, document: documentCommands }
   const shown = (commands: BarCommand[], measure: boolean) => measure ? commands : commands.filter((command) => !hidden.includes(command.id));
   const overflowed = all.filter((command) => hidden.includes(command.id));
   const groups = (measure: boolean) => <>
-    {mode && <div className="command-group command-modes" role="group" aria-label="Mode">
-      {MODES.map(({ id, label }) => (
-        <button key={id} type="button" className="command" tabIndex={measure ? -1 : undefined}
-          aria-pressed={mode.current === id} disabled={mode.disabled} onClick={() => mode.onChange(id)}>{label}</button>
-      ))}
-    </div>}
     <div className="command-group command-context">
       {shown(context, measure).map((command) => <CommandButton key={command.id} command={command} measure={measure} />)}
     </div>

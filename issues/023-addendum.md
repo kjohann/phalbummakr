@@ -77,3 +77,100 @@ toggle button inside that pane. Both then leave the command bar.
     the pane is hidden when unpinned. It still reads as a pin, as the addendum
     asks. In practice it is a one-way "unpin" button, and the edge button pins
     the pane again.
+
+## Section 2 - Mode bar on the left pane
+
+Status: done
+
+### Feedback
+
+Removing the edge handle made it impossible to pin the pane again after
+unpinning it: the small "›" edge button and Ctrl+B were too easy to miss. The
+pane should behave more like the left side of VS Code. The mode switch moves
+into the pane, and collapsing the pane leaves a vertical, icon-only bar with
+tooltips. Clicking the selected icon collapses and expands the pane.
+
+### Additional acceptance criteria
+
+- [x] The mode switch (Album, Layouts, Sort) moves from the command bar to the
+  top of the left pane, where it replaces the pin. The command bar no longer
+  shows it.
+- [x] Collapsing the pane leaves a narrow vertical bar along the window edge
+  with one icon per mode, each with a tooltip. The bar never disappears, so
+  the pane can always be opened again.
+- [x] Clicking the selected mode collapses or expands the pane. Clicking
+  another mode switches to it and expands the pane, as in VS Code.
+- [x] Ctrl+B still collapses and expands the pane, with the same exceptions as
+  before. The selected mode's tooltip shows the shortcut.
+- [x] Mode rules are unchanged: every Album opens in Album mode, the mode is
+  not saved, and switching keeps each mode's state. The switch is disabled
+  while Preferences is open.
+- [x] Collapsed state, width and Compact are still remembered per computer in
+  `settings.json`.
+
+### Notes
+
+- This replaces Section 1's pin, its edge "Show Photo pane" button and the
+  pane's `title` heading. Section 1's Notes describe that earlier state. The
+  Compact toggle in the Photo browser header and the settings are unchanged.
+- `Mode` and `MODES` moved from `CommandBar.tsx` to `modes.ts`. `CommandBar`
+  no longer takes a `mode` prop. `App` passes `{ current, onChange, disabled }`
+  as `PaneModes` through `DocumentWorkspace` to `PhotoPane`. The disabled rule
+  (Preferences open) is unchanged.
+- `PhotoPane` renders the mode switch (group "Mode") at the top of the
+  expanded pane, with icons and labels. Collapsed, it renders a rail (`nav`
+  "Modes") with the same switch, icons only. Each button has its mode as its
+  `aria-label` and its `title`. The selected mode also has `aria-expanded`,
+  `aria-keyshortcuts="Control+B"` and the tooltip "Album · Hide/Show the Photo
+  pane (Ctrl+B)". The pane's content stays mounted while it is collapsed, as
+  before.
+- Clicking another mode in the rail switches modes and expands the pane, as in
+  VS Code. Clicking another mode while the pane is expanded only switches
+  modes.
+- Focus: the expanded switch and the rail are separate elements. The clicked
+  mode takes focus in whichever one replaces the other, so keyboard users can
+  press it again. A code review found this.
+- Narrow panes: below 280 px a container query hides the mode labels, leaving
+  icons with tooltips. The Photo browser header wraps, and its buttons are
+  tighter, so Compact and Rescan fit at the 200 px minimum width. Section 1
+  had let them overflow there.
+- Tests: `App.test.tsx` covers:
+  - the mode switch in the pane, and its absence from the bar
+  - collapsing to the rail and expanding from the selected or another mode
+  - tooltips, Ctrl+B, focus, the disabled state while Preferences is open,
+    and persistence
+- Verified in a temporary browser harness (removed):
+  - the expanded switch, the rail, switching from the rail, the 200 px
+    layout, and Ctrl+B dispatched to the page
+  - The integrated browser's host takes a physical Ctrl+B for itself, so that
+    path still needs a check in `tauri dev`.
+
+### Earlier considerations reviewed
+
+- Section 1: "the pin's `aria-pressed` is always `true` while visible" is
+  obsolete. The pin is gone.
+- Section 1: "check the pane header, pin and Compact toggle by eye" is
+  partly done: the browser harness covered the new layout. WebView2 is still
+  unchecked.
+- Section 1 and 020: the "Photo pane" naming stays deferred. The pane now also
+  owns the mode switch, so the name fits less well. Rename it when 025 or 010
+  give the pane other content.
+- 020: the pane settings travelling through `DocumentWorkspace` stay deferred.
+  `modes` now travels the same way.
+- 023: the WebView2 smoke test of the bar stays deferred. The bar no longer
+  has the mode switch.
+
+### Future considerations (low priority)
+
+- Smoke-test in `tauri dev`: the rail, tooltips, a physical Ctrl+B and focus
+  after collapsing.
+- Code review judgement calls:
+  - Shotgun Surgery: a mode's label lives in `MODES` (`modes.ts`) and its icon
+    in `MODE_ICONS` (`PhotoPane.tsx`). `Record<Mode, …>` catches a missing
+    icon, but a new mode touches both files.
+  - Tramp data: `DocumentWorkspace` passes `PaneModes` on to `PhotoPane` and
+    only reads `current` itself.
+  - The pane no longer has a heading naming its content ("Photos"). Section 1
+    added one; the mode switch now heads the pane instead. This was a
+    deliberate choice.
+
