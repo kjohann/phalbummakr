@@ -17,7 +17,7 @@ export interface SlotDrag {
   bypass: boolean;
 }
 
-export function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, trimHeight: number): {
+export function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, trimHeight: number, measurePlaceholders = false): {
   album: Album;
   guides: SnapGuide[];
 } {
@@ -29,7 +29,7 @@ export function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, t
   const apply = (rect: Rectangle) => drag.kind === "move"
     ? moveSlot(album, drag.pageId, drag.slotId, rect.x, rect.y)
     : resizeSlot(album, drag.pageId, drag.slotId, rect.width, rect.height);
-  const updated = fitTextSlots(apply(unclamped), album);
+  const updated = fitTextSlots(apply(unclamped), album, measurePlaceholders);
   if (drag.bypass) return { album: updated, guides: [] };
   const page = updated.pages.find((item) => item.id === drag.pageId)!;
   const proposed = page.slots.find((item) => item.id === drag.slotId)!;
@@ -46,11 +46,11 @@ export function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, t
     resizeWidth: !sidewaysText,
     resizeHeight: slot.type === "photo" || sidewaysText,
     project: (rect) => {
-      const candidate = fitTextSlots(apply(rect), album);
+      const candidate = fitTextSlots(apply(rect), album, measurePlaceholders);
       return candidate.pages.find((item) => item.id === drag.pageId)!.slots.find((item) => item.id === drag.slotId)!;
     },
   });
-  const result = fitTextSlots(apply(snapped.rect), album);
+  const result = fitTextSlots(apply(snapped.rect), album, measurePlaceholders);
   const actual = result.pages.find((item) => item.id === drag.pageId)!.slots.find((item) => item.id === drag.slotId)!;
   return {
     album: result,
@@ -61,20 +61,23 @@ export function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, t
   };
 }
 
-export function TextContent({ slot, id, rect, scale, format, hidden, onOverflow }: {
+/** Draws a Text Slot's text, or, where `showPlaceholder` is set and the Slot is empty, its placeholder greyed out. */
+export function TextContent({ slot, id, rect, scale, format, hidden, showPlaceholder, onOverflow }: {
   slot: TextSlot; id: string; rect: Rectangle;
-  scale: number; format: PageFormat; hidden: boolean; onOverflow: (id: string, overflow: boolean) => void;
+  scale: number; format: PageFormat; hidden: boolean; showPlaceholder: boolean; onOverflow: (id: string, overflow: boolean) => void;
 }) {
-  const layout = useMemo(() => measureTextSlot(slot, format), [slot.text, slot.style, slot.width, slot.height, slot.rotation, format]);
+  const layout = useMemo(() => measureTextSlot(slot, format),
+    [slot.text, slot.placeholder, slot.style, slot.width, slot.height, slot.rotation, format]);
+  const placeholder = !slot.text && showPlaceholder;
   useEffect(() => { onOverflow(id, layout.tooWide); }, [id, layout.tooWide, onOverflow]);
   const textScale = scale / POINTS_PER_MM;
   return (
     <Group x={rect.x} y={rect.y} scaleX={textScale} scaleY={textScale}
       clipX={0} clipY={0} clipWidth={layout.width} clipHeight={rect.height / textScale}>
-      <Text width={layout.width} text={slot.text}
+      <Text width={layout.width} text={placeholder ? slot.placeholder : slot.text}
         fontFamily={slot.style.fontFamily} fontSize={slot.style.fontSize} fontStyle={textFontStyle(slot.style)}
         textDecoration={slot.style.underline ? "underline" : ""}
-        fill={slot.style.color} align={slot.style.align} lineHeight={TEXT_LINE_HEIGHT} opacity={hidden ? 0 : 1} />
+        fill={slot.style.color} align={slot.style.align} lineHeight={TEXT_LINE_HEIGHT} opacity={hidden ? 0 : placeholder ? 0.4 : 1} />
     </Group>
   );
 }

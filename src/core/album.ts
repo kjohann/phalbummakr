@@ -1,4 +1,4 @@
-import { validateSlots, type Slot } from "./slots";
+import { DEFAULT_PLACEHOLDER, validateSlots, type Slot } from "./slots";
 
 export interface PageFormat {
   size: "A4";
@@ -141,7 +141,10 @@ export function deserializeAlbum(json: string): Album {
   for (const page of album.pages) {
     for (const slot of page.slots) {
       if (slot.placement) slot.placement.fit ??= false;
-      if (slot.type === "text") slot.style.underline ??= false;
+      if (slot.type === "text") {
+        slot.style.underline ??= false;
+        slot.placeholder ??= DEFAULT_PLACEHOLDER;
+      }
     }
   }
   return album;

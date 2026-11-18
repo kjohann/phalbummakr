@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Group, Layer, Rect, Stage } from "react-konva";
 import {
   addPhotoSlot, addTextSlot, deleteLayout, deleteSlot, duplicateLayout, madeForOtherAspectRatio, newLayout, pageAspectRatio, pageDimensions,
-  readLayoutLibrary, rotateSlot, serializeLayoutLibrary, setLayoutSlots, setTextStyle,
+  readLayoutLibrary, rotateSlot, serializeLayoutLibrary, setLayoutSlots, setSlotPlaceholder, setTextStyle, POINTS_PER_MM, TEXT_LINE_HEIGHT,
   type Album, type Layout, type LayoutLibrary, type LayoutPorts, type PageFormat, type Slot, type TextStyle,
 } from "../core";
 import ModalDialog from "./ModalDialog";
@@ -54,7 +54,6 @@ interface Props {
 }
 
 const LAYOUT_PAGE = "layout";
-const SAMPLE_TEXT = "Sample text";
 
 /** Edits a Layout through the same Slot operations as a Page, as a one-Page Album. */
 function layoutAlbum(layout: Layout, format: PageFormat): Album {
@@ -104,6 +103,8 @@ export default function LayoutWorkspace({ root, format, ports = tauriLayoutPorts
   const saveInFlight = useRef(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
+  /** The Text Slot whose placeholder is being edited. */
+  const [editingPlaceholder, setEditingPlaceholder] = useState<string | null>(null);
   const [layoutDeleteTarget, setLayoutDeleteTarget] = useState<string | null>(null);
   const [slotDeleteTarget, setSlotDeleteTarget] = useState<string | null>(null);
   const [neverAsk, setNeverAsk] = useState(false);
@@ -122,6 +123,12 @@ export default function LayoutWorkspace({ root, format, ports = tauriLayoutPorts
   const handledCommand = useRef(command?.serial);
   const formatRef = useRef(format);
   formatRef.current = format;
+
+  /** Selecting another Slot, or none, ends editing a placeholder. */
+  function selectSlot(slotId: string | null) {
+    if (slotId !== selectedSlotId) setEditingPlaceholder(null);
+    setSelectedSlotId(slotId);
+  }
 
   function setLibrary(next: LayoutLibrary | null) {
     libraryRef.current = next;
@@ -191,7 +198,7 @@ export default function LayoutWorkspace({ root, format, ports = tauriLayoutPorts
   const trimTop = originY + bleedMm * scale;
   const trimWidth = dimensions.widthMm * scale;
   const trimHeight = dimensions.heightMm * scale;
-  const dragPreview = slotDrag && savedAlbum && scale > 0 ? applySlotDrag(savedAlbum, slotDrag, trimWidth, trimHeight) : null;
+  const dragPreview = slotDrag && savedAlbum && scale > 0 ? applySlotDrag(savedAlbum, slotDrag, trimWidth, trimHeight, true) : null;
   const slots = (dragPreview?.album ?? savedAlbum)?.pages[0].slots ?? [];
   const selectedSlot = slots.find((slot) => slot.id === selectedSlotId) ?? null;
 
@@ -252,14 +259,14 @@ export default function LayoutWorkspace({ root, format, ports = tauriLayoutPorts
       const target = current.layouts.find((item) => item.id === id);
       if (!target) throw new Error("Layout not found in the Layout Library.");
       const before = layoutAlbum(target, format);
-      return setLayoutSlots(current, id, fitTextSlots(update(before), before).pages[0].slots, pageAspectRatio(format));
+      return setLayoutSlots(current, id, fitTextSlots(update(before), before, true).pages[0].slots, pageAspectRatio(format));
     });
   }
 
   function selectLayout(id: string | null) {
     stopSlotDrag.current?.();
     setSelectedId(id);
-    setSelectedSlotId(null);
+    selectSlot(null);
     setCanvasMenu(null);
   }
 
@@ -268,11 +275,11 @@ export default function LayoutWorkspace({ root, format, ports = tauriLayoutPorts
     const add = type === "photo" ? addPhotoSlot : addTextSlot;
     const added = add(savedAlbum, LAYOUT_PAGE, centre).pages[0].slots.at(-1)!;
     changeLayout((current) => add(current, LAYOUT_PAGE, centre));
-    setSelectedSlotId(added.id);
+    selectSlot(added.id);
   }
 
   function removeSlot(slotId: string) {
-    setSelectedSlotId(null);
+    selectSlot(null);
     changeLayout((current) => deleteSlot(current, LAYOUT_PAGE, slotId));
   }
 
@@ -337,7 +344,7 @@ export default function LayoutWorkspace({ root, format, ports = tauriLayoutPorts
     if (key !== "b" && key !== "i" && key !== "u") return false;
     event.preventDefault();
     event.stopPropagation();
-    setSelectedSlotId(slot.id);
+    selectSlot(slot.id);
     const property = key === "b" ? "bold" : key === "i" ? "italic" : "underline";
     changeLayout((current) => {
       const currentSlot = current.pages[0].slots.find((item) => item.id === slot.id);
@@ -350,7 +357,7 @@ export default function LayoutWorkspace({ root, format, ports = tauriLayoutPorts
   function startSlotDrag(event: ReactMouseEvent, slotId: string, kind: SlotDrag["kind"]) {
     if (event.button !== 0) return;
     event.stopPropagation();
-    setSelectedSlotId(slotId);
+    selectSlot(slotId);
     if (disabled) return;
     event.preventDefault();
     stopSlotDrag.current?.();
@@ -376,7 +383,7 @@ export default function LayoutWorkspace({ root, format, ports = tauriLayoutPorts
     };
     const finish = (drag: SlotDrag) => {
       stop();
-      if (drag.dx !== 0 || drag.dy !== 0) changeLayout((current) => applySlotDrag(current, drag, trimWidth, trimHeight).album);
+      if (drag.dx !== 0 || drag.dy !== 0) changeLayout((current) => applySlotDrag(current, drag, trimWidth, trimHeight, true).album);
     };
     const up = (released: MouseEvent) => finish(offset(released));
     const blur = () => finish(latest);
@@ -494,8 +501,8 @@ export default function LayoutWorkspace({ root, format, ports = tauriLayoutPorts
                       <Group key={slot.id} x={rect.x + rect.width / 2} y={rect.y + rect.height / 2}
                         offsetX={local.width / 2} offsetY={local.height / 2} rotation={slot.rotation ?? 0}>
                         {slot.type === "text"
-                          ? <TextContent slot={{ ...slot, text: SAMPLE_TEXT }} id={slot.id} rect={local} scale={scale} format={format}
-                            hidden={false} onOverflow={ignoreOverflow} />
+                          ? <TextContent slot={slot} id={slot.id} rect={local} scale={scale} format={format}
+                            hidden={editingPlaceholder === slot.id} showPlaceholder onOverflow={ignoreOverflow} />
                           : <Rect {...local} fill="#e8ebe6" stroke="#9aa49c" strokeWidth={1} dash={[4, 3]} />}
                       </Group>
                     );
@@ -506,11 +513,11 @@ export default function LayoutWorkspace({ root, format, ports = tauriLayoutPorts
           )}
           {layout && scale > 0 && <button type="button" className="canvas-page-hit" aria-label="Layout Page"
             style={{ left: originX, top: originY, width: pageWidth, height: pageHeight }}
-            onClick={() => setSelectedSlotId(null)}
+            onClick={() => selectSlot(null)}
             onContextMenu={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              setSelectedSlotId(null);
+              selectSlot(null);
               if (disabled) return;
               const bounds = event.currentTarget.getBoundingClientRect();
               setCanvasMenu({
@@ -528,24 +535,55 @@ export default function LayoutWorkspace({ root, format, ports = tauriLayoutPorts
                 aria-pressed={slot.id === selectedSlot?.id}
                 style={{ left: trimLeft + slot.x * trimWidth, top: trimTop + slot.y * trimHeight, width: slot.width * trimWidth, height: slot.height * trimHeight }}
                 onMouseDown={(event) => startSlotDrag(event, slot.id, "move")}
-                onClick={(event) => { event.stopPropagation(); setSelectedSlotId(slot.id); }}
+                onClick={(event) => { event.stopPropagation(); selectSlot(slot.id); }}
                 onContextMenu={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
-                  setSelectedSlotId(slot.id);
+                  selectSlot(slot.id);
                   if (!disabled) setCanvasMenu({ x: event.clientX, y: event.clientY, kind: "slot", slotId: slot.id });
                 }}
+                title={slot.type === "text" ? "Double-click to edit the placeholder" : undefined}
+                onDoubleClick={() => { if (!disabled && slot.type === "text") setEditingPlaceholder(slot.id); }}
                 onKeyDown={(event) => {
                   if (toggleTextShortcut(event, slot)) return;
                   if (event.key === " " || event.key === "Enter") {
                     event.preventDefault();
-                    setSelectedSlotId(slot.id);
+                    selectSlot(slot.id);
+                    if (event.key === "Enter" && slot.type === "text" && !disabled) setEditingPlaceholder(slot.id);
                   } else if ((event.key === "Delete" || event.key === "Backspace") && !disabled) {
                     event.preventDefault();
-                    setSelectedSlotId(slot.id);
+                    selectSlot(slot.id);
                     requestDeleteSlot(slot.id);
                   }
                 }}>
+                {slot.type === "text" && editingPlaceholder === slot.id && (
+                  <textarea className="slot-text-editor" aria-label={`Edit the placeholder of ${name}`} autoFocus
+                    value={slot.placeholder} disabled={disabled}
+                    style={{
+                      ...(slot.rotation ? {
+                        inset: "auto", left: "50%", top: "50%",
+                        width: slot.rotation === 90 || slot.rotation === 270 ? slot.height * trimHeight : slot.width * trimWidth,
+                        height: slot.rotation === 90 || slot.rotation === 270 ? slot.width * trimWidth : slot.height * trimHeight,
+                        transform: `translate(-50%, -50%) rotate(${slot.rotation}deg)`,
+                      } : {}),
+                      fontFamily: slot.style.fontFamily, fontSize: slot.style.fontSize / POINTS_PER_MM * scale,
+                      color: slot.style.color, opacity: 0.6, fontWeight: slot.style.bold ? "bold" : "normal",
+                      fontStyle: slot.style.italic ? "italic" : "normal", textAlign: slot.style.align,
+                      textDecoration: slot.style.underline ? "underline" : "none", lineHeight: TEXT_LINE_HEIGHT,
+                    }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onClick={(event) => event.stopPropagation()}
+                    onContextMenu={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => {
+                      if (toggleTextShortcut(event, slot)) return;
+                      event.stopPropagation();
+                      if (event.key === "Escape") setEditingPlaceholder(null);
+                    }}
+                    onChange={(event) => {
+                      const placeholder = event.target.value;
+                      changeLayout((current) => setSlotPlaceholder(current, LAYOUT_PAGE, slot.id, placeholder));
+                    }} />
+                )}
                 {!disabled && (
                   <span className={`slot-resize-handle${slot.type === "text" ? slot.rotation === 90 || slot.rotation === 270 ? " slot-resize-handle--text-sideways" : " slot-resize-handle--text" : ""}`}
                     aria-label={`Resize ${name}`} role="button"

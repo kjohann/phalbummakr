@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { createAlbum, deserializeAlbum, duplicatePage, serializeAlbum } from "./album";
-import { addPhotoSlot, addTextSlot, deleteSlot, moveSlot, placePhoto, resizeSlot, setSlotText, setTextStyle } from "./slots";
+import { addPhotoSlot, addTextSlot, deleteSlot, moveSlot, placePhoto, resizeSlot, setSlotPlaceholder, setSlotText, setTextStyle } from "./slots";
 
 it("adds, edits, moves, resizes, saves and deletes a Text Slot", () => {
   const original = createAlbum({ name: "Test", pageCount: 2 });
@@ -42,6 +42,18 @@ it("duplicates Page text independently and rejects invalid text styles and Photo
     expect(() => deserializeAlbum(JSON.stringify(invalid))).toThrow(/Text Slot style/);
   }
   expect(deserializeAlbum(serializeAlbum(album))).toEqual(album);
+});
+
+it("gives new Text Slots the default placeholder, keeps edited placeholders and defaults it in older Albums", () => {
+  let album = addTextSlot(createAlbum({ name: "Test", pageCount: 2 }), "page-1");
+  expect(album.pages[0].slots[0]).toMatchObject({ text: "", placeholder: "Text" });
+  album = setSlotPlaceholder(album, "page-1", "slot-1", "Who is this?");
+  expect(deserializeAlbum(serializeAlbum(album)).pages[0].slots[0]).toMatchObject({ placeholder: "Who is this?" });
+  const legacy = JSON.parse(serializeAlbum(album));
+  delete legacy.pages[0].slots[0].placeholder;
+  expect(deserializeAlbum(JSON.stringify(legacy)).pages[0].slots[0]).toMatchObject({ placeholder: "Text" });
+  legacy.pages[0].slots[0].placeholder = 42;
+  expect(() => deserializeAlbum(JSON.stringify(legacy))).toThrow();
 });
 
 it("defaults legacy Text Slot underline to off and persists explicit underline", () => {

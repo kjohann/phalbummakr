@@ -550,7 +550,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
                         offsetX={localRect.width / 2} offsetY={localRect.height / 2} rotation={slot.rotation ?? 0}>
                         {slot.type === "text" ? (
                           <TextContent slot={slot} id={slotId} rect={localRect} scale={scale} format={album.pageFormat}
-                            hidden={editingText === slotId} onOverflow={reportTextOverflow} />
+                            hidden={editingText === slotId} showPlaceholder onOverflow={reportTextOverflow} />
                         ) : slot.placement ? (
                           <PlacementImage {...localRect} crop={placementDisplayCrop(slot.placement)} fit={slot.placement.fit}
                             root={root} path={slot.placement.photoPath} photoPorts={photoPorts}
@@ -742,6 +742,7 @@ export default function AlbumView({ album: savedAlbum, onChange, disabled, textD
               )}
               {slot.type === "text" && editingText === targetId && (
                 <textarea className="slot-text-editor" aria-label={`Edit ${name}`} autoFocus value={slot.text} disabled={textDisabled}
+                  placeholder={slot.placeholder}
                   ref={selectedTextEditor}
                   onFocus={() => { returnToTextEditor.current = false; }}
                   onBlur={(event) => {
@@ -1023,7 +1024,8 @@ function VisiblePagePreview({ page, format, root, photoPorts, width, height, sca
           return <Group key={slot.id} x={rect.x + rect.width / 2} y={rect.y + rect.height / 2}
             offsetX={local.width / 2} offsetY={local.height / 2} rotation={slot.rotation ?? 0}>
             {slot.type === "text"
-              ? <TextContent slot={slot} id={slot.id} rect={local} scale={scale} format={format} hidden={false} onOverflow={ignoreOverflow} />
+              ? <TextContent slot={slot} id={slot.id} rect={local} scale={scale} format={format} hidden={false}
+                showPlaceholder={false} onOverflow={ignoreOverflow} />
               : slot.placement
                 ? <PlacementImage {...local} crop={placementDisplayCrop(slot.placement)} fit={slot.placement.fit}
                   root={root} path={slot.placement.photoPath} photoPorts={photoPorts} thumbnailRequest={photoPorts.pageThumbnail}

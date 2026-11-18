@@ -43,6 +43,7 @@ export interface TextStyle {
 }
 
 export const POINTS_PER_MM = 72 / 25.4;
+export const DEFAULT_PLACEHOLDER = "Text";
 export const TEXT_LINE_HEIGHT = 1.2;
 
 export interface TextSlot {
@@ -54,6 +55,8 @@ export interface TextSlot {
   height: number;
   rotation?: SlotRotation;
   text: string;
+  /** Shown greyed out on the canvas while the Slot has no text; never printed. */
+  placeholder: string;
   style: TextStyle;
   placement?: never;
 }
@@ -98,7 +101,7 @@ export function addTextSlot(album: Album, pageId: string, centre?: { x: number; 
     ...page,
     slots: [...page.slots, {
       id: unusedSlotId(page), type: "text", x: 0.3, y: 0.3, width: 0.4, height,
-      text: "", style: { fontFamily: "Arial", fontSize: 18, color: "#000000", bold: false, italic: false, underline: false, align: "left" },
+      text: "", placeholder: DEFAULT_PLACEHOLDER, style: { fontFamily: "Arial", fontSize: 18, color: "#000000", bold: false, italic: false, underline: false, align: "left" },
     }],
   })), pageId, centre);
 }
@@ -117,6 +120,13 @@ export function setSlotText(album: Album, pageId: string, slotId: string, text: 
   return editSlot(album, pageId, slotId, (slot) => {
     if (slot.type !== "text") throw new Error("Slot is not a Text Slot.");
     return { ...slot, text };
+  });
+}
+
+export function setSlotPlaceholder(album: Album, pageId: string, slotId: string, placeholder: string): Album {
+  return editSlot(album, pageId, slotId, (slot) => {
+    if (slot.type !== "text") throw new Error("Slot is not a Text Slot.");
+    return { ...slot, placeholder };
   });
 }
 
@@ -389,14 +399,19 @@ function exactRecord(value: unknown, keys: string[]): value is Record<string, un
     && Object.keys(value).length === keys.length && keys.every((key) => key in value);
 }
 
+function recordWithKeys(value: unknown, required: string[], optional: string[]): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    && required.every((key) => key in value)
+    && Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
+}
+
 export function validateSlots(slots: unknown): asserts slots is Slot[] {
   if (!Array.isArray(slots)) throw new Error("Page Slots must be an array.");
   const ids = new Set<string>();
   for (const slot of slots) {
-    if ((!exactRecord(slot, ["id", "type", "x", "y", "width", "height", "placement"])
-      && !exactRecord(slot, ["id", "type", "x", "y", "width", "height", "placement", "rotation"])
-      && !exactRecord(slot, ["id", "type", "x", "y", "width", "height", "text", "style"])
-      && !exactRecord(slot, ["id", "type", "x", "y", "width", "height", "text", "style", "rotation"]))
+    if ((!recordWithKeys(slot, ["id", "type", "x", "y", "width", "height", "placement"], ["rotation"])
+      && !recordWithKeys(slot, ["id", "type", "x", "y", "width", "height", "text", "style"], ["rotation", "placeholder"]))
+      || ("placeholder" in slot && typeof slot.placeholder !== "string")
       || typeof slot.id !== "string" || !slot.id || ids.has(slot.id)
       || !finite(slot.x) || !finite(slot.y) || !finite(slot.width) || !finite(slot.height)
       || ("rotation" in slot && slot.rotation !== 0 && slot.rotation !== 90 && slot.rotation !== 180 && slot.rotation !== 270)

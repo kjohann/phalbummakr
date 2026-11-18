@@ -1,6 +1,6 @@
 import { pageDimensions, type Album, type PageFormat } from "./album";
 import {
-  POINTS_PER_MM, refitPlacement, TEXT_LINE_HEIGHT, validateSlots,
+  DEFAULT_PLACEHOLDER, POINTS_PER_MM, refitPlacement, TEXT_LINE_HEIGHT, validateSlots,
   type PhotoSlot, type Placement, type Slot, type TextSlot, type TextStyle,
 } from "./slots";
 
@@ -116,6 +116,9 @@ export function readLayoutLibrary(json: string | null, format: PageFormat): Layo
   if (json === null) return predefinedLayoutLibrary(format);
   const library: unknown = JSON.parse(json);
   validateLayoutLibrary(library);
+  for (const layout of library.layouts) {
+    for (const slot of layout.slots) if (slot.type === "text") slot.placeholder ??= DEFAULT_PLACEHOLDER;
+  }
   return library;
 }
 
@@ -165,7 +168,7 @@ export function predefinedLayoutLibrary(format: PageFormat): LayoutLibrary {
     id: `slot-${++slotNumber}`, type: "text",
     x: x / widthMm, y: y / heightMm, width: width / widthMm,
     height: fontSize * TEXT_LINE_HEIGHT / POINTS_PER_MM / heightMm,
-    text: "", style: { ...DEFAULT_TEXT_STYLE, fontSize },
+    text: "", placeholder: DEFAULT_PLACEHOLDER, style: { ...DEFAULT_TEXT_STYLE, fontSize },
   });
   const grid = (rows: number, columns: number, x = left, y = top, width = contentWidth, height = contentHeight) => {
     const columnWidth = (width - (columns - 1) * gap) / columns;
@@ -173,6 +176,14 @@ export function predefinedLayoutLibrary(format: PageFormat): LayoutLibrary {
     return Array.from({ length: rows * columns }, (_, index) => photo(
       x + (index % columns) * (columnWidth + gap), y + Math.floor(index / columns) * (rowHeight + gap), columnWidth, rowHeight,
     ));
+  };
+  /** Equal Slots of the given width-to-height ratio, as large as fits, centred on the Page. */
+  const centredGrid = (rows: number, columns: number, aspect: number) => {
+    const width = Math.min((contentWidth - (columns - 1) * gap) / columns, (contentHeight - (rows - 1) * gap) / rows * aspect);
+    const height = width / aspect;
+    const totalWidth = columns * width + (columns - 1) * gap;
+    const totalHeight = rows * height + (rows - 1) * gap;
+    return grid(rows, columns, (widthMm - totalWidth) / 2, (heightMm - totalHeight) / 2, totalWidth, totalHeight);
   };
   const largeWidth = (contentWidth - gap) * 0.6;
   const captionHeight = 18 * TEXT_LINE_HEIGHT / POINTS_PER_MM;
@@ -185,8 +196,10 @@ export function predefinedLayoutLibrary(format: PageFormat): LayoutLibrary {
       photo(left, top, largeWidth, contentHeight),
       ...grid(2, 1, left + largeWidth + gap, top, contentWidth - largeWidth - gap, contentHeight),
     ],
-    () => grid(1, 3),
+    () => centredGrid(1, 3, 3 / 2),
+    () => centredGrid(1, 3, 2 / 3),
     () => grid(2, 2),
+    () => centredGrid(2, 2, 2 / 3),
     () => grid(2, 3),
     () => grid(3, 3),
     () => [

@@ -15,7 +15,7 @@ describe("applying a Layout to a Page", () => {
   const photoSlot = (id: string, x: number, rotation?: 90): LayoutSlot =>
     ({ id, type: "photo", x, y: 0.1, width: 0.2, height: 0.3, ...(rotation ? { rotation } : {}), placement: null });
   const textSlot = (id: string, y: number): LayoutSlot => ({
-    id, type: "text", x: 0.1, y, width: 0.8, height: 0.05, text: "",
+    id, type: "text", x: 0.1, y, width: 0.8, height: 0.05, text: "", placeholder: `Placeholder ${id}`,
     style: { fontFamily: "Georgia", fontSize: 24, color: "#333333", bold: true, italic: false, underline: false, align: "center" },
   });
 
@@ -39,7 +39,7 @@ describe("applying a Layout to a Page", () => {
     const slots = result.album.pages[0].slots;
     expect(slots.map((slot) => [slot.type, slot.x, slot.y])).toEqual([["text", 0.1, 0.8], ["photo", 0.1, 0.1], ["photo", 0.4, 0.1], ["text", 0.1, 0.9]]);
     expect(slots.map((slot) => slot.type === "photo" ? slot.placement?.photoPath : slot.text)).toEqual(["First", "a.jpg", "b.jpg", "Second"]);
-    expect(slots[0]).toMatchObject({ style: { fontFamily: "Georgia", fontSize: 24, bold: true } });
+    expect(slots[0]).toMatchObject({ placeholder: "Placeholder slot-1", style: { fontFamily: "Georgia", fontSize: 24, bold: true } });
     expect(result.dropped).toEqual({ placements: [], texts: [] });
     expect(result.aspectMismatch).toBe(false);
     expect(result.album.pages[1]).toBe(album.pages[1]);
@@ -83,9 +83,35 @@ describe("Layout Library", () => {
   it("starts a new Library with the predefined Layouts, made for an A4 landscape canvas", () => {
     const library = predefinedLayoutLibrary(format);
     expect(library.layouts.map((layout) => slotCounts(layout.slots))).toEqual([
-      "1P0T", "2P0T", "3P0T", "3P0T", "4P0T", "6P0T", "9P0T", "1P1T", "1P1T",
+      "1P0T", "2P0T", "3P0T", "3P0T", "3P0T", "4P0T", "4P0T", "6P0T", "9P0T", "1P1T", "1P1T",
     ]);
     for (const layout of library.layouts) expect(layout.aspectRatio).toBeCloseTo(297 / 210);
+  });
+
+  it("offers equal landscape and portrait Slots, centred on the Page", () => {
+    const layouts = predefinedLayoutLibrary(format).layouts;
+    const mm = (slot: { x: number; y: number; width: number; height: number }) =>
+      ({ left: slot.x * 297, top: slot.y * 210, width: slot.width * 297, height: slot.height * 210 });
+    for (const [index, aspect] of [[3, 3 / 2], [4, 2 / 3], [6, 2 / 3]] as const) {
+      const slots = layouts[index].slots.map(mm);
+      const left = Math.min(...slots.map((slot) => slot.left));
+      const right = Math.max(...slots.map((slot) => slot.left + slot.width));
+      const top = Math.min(...slots.map((slot) => slot.top));
+      const bottom = Math.max(...slots.map((slot) => slot.top + slot.height));
+      for (const slot of slots) {
+        expect(slot.width / slot.height).toBeCloseTo(aspect);
+        expect(slot.width).toBeCloseTo(slots[0].width);
+      }
+      expect(left).toBeCloseTo(297 - right);
+      expect(top).toBeCloseTo(210 - bottom);
+    }
+    expect(new Set(layouts[3].slots.map((slot) => slot.y)).size).toBe(1);
+    expect(new Set(layouts[6].slots.map((slot) => slot.x.toFixed(9))).size).toBe(2);
+  });
+
+  it("gives every predefined Text Slot the default placeholder", () => {
+    const texts = predefinedLayoutLibrary(format).layouts.flatMap((layout) => layout.slots).filter((slot) => slot.type === "text");
+    expect(texts.map((slot) => slot.type === "text" && slot.placeholder)).toEqual(["Text", "Text"]);
   });
 
   it("covers the whole Page out to the Bleed with the full-bleed Layout", () => {
@@ -136,8 +162,15 @@ describe("Layout Library", () => {
     expect(readLayoutLibrary(null, format)).toEqual(predefinedLayoutLibrary(format));
     const emptied = { schemaVersion: 1 as const, layouts: [] };
     expect(readLayoutLibrary(serializeLayoutLibrary(emptied), format)).toEqual(emptied);
-    const library = duplicateLayout(predefinedLayoutLibrary(format), "predefined-8").library;
+    const library = duplicateLayout(predefinedLayoutLibrary(format), "predefined-10").library;
     expect(readLayoutLibrary(serializeLayoutLibrary(library), format)).toEqual(library);
+  });
+
+  it("reads Text Slots saved without a placeholder with the default one", () => {
+    const caption = predefinedLayoutLibrary(format).layouts[9];
+    const legacy = JSON.parse(serializeLayoutLibrary({ schemaVersion: 1, layouts: [caption] }));
+    delete legacy.layouts[0].slots[1].placeholder;
+    expect(readLayoutLibrary(JSON.stringify(legacy), format).layouts[0].slots[1]).toMatchObject({ placeholder: "Text" });
   });
 
   it("rejects Layout Libraries holding content or invalid Layouts", () => {
@@ -149,7 +182,7 @@ describe("Layout Library", () => {
       { schemaVersion: 1, layouts: [{ ...valid.layouts[0], name: "Named" }] },
       { schemaVersion: 1, layouts: [{ ...valid.layouts[0], slots: [{ ...valid.layouts[0].slots[0],
         placement: { photoPath: "a.jpg", crop: { x: 0, y: 0, width: 1, height: 1 }, fit: false } }] }] },
-      { schemaVersion: 1, layouts: [{ ...valid.layouts[7], slots: [valid.layouts[7].slots[0], { ...valid.layouts[7].slots[1], text: "Hi" }] }] },
+      { schemaVersion: 1, layouts: [{ ...valid.layouts[9], slots: [valid.layouts[9].slots[0], { ...valid.layouts[9].slots[1], text: "Hi" }] }] },
     ];
     for (const variant of variants) {
       expect(() => readLayoutLibrary(JSON.stringify(variant), format)).toThrow();

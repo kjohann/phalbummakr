@@ -83,6 +83,7 @@ Work order for modes: 023, then 024, the 016 addendum and 011; 025 → 026 → 0
 | [008 addendum – Filesystem-aware Photo Usage](008-addendum.md) | 008 | todo |
 | [009 addendum - Auto-height text boxes and attached controls](009-addendum.md) | 009 | done |
 | [009 addendum - Stable toolbar appearance](009-addendum.md#section-2---stable-toolbar-appearance) | 009 | done |
+| [010 addendum - Better predefined Layouts and placeholder text](010-addendum.md) | 010 | done |
 | [013 addendum - All aligned snap guides](013-addendum.md) | 013 | done |
 | [014 addendum - Upright Photos on placement](014-addendum.md) | 014 | done |
 | [015 addendum - Swap-only interaction and compact handle](015-addendum.md) | 015 | done |

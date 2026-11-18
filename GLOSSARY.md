@@ -99,6 +99,10 @@ _Avoid_: DPI, quality
 **Text Slot**:
 A Slot that shows text, such as a caption or title.
 
+**Placeholder text**:
+The hint an empty Text Slot shows greyed out on the canvas, "Text" by default. It is only edited in Layout mode, travels with the Slot when a Layout is applied, and is never printed.
+_Avoid_: Sample text, hint
+
 **Crop**:
 The part of a Photo visible in a Photo Slot when the Photo fills the Slot, chosen by panning and zooming.
 _Avoid_: Cut, trim

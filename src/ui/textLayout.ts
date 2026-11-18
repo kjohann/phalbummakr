@@ -5,18 +5,20 @@ export function textFontStyle(style: TextStyle): string {
   return `${style.italic ? "italic " : ""}${style.bold ? "bold" : "normal"}`;
 }
 
-export function measureTextSlot(slot: TextSlot, format: PageFormat) {
+/** Measures the Slot's text; Layouts, whose Text Slots only show placeholders, measure the placeholder instead. */
+export function measureTextSlot(slot: TextSlot, format: PageFormat, measurePlaceholder = false) {
+  const shown = slot.text || (measurePlaceholder ? slot.placeholder : "");
   const { widthMm, heightMm } = pageDimensions(format);
   const sideways = slot.rotation === 90 || slot.rotation === 270;
   const width = (sideways ? slot.height * heightMm : slot.width * widthMm) * POINTS_PER_MM;
   // Measure in points so line wrapping does not change with editor zoom.
   const text = new Text({
-    text: slot.text, width, fontSize: slot.style.fontSize, fontFamily: slot.style.fontFamily,
+    text: shown, width, fontSize: slot.style.fontSize, fontFamily: slot.style.fontFamily,
     fontStyle: textFontStyle(slot.style),
     lineHeight: TEXT_LINE_HEIGHT,
   });
   try {
-    const graphemes = new Set([...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(slot.text)]
+    const graphemes = new Set([...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(shown)]
       .map(({ segment }) => segment).filter((segment) => segment !== "\n" && segment !== "\r\n"));
     return {
       width,
@@ -29,7 +31,7 @@ export function measureTextSlot(slot: TextSlot, format: PageFormat) {
   }
 }
 
-export function fitTextSlots(album: Album, previous?: Album): Album {
+export function fitTextSlots(album: Album, previous?: Album, measurePlaceholders = false): Album {
   const previousPages = new Map(previous?.pages.map((page) => [page.id, page]));
   let changed = false;
   const pages = album.pages.map((page) => {
@@ -45,9 +47,9 @@ export function fitTextSlots(album: Album, previous?: Album): Album {
       const width = sideways ? slot.height * heightMm : slot.width * widthMm;
       const oldWidth = old?.type === "text"
         ? (old.rotation === 90 || old.rotation === 270 ? old.height * heightMm : old.width * widthMm) : null;
-      if (old?.type === "text" && old.text === slot.text && oldWidth !== null
+      if (old?.type === "text" && old.text === slot.text && old.placeholder === slot.placeholder && oldWidth !== null
         && Math.abs(oldWidth - width) < 1e-9 && old.style === slot.style) return slot;
-      const { height } = measureTextSlot(slot, album.pageFormat);
+      const { height } = measureTextSlot(slot, album.pageFormat, measurePlaceholders);
       const currentHeight = sideways ? slot.width : slot.height;
       if (Math.abs(height - currentHeight) < 1e-9) return slot;
       pageChanged = true;

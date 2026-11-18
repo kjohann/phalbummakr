@@ -6,6 +6,8 @@ Status: done · Depends on: 006, 009, 013, 014, 023, 024
 
 Create and edit Layouts in a dedicated Layout mode. Applying Layouts to Pages in Album mode is [029](029-apply-layouts.md).
 
+Follow-up feedback: [010 addendum](010-addendum.md).
+
 ## Acceptance criteria
 
 - [x] The Layout Library belongs to the Library and is stored under `.phalbummakr/`. Every Album in the Library shares it.

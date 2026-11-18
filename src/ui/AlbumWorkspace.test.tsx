@@ -2,7 +2,7 @@
 import { useState, type ComponentProps, type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { addPhotoSlot, addTextSlot, createAlbum, deserializeAlbum, photoUsage, placePhoto, serializeAlbum, setSlotText, type Album, type AlbumPorts } from "../core";
+import { addPhotoSlot, addTextSlot, createAlbum, deserializeAlbum, photoUsage, placePhoto, serializeAlbum, setSlotPlaceholder, setSlotText, type Album, type AlbumPorts } from "../core";
 import Workspace, { type AlbumCommand, type AlbumCommandName } from "./AlbumWorkspace";
 import PhotoBrowser from "./PhotoBrowser";
 import { PhotoSlotTools } from "./SlotTools";
@@ -11,7 +11,7 @@ vi.mock("react-konva", () => ({
   Stage: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   Layer: ({ children }: { children: ReactNode }) => <>{children}</>,
   Rect: () => null,
-  Text: ({ text }: { text: string }) => <span>{text}</span>,
+  Text: ({ text, opacity }: { text: string; opacity?: number }) => <span style={{ opacity }}>{text}</span>,
   Group: ({ children, rotation }: { children: ReactNode; rotation?: number }) =>
     <div data-slot-rotation={rotation}>{children}</div>,
   Image: ({ image, opacity }: { image: HTMLImageElement; opacity?: number }) =>
@@ -111,6 +111,32 @@ it("inserts an empty Spread between existing Spreads from the strip", () => {
   fireEvent.click(strip.getByRole("button", { name: "Insert Spread before Spread 2" }));
   expect(screen.getByText("PAGE 2 OF 6")).toBeTruthy();
   expect(strip.getAllByRole("group", { name: /Spread \d/ })).toHaveLength(4);
+});
+
+it("shows an empty Text Slot's placeholder greyed out on the canvas, but not in the strip", () => {
+  const { ports } = disk();
+  const album = addTextSlot(createAlbum({ name: "Existing" }), "page-1");
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} document={{ path: "Existing", album }} />);
+  const editor = within(screen.getByRole("group", { name: "Spread editor" }));
+  expect(Number(editor.getByText("Text").style.opacity)).toBeLessThan(1);
+  expect(within(screen.getByRole("navigation", { name: "Spreads" })).queryByText("Text")).toBeNull();
+  fireEvent.doubleClick(editor.getByRole("button", { name: "Page 1 Text Slot 1" }));
+  const textbox = screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" });
+  expect(textbox.getAttribute("placeholder")).toBe("Text");
+  fireEvent.change(textbox, { target: { value: "Hello" } });
+  fireEvent.keyDown(textbox, { key: "Escape" });
+  expect(editor.queryByText("Text")).toBeNull();
+  expect(Number(editor.getByText("Hello").style.opacity)).toBe(1);
+});
+
+it("sizes an empty Text Slot by its text, never by its placeholder", () => {
+  const { ports } = disk();
+  const album = setSlotPlaceholder(addTextSlot(createAlbum({ name: "Existing" }), "page-1"), "page-1", "slot-1", "A very long hint ".repeat(12));
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} document={{ path: "Existing", album }} />);
+  const slot = within(screen.getByRole("group", { name: "Spread editor" })).getByRole("button", { name: "Page 1 Text Slot 1" });
+  // One 18 pt line is 7.62 mm, at 2 px per mm.
+  expect(parseFloat(slot.style.height)).toBeCloseTo(15.24, 1);
+  expect(screen.queryByText("Text overflows Slot")).toBeNull();
 });
 
 it("renders Page content in the strip thumbnail", () => {
