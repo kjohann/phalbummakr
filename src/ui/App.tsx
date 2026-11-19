@@ -9,10 +9,10 @@ import AlbumWorkspace, { type AlbumCommand, type AlbumCommandName, type CommandB
 import CommandBar, { type BarCommand } from "./CommandBar";
 import LayoutWorkspace, { type LayoutBarLink, type LayoutBarState, type LayoutCommand, type LayoutCommandName } from "./LayoutWorkspace";
 import type { Mode } from "./modes";
-import PhotoBrowser from "./PhotoBrowser";
+import PhotoBrowser, { type SortLink } from "./PhotoBrowser";
 import SidePane, { clampPaneWidth, DEFAULT_SIDE_PANE, type PaneModes, type SidePaneSettings } from "./SidePane";
 import { historyShortcut } from "./historyShortcut";
-import { tauriSortingPorts } from "./tauriSortingPorts";
+import { createFolder, tauriSortingPorts } from "./tauriSortingPorts";
 import { useLayoutLibrary } from "./useLayoutLibrary";
 
 interface Settings {
@@ -81,7 +81,7 @@ function PaneTabs({ current, onChange }: { current: PaneTab; onChange: (tab: Pan
   );
 }
 
-function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, suspended, modes, bar, layoutBar, layoutPorts, sidePane, onSidePaneChange, onLayoutLibraryReadyChange }: {
+function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, suspended, modes, bar, layoutBar, sortBar, layoutPorts, sidePane, onSidePaneChange, onLayoutLibraryReadyChange }: {
   document: OpenDocument;
   onBusyChange: (busy: boolean) => void;
   onTitleChange: (album: Album | null) => void;
@@ -90,6 +90,7 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
   modes: PaneModes;
   bar: CommandBarLink;
   layoutBar: LayoutBarLink;
+  sortBar: Pick<SortLink, "command" | "onChosenChange">;
   layoutPorts?: LayoutPorts;
   sidePane: SidePaneSettings;
   onSidePaneChange: (change: Partial<SidePaneSettings>) => void;
@@ -132,6 +133,8 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
       root: document.root, photos, target, openAlbum: { name, album },
     })).moves);
   }, [document.path, document.root]);
+  const createPhotoFolder = useCallback((parent: string, name: string) => createFolder(document.root, parent, name), [document.root]);
+  const [sortHost, setSortHost] = useState<HTMLElement | null>(null);
   return (
     <div className="library-workspace" style={{ display: hidden ? "none" : undefined }}>
       <SidePane modes={modes} settings={sidePane} onChange={onSidePaneChange}>
@@ -140,7 +143,8 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
           <div className="pane-view" hidden={mode === "album" && paneTab !== "photos"}
             {...mode === "album" ? { role: "tabpanel", id: "pane-panel-photos", "aria-labelledby": "pane-tab-photos" } : {}}>
             <PhotoBrowser root={document.root} album={album} compact={sidePane.compact}
-              onCompactChange={(compact) => onSidePaneChange({ compact })} onSendPhotos={sendPhotos} />
+              onCompactChange={(compact) => onSidePaneChange({ compact })} onSendPhotos={sendPhotos} onCreateFolder={createPhotoFolder}
+              sort={{ ...sortBar, host: sortHost, active: mode === "sort" && !hidden && !suspended }} />
           </div>
           <div className="pane-view" hidden={mode !== "album" || paneTab !== "layouts"} ref={setAlbumLayoutsHost}
             role="tabpanel" id="pane-panel-layouts" aria-labelledby="pane-tab-layouts" />
@@ -157,9 +161,7 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
         <LayoutWorkspace format={format} layouts={layouts}
           paneHost={layoutPaneHost} active={mode === "layouts" && !hidden && !suspended} bar={layoutBar} />
       </div>}
-      {mode === "sort" && <section className="workspace mode-placeholder" aria-label="Sort">
-        <h2>Sort</h2><p>Sorting Photos into Folders arrives with issue 028.</p>
-      </section>}
+      <section className="workspace sort-workspace" aria-label="Sort" hidden={mode !== "sort"} ref={setSortHost} />
     </div>
   );
 }
@@ -183,6 +185,8 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
   const [layoutLibraryReady, setLayoutLibraryReady] = useState(false);
   const [layoutCommand, setLayoutCommand] = useState<LayoutCommand | undefined>();
   const [layoutState, setLayoutState] = useState<LayoutBarState>({ editable: false, layoutSelected: false, slotSelected: false, canUndo: false, canRedo: false });
+  const [sortCommand, setSortCommand] = useState<{ serial: number } | undefined>();
+  const [sortChosen, setSortChosen] = useState(0);
   const [modeState, setModeState] = useState<{ documentId: number | undefined; mode: Mode }>({ documentId: undefined, mode: "album" });
   const commandSerial = useRef(0);
   const busyRef = useRef(false);
@@ -507,7 +511,9 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
     albumCommand("add-text-slot", "Add Text Slot"),
     albumCommand("add-spread", "Add Spread", { overflow: 1 }),
     albumCommand("save-as-layout", "Save as Layout", { overflow: 2, disabled: !(albumCommandsEnabled && layoutLibraryReady) }),
-  ] : albumOpen && mode === "layouts" ? layoutCommands() : [];
+  ] : albumOpen && mode === "layouts" ? layoutCommands()
+    : albumOpen && mode === "sort" ? [{ id: "send-to-folder", label: "Send to Folder…", disabled: !commandsAvailable || sortChosen === 0,
+      run: () => setSortCommand({ serial: ++commandSerial.current }) }] : [];
   const history = mode === "album" ? { enabled: albumCommandsEnabled, ...albumHistory }
     : mode === "layouts" ? { enabled: commandsAvailable && layoutState.editable, canUndo: layoutState.canUndo, canRedo: layoutState.canRedo }
       : { enabled: false, canUndo: false, canRedo: false };
@@ -555,7 +561,8 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
         onTitleChange={reportTitle} hidden={draft !== null} suspended={transitioning}
         modes={{ current: mode, onChange: setMode }}
         bar={{ command, toolsHost, onSlotSelectedChange: setSlotSelected, onEditableChange: setAlbumEditable, onHistoryChange: setAlbumHistory }}
-        layoutBar={{ command: layoutCommand, toolsHost, onStateChange: setLayoutState }} layoutPorts={layoutPorts}
+        layoutBar={{ command: layoutCommand, toolsHost, onStateChange: setLayoutState }}
+        sortBar={{ command: sortCommand, onChosenChange: setSortChosen }} layoutPorts={layoutPorts}
         sidePane={sidePane} onSidePaneChange={changeSidePane} onLayoutLibraryReadyChange={setLayoutLibraryReady} />}
     </main>
   );

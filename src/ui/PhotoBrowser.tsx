@@ -1,7 +1,37 @@
-import { useEffect, useRef, useState, type DragEvent } from "react";
-import { isProtectedFolder, photoUsage, type Album, type Photo, type PhotoMove, type PhotoScan } from "../core";
+import { useEffect, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { createPortal } from "react-dom";
+import {
+  afterMove, canAddToComparison, chosenPhotos, EMPTY_COMPARISON, isProtectedFolder, photoUsage, showPhoto, stepPhoto,   toggleChosen, toggleComparison, withoutPhotos,
+  type Album, type Comparison, type Photo, type PhotoMove, type PhotoScan,
+} from "../core";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
 import { hasPhotoDrag, readPhotoDrag, writePhotoDrag } from "./photoDrag";
+import SortView, { usageLabel } from "./SortView";
+import ContextMenu, { type MenuItem } from "./ContextMenu";
+import SendToFolderDialog from "./SendToFolderDialog";
+
+/** Connects the Photo grid to Sort mode's work area and command bar. */
+export interface SortLink {
+  /** Where the shown Photos are rendered. */
+  host: HTMLElement | null;
+  /** Whether Sort mode is the current mode: grid clicks and arrow keys only act then. */
+  active: boolean;
+  /** "Send to Folder…" from the command bar; a new serial opens the dialog. */
+  command?: { serial: number };
+  /** Reports how many Photos "Send to Folder…" would move. */
+  onChosenChange: (count: number) => void;
+}
+
+/** What a click on a Photo in the grid does, given whether Ctrl (or ⌘) was held. */
+type PhotoClick = (photo: string, event: ReactMouseEvent) => void;
+
+/** A right-click menu for a Photo in the grid or in Sort mode's work area. */
+interface PhotoMenu {
+  path: string;
+  where: "grid" | "view";
+  x: number;
+  y: number;
+}
 
 /** Props that make a folder tile or breadcrumb a drop target while a Photo is dragged from the grid. */
 type FolderDrop = (folder: string) => {
@@ -28,8 +58,9 @@ function parentFolder(path: string) {
   return separator < 0 ? "" : path.slice(0, separator);
 }
 
-function PhotoThumbnail({ root, photo, usage, compact, onDragChange }: {
+function PhotoThumbnail({ root, photo, usage, compact, onDragChange, shown, onClick, onContextMenu }: {
   root: string; photo: Photo; usage: number; compact: boolean; onDragChange: (path: string | null) => void;
+  shown: boolean; onClick?: PhotoClick; onContextMenu?: PhotoClick;
 }) {
   const [source, setSource] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -49,7 +80,9 @@ function PhotoThumbnail({ root, photo, usage, compact, onDragChange }: {
 
   const name = photo.path.split("/").pop()!;
   return (
-    <figure className="photo-tile" title={`${photo.path}\n${photo.width} x ${photo.height} pixels`}
+    <figure className={shown ? "photo-tile photo-tile--shown" : "photo-tile"} title={`${photo.path}\n${photo.width} x ${photo.height} pixels`}
+      onClick={onClick && ((event) => onClick(photo.path, event))}
+      onContextMenu={onContextMenu && ((event) => { event.preventDefault(); onContextMenu(photo.path, event); })}
       draggable onDragStart={(event) => {
         writePhotoDrag(event.dataTransfer, photo, source ?? undefined);
         onDragChange(photo.path);
@@ -59,7 +92,7 @@ function PhotoThumbnail({ root, photo, usage, compact, onDragChange }: {
         {source && <img src={source} alt={name} loading="lazy" decoding="async" draggable={false} />}
         {!source && !error && <span className="photo-placeholder">{compact ? "…" : "Loading..."}</span>}
         {error && <span className="photo-failure" role="alert" title={error}>{compact ? "!" : "Thumbnail unavailable. Rescan to retry."}</span>}
-        {usage > 0 && <span className="photo-usage" aria-label={`Used ${usage} ${usage === 1 ? "time" : "times"} in this Album`}>{usage}</span>}
+        {usage > 0 && <span className="photo-usage" aria-label={usageLabel(usage)}>{usage}</span>}
       </div>
       {!compact && <figcaption>
         <span className="photo-name">{name}</span>
@@ -89,7 +122,7 @@ function FolderTile({ path, compact, onOpen, drop }: { path: string; compact: bo
   );
 }
 
-function PhotoGrid({ root, photos, folders, usage, compact, onOpenFolder, onDragChange, drop }: {
+function PhotoGrid({ root, photos, folders, usage, compact, onOpenFolder, onDragChange, drop, shown, onPhotoClick, onPhotoContextMenu }: {
   root: string;
   photos: Photo[];
   folders: string[];
@@ -98,6 +131,9 @@ function PhotoGrid({ root, photos, folders, usage, compact, onOpenFolder, onDrag
   onOpenFolder: (folder: string) => void;
   onDragChange: (path: string | null) => void;
   drop: FolderDrop;
+  shown: readonly string[];
+  onPhotoClick?: PhotoClick;
+  onPhotoContextMenu?: PhotoClick;
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
@@ -141,7 +177,8 @@ function PhotoGrid({ root, photos, folders, usage, compact, onOpenFolder, onDrag
                 height: rowHeight,
               }}>
               {entry.kind === "photo" ? <PhotoThumbnail root={root} photo={entry.photo} usage={usage.get(entry.photo.path) ?? 0}
-                compact={compact} onDragChange={onDragChange} />
+                compact={compact} onDragChange={onDragChange} shown={shown.includes(entry.photo.path)}
+                onClick={onPhotoClick} onContextMenu={onPhotoContextMenu} />
                 : <FolderTile path={entry.path} compact={compact} onOpen={onOpenFolder} drop={drop} />}
             </div>
           );
@@ -166,14 +203,21 @@ function movedMessage(moves: PhotoMove[], target: string) {
     : `Moved "${fileName(from)}" to ${folderName(target)} as "${fileName(to)}".`;
 }
 
-export default function PhotoBrowser({ root, album = null, compact = false, onCompactChange, onSendPhotos }: {
+export default function PhotoBrowser({ root, album = null, compact = false, onCompactChange, onSendPhotos, onCreateFolder, sort }: {
   root: string;
   album?: Album | null;
   compact?: boolean;
   onCompactChange?: (compact: boolean) => void;
   /** Moves Photos to a Folder ("" is the Library root), returning the moves made. Without it, Folders aren't drop targets. */
   onSendPhotos?: (photos: string[], target: string) => Promise<PhotoMove[]>;
+  /** Creates Folder `name` inside `parent`, returning its Library-relative path, for "New Folder…". */
+  onCreateFolder?: (parent: string, name: string) => Promise<string>;
+  /** Set in Sort mode, where Photos are shown large and compared. */
+  sort?: SortLink;
 }) {
+  const [comparison, setComparison] = useState<Comparison>(EMPTY_COMPARISON);
+  const [menu, setMenu] = useState<PhotoMenu | null>(null);
+  const [folderDialog, setFolderDialog] = useState<{ paths: string[]; parent?: string } | null>(null);
   const [scan, setScan] = useState(0);
   const [unusedOnly, setUnusedOnly] = useState(false);
   const [dragged, setDragged] = useState<string | null>(null);
@@ -193,7 +237,11 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
     setError(null);
     tauriPhotoPorts.scan(root)
       .then((result) => {
-        if (active) setResult((previous) => {
+        if (!active) return;
+        // Photos removed outside the app leave the work area.
+        const scanned = new Set(result.photos.map((photo) => photo.path));
+        setComparison((current) => withoutPhotos(current, current.shown.filter((path) => !scanned.has(path))));
+        setResult((previous) => {
           const selected = previous?.folder ?? "";
           let folder = selected;
           while (folder && !result.folders.includes(folder)) folder = parentFolder(folder);
@@ -226,25 +274,125 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
     setResult((previous) => previous && { ...previous, folder: path, notice: null });
   }
 
+  const sortActive = sort?.active ?? false;
+  const grid = photos.map((photo) => photo.path);
+  const gridRef = useRef(grid);
+  gridRef.current = grid;
+  const chosenCount = chosenPhotos(comparison).length;
+  const onChosenChange = sort?.onChosenChange;
+  useEffect(() => onChosenChange?.(chosenCount), [chosenCount, onChosenChange]);
+
+  useEffect(() => {
+    if (!sortActive) return;
+    const step = (event: KeyboardEvent) => {
+      const direction = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+      if (!direction || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.target instanceof HTMLElement && event.target.closest(
+        "input, textarea, select, [contenteditable], [role='separator'], [role='tab'], [role='menu']")) return;
+      if (window.document.querySelector("[aria-modal='true']")) return;
+      event.preventDefault();
+      setComparison((current) => stepPhoto(current, gridRef.current, direction));
+    };
+    window.addEventListener("keydown", step);
+    return () => window.removeEventListener("keydown", step);
+  }, [sortActive]);
+
+  const photoClick: PhotoClick | undefined = sortActive ? (path, event) => {
+    setComparison((current) => event.ctrlKey || event.metaKey ? toggleComparison(current, path) : showPhoto(path));
+  } : undefined;
+  const openMenu = (where: PhotoMenu["where"]) => (path: string, event: ReactMouseEvent) =>
+    setMenu({ path, where, x: event.clientX, y: event.clientY });
+  const byPath = new Map(result?.photos.map((photo) => [photo.path, photo]));
+  const shownPhotos = comparison.shown.flatMap((path) => byPath.get(path) ?? []);
+
   function dragChange(path: string | null) {
     setDragged(path);
     setDropOver(null);
     if (path) setMoveMessage(null);
   }
 
-  async function send(photo: string, target: string) {
+  async function send(paths: string[], target: string) {
+    const gridBefore = gridRef.current;
     setMoving(true);
+    setMoveMessage(null);
     try {
-      const moves = await onSendPhotos!([photo], target);
+      const moves = await onSendPhotos!(paths, target);
       if (moves.length > 0) {
         setMoveMessage({ text: movedMessage(moves, target), failed: false });
+        setComparison((current) => afterMove(current, moves.map(({ from }) => from), gridBefore));
         setScan((value) => value + 1);
       }
     } catch (cause) {
-      setMoveMessage({ text: `Could not move "${fileName(photo)}": ${cause instanceof Error ? cause.message : String(cause)}`, failed: true });
+      const what = paths.length === 1 ? `"${fileName(paths[0])}"` : `${paths.length} Photos`;
+      setMoveMessage({ text: `Could not move ${what}: ${cause instanceof Error ? cause.message : String(cause)}`, failed: true });
     } finally {
       setMoving(false);
     }
+  }
+
+  /** The Folders `paths` can be sent to, nested as in the Library, each with "New Folder…" inside it. */
+  const sendTargets = result?.folders.filter((path) => !isProtectedFolder(path)) ?? [];
+  const isAllIn = (paths: string[]) => (target: string) => paths.every((path) => parentFolder(path) === target);
+  function sendToFolderItems(paths: string[]): MenuItem[] {
+    const unavailable = !onSendPhotos || moving;
+    const alreadyIn = isAllIn(paths);
+    const level = (parent: string): MenuItem[] => [
+      ...sendTargets.filter((path) => parentFolder(path) === parent).map((path) => ({
+        label: fileName(path), onSelect: () => void send(paths, path), disabled: unavailable || alreadyIn(path), items: level(path),
+      })),
+      { label: "New Folder…", onSelect: () => setFolderDialog({ paths, parent }), disabled: unavailable || !onCreateFolder },
+    ];
+    return [{ label: "Library", onSelect: () => void send(paths, ""), disabled: unavailable || alreadyIn("") }, ...level("")];
+  }
+
+  function siblingNames(parent: string) {
+    return [
+      ...result?.folders.filter((path) => parentFolder(path) === parent) ?? [],
+      ...result?.photos.filter((photo) => parentFolder(photo.path) === parent).map((photo) => photo.path) ?? [],
+    ].map(fileName);
+  }
+
+  async function sendFromDialog(paths: string[], target: string, name: string | null) {
+    let destination = target;
+    if (name !== null) {
+      if (!onCreateFolder) throw new Error("Folders can't be created here.");
+      destination = await onCreateFolder(target, name);
+      setScan((value) => value + 1);
+    }
+    setFolderDialog(null);
+    await send(paths, destination);
+  }
+
+  const comparisonRef = useRef(comparison);
+  comparisonRef.current = comparison;
+  const commandSerial = sort?.command?.serial;
+  const handledSerial = useRef(commandSerial);
+  useEffect(() => {
+    if (commandSerial === undefined || commandSerial === handledSerial.current) return;
+    handledSerial.current = commandSerial;
+    const paths = chosenPhotos(comparisonRef.current);
+    if (paths.length > 0) setFolderDialog({ paths });
+  }, [commandSerial]);
+
+  function menuItems({ path, where }: PhotoMenu): MenuItem[] {
+    const inComparison = comparison.shown.includes(path);
+    const sendItem = { label: "Send to Folder", items: sendToFolderItems([path]) };
+    if (where === "grid") {
+      return [
+        { label: "Show", onSelect: () => setComparison(showPhoto(path)) },
+        inComparison
+          ? { label: "Remove from Comparison", onSelect: () => setComparison((current) => toggleComparison(current, path)) }
+          : { label: "Add to Comparison", onSelect: () => setComparison((current) => toggleComparison(current, path)),
+            disabled: !canAddToComparison(comparison) },
+        sendItem,
+      ];
+    }
+    const chosen = comparison.chosen.includes(path);
+    return [
+      ...comparison.shown.length > 1 ? [{ label: chosen ? "Unchoose" : "Choose", onSelect: () => setComparison((current) => toggleChosen(current, path)) }] : [],
+      { label: "Remove from Comparison", onSelect: () => setComparison((current) => toggleComparison(current, path)) },
+      sendItem,
+    ];
   }
 
   // The current Folder and the Photo's own Folder are never targets; from the grid, these are usually the same.
@@ -270,7 +418,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
         event.preventDefault();
         // The tile being dragged may be gone after the move, so dragend can't be relied on.
         dragChange(null);
-        if (photo.path === dragged) void send(photo.path, target);
+        if (photo.path === dragged) void send([photo.path], target);
       },
     };
   };
@@ -338,7 +486,15 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
       )}
       {result && <PhotoGrid key={`${root}:${result.generation}:${folder}:${unusedOnly}`} root={root}
         photos={photos} folders={folders} usage={usage} compact={compact} onOpenFolder={openFolder}
-        onDragChange={dragChange} drop={drop} />}
+        onDragChange={dragChange} drop={drop} shown={sortActive ? comparison.shown : []}
+        onPhotoClick={photoClick} onPhotoContextMenu={sortActive ? openMenu("grid") : undefined} />}
+      {sort?.host && createPortal(<SortView root={root} photos={shownPhotos} chosen={comparison.chosen} usage={usage}
+        onToggleChosen={(path) => setComparison((current) => toggleChosen(current, path))}
+        onContextMenu={openMenu("view")} />, sort.host)}
+      {menu && <ContextMenu label="Photo actions" x={menu.x} y={menu.y} items={menuItems(menu)} onClose={() => setMenu(null)} />}
+      {folderDialog && <SendToFolderDialog count={folderDialog.paths.length} folders={sendTargets} parent={folderDialog.parent}
+        siblings={siblingNames} alreadyIn={isAllIn(folderDialog.paths)}
+        onSend={(target, name) => sendFromDialog(folderDialog.paths, target, name)} onClose={() => setFolderDialog(null)} />}
     </aside>
   );
 }

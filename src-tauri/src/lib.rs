@@ -108,6 +108,15 @@ async fn root_albums(root: String) -> Result<Vec<sorting::RootAlbum>, String> {
 }
 
 #[tauri::command]
+async fn create_folder(root: String, parent: String, name: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        sorting::create_folder(Path::new(&root), &parent, &name)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn move_photos(
     root: String,
     moves: Vec<sorting::PhotoMove>,
@@ -205,6 +214,7 @@ pub fn run() {
             scan_photos,
             folder_names,
             root_albums,
+            create_folder,
             move_photos,
             photo_thumbnail,
             photo_page_thumbnail,

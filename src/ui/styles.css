@@ -776,17 +776,155 @@ body {
   display: none;
 }
 
-.mode-placeholder {
+/* Sort mode: Photos shown large, or a Comparison of up to four. */
+.sort-workspace[hidden] {
+  display: none;
+}
+
+.sort-view {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  gap: 14px;
+  grid-template-columns: 1fr;
+  grid-auto-rows: minmax(0, 1fr);
+}
+
+.sort-view--2 {
+  grid-template-columns: 1fr 1fr;
+}
+
+.sort-view--3,
+.sort-view--4 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.sort-view--empty {
   align-items: center;
-  justify-content: center;
+  justify-items: center;
   color: #6f7771;
   text-align: center;
 }
 
-.mode-placeholder h2 {
+.sort-photo {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
   margin: 0;
-  color: #242a27;
-  font-size: 20px;
+  padding: 6px;
+  flex-direction: column;
+  gap: 6px;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+button.sort-photo {
+  cursor: pointer;
+}
+
+button.sort-photo:hover {
+  border-color: #c5ccc1;
+}
+
+.sort-photo--chosen,
+button.sort-photo--chosen:hover {
+  border-color: #d1783e;
+  background: #f6e6da;
+}
+
+.sort-photo-image {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  background: #e9ebe6;
+  overflow: hidden;
+}
+
+.sort-photo-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.sort-photo-caption {
+  display: flex;
+  min-width: 0;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.sort-photo-chosen {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 3px;
+  color: #fff;
+  background: #d1783e;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.photo-tile--shown .photo-preview {
+  outline: 3px solid #d1783e;
+}
+
+.context-menu-entry {
+  position: relative;
+  display: grid;
+}
+
+.context-menu-parent::after {
+  content: "▸" / "";
+  float: right;
+  margin-left: 16px;
+}
+
+.context-menu button[aria-disabled="true"],
+.context-submenu button[aria-disabled="true"] {
+  color: #9aa19b;
+}
+
+.strip-menu.context-submenu {
+  position: absolute;
+  top: -5px;
+  left: 100%;
+}
+
+.strip-menu.context-submenu--left {
+  right: 100%;
+  left: auto;
+}
+
+.folder-choices {
+  display: grid;
+  max-height: 260px;
+  margin: 0;
+  padding: 6px 8px;
+  gap: 2px;
+  overflow: auto;
+  border: 1px solid #c5ccc1;
+  border-radius: 4px;
+}
+
+.album-form .folder-choices label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.send-to-folder {
+  display: grid;
+  gap: 14px;
 }
 
 .album-workspace > .album-toolbar,

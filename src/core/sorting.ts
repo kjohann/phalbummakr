@@ -67,6 +67,27 @@ function freeName(name: string, taken: ReadonlySet<string>): string {
   return candidate;
 }
 
+const RESERVED_WINDOWS_NAMES = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$/i;
+
+/**
+ * Why `name` can't be used for a new Folder next to `siblings` (the names already in its parent),
+ * or null if it can. Surrounding spaces are ignored, as the Folder is created with the trimmed name.
+ */
+export function folderNameProblem(name: string, siblings: readonly string[]): string | null {
+  const trimmed = name.trim();
+  if (!trimmed) return "Enter a name for the Folder.";
+  // eslint-disable-next-line no-control-regex
+  if (/[<>:"/\\|?*\u0000-\u001f]/.test(trimmed)) return 'Folder names can\'t contain < > : " / \\ | ? * or control characters.';
+  if (trimmed.startsWith(".")) return "Folder names can't start with a dot.";
+  if (trimmed.endsWith(".")) return "Folder names can't end with a dot.";
+  if (RESERVED_WINDOWS_NAMES.test(trimmed)) return `"${trimmed}" is reserved by Windows.`;
+  if (isProtectedFolder(trimmed)) return `"${trimmed}" is kept for the app's own files.`;
+  if (siblings.some((sibling) => sibling.toLowerCase() === trimmed.toLowerCase())) {
+    return `Something named "${trimmed}" is already there.`;
+  }
+  return null;
+}
+
 /** An Album file directly in the Library root, rewritten with the moved Photos' new paths. */
 export interface AlbumRewrite {
   /** The file name, such as "Christmas.phalbum". */

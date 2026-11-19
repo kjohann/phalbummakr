@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addPhotoSlot, createAlbum, placePhoto, serializeAlbum, setPlacementFit, type Album } from ".";
-import { planPhotoMove, relinkPlacements, sendPhotosToFolder, type AlbumRewrite, type PhotoMove, type SortingPorts } from "./sorting";
+import { folderNameProblem, planPhotoMove, relinkPlacements, sendPhotosToFolder, type AlbumRewrite, type PhotoMove, type SortingPorts } from "./sorting";
 
 function photo(path: string) {
   return { path, width: 4000, height: 3000, orientation: 1 };
@@ -115,5 +115,19 @@ describe("sendPhotosToFolder", () => {
     });
     expect(result.openAlbum).toBeNull();
     expect(library.moved).toEqual([{ moves: [{ from: "a.jpg", to: "kids/a.jpg" }], albums: [] }]);
+  });
+});
+
+describe("naming a new Folder", () => {
+  it("accepts a plain name that no sibling uses, ignoring surrounding spaces", () => {
+    expect(folderNameProblem("grandparents", ["kids", "a.jpg"])).toBeNull();
+    expect(folderNameProblem("  summer 2024 ", [])).toBeNull();
+  });
+
+  it("rejects empty, protected, Windows-invalid and taken names with a reason", () => {
+    for (const name of ["", "   ", ".", "..", ".hidden", "Exports", "a/b", "a\\b", "what?", "a:b", "x<y", "pipe|", "star*", "quote\"", "CON", "lpt1", "com¹", "nul.txt", "trailing.", "tab\tname"]) {
+      expect(folderNameProblem(name, []), name).toMatch(/\S/);
+    }
+    expect(folderNameProblem("Kids", ["kids"])).toMatch(/already/);
   });
 });

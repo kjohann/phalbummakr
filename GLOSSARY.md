@@ -22,6 +22,10 @@ _Avoid_: Tag, category, label, keyword, collection
 Moving Photos between Folders in the Library. Moving a placed Photo keeps every Album that uses it pointing at the Photo's new location.
 _Avoid_: Culling, filing, importing
 
+**Comparison**:
+Up to four Photos shown side by side while Sorting. Photos in a Comparison are chosen one by one to be sent to a Folder together; a single Photo shown on its own counts as chosen.
+_Avoid_: Selection, lightbox, stack
+
 **Usage**:
 The number of times a Photo has been placed in an Album.
 _Avoid_: Occurrence, reference count

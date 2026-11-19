@@ -7,3 +7,4 @@ export * from "./layouts";
 export * from "./usage";
 export * from "./history";
 export * from "./sorting";
+export * from "./comparison";

@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { addPhotoSlot, createAlbum, duplicatePage, placePhoto, type PhotoMove } from "../core";
+import { addPhotoSlot, createAlbum, duplicatePage, placePhoto, type Album, type PhotoMove } from "../core";
 import PhotoBrowser from "./PhotoBrowser";
 import { hasPhotoDrag, readPhotoDrag } from "./photoDrag";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
@@ -440,4 +440,193 @@ it("forgets a grid drag whose tile disappeared before the drag ended, and only t
   // Browsers send no mouse moves during a drag, so the first one means it ended.
   fireEvent.mouseMove(window);
   expect(folder.classList.contains("drop-target")).toBe(false);
+});
+
+describe("Sort mode", () => {
+  const hosts: HTMLElement[] = [];
+  afterEach(() => hosts.splice(0).forEach((host) => host.remove()));
+
+  function sortHost() {
+    const host = document.createElement("section");
+    document.body.append(host);
+    hosts.push(host);
+    return host;
+  }
+
+  async function browseSort({ photos = [0, 1, 2].map(photo), folders = ["kids", "kids/small", ".hidden"], album = null as Album | null,
+    onSendPhotos = vi.fn(async (): Promise<PhotoMove[]> => []), onCreateFolder = vi.fn(async (parent: string, name: string) => parent ? `${parent}/${name}` : name) } = {}) {
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "scan_photos") return { photos, folders, warnings: [] };
+      return `data:image/png;base64,${String(command)}`;
+    });
+    const host = sortHost();
+    const onChosenChange = vi.fn();
+    const props = { root: "D:\\Photos", album, onSendPhotos, onCreateFolder };
+    const view = render(<PhotoBrowser {...props} sort={{ host, active: true, onChosenChange }} />);
+    await screen.findByText(photos[0].path);
+    const tile = (path: string) => within(screen.getByRole("list", { name: "Folders and Photos" })).getByText(path).closest("figure")!;
+    const rerunCommand = (serial: number) => view.rerender(<PhotoBrowser {...props} sort={{ host, active: true, onChosenChange, command: { serial } }} />);
+    const leaveSort = () => view.rerender(<PhotoBrowser {...props} sort={{ host, active: false, onChosenChange }} />);
+    return { host, work: within(host), tile, onChosenChange, onSendPhotos, onCreateFolder, rerunCommand, leaveSort };
+  }
+
+  it("shows a clicked Photo large with its Usage badge, and steps through the grid with the arrow keys", async () => {
+    const album = placePhoto(addPhotoSlot(createAlbum({ name: "Test", pageCount: 2 }), "page-1"), "page-1", "slot-1", photo(1));
+    const { work, tile, onChosenChange, leaveSort } = await browseSort({ album });
+    expect(work.getByText(/Click a Photo/)).toBeTruthy();
+    expect(onChosenChange).toHaveBeenLastCalledWith(0);
+    fireEvent.click(tile(photo(0).path));
+    expect(await work.findByRole("img", { name: photo(0).path })).toBeTruthy();
+    expect(work.queryByLabelText(/Used/)).toBeNull();
+    expect(onChosenChange).toHaveBeenLastCalledWith(1);
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(await work.findByRole("img", { name: photo(1).path })).toBeTruthy();
+    expect(work.getByLabelText("Used 1 time in this Album").textContent).toBe("1");
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(await work.findByRole("img", { name: photo(2).path })).toBeTruthy();
+    fireEvent.keyDown(window, { key: "ArrowLeft" });
+    expect(await work.findByRole("img", { name: photo(1).path })).toBeTruthy();
+    expect(work.getAllByRole("img")).toHaveLength(1);
+    expect(tile(photo(1).path).classList.contains("photo-tile--shown")).toBe(true);
+    // Outside Sort mode, clicks and arrows do nothing and the grid doesn't mark what Sort mode shows.
+    leaveSort();
+    expect(tile(photo(1).path).classList.contains("photo-tile--shown")).toBe(false);
+    fireEvent.click(tile(photo(0).path));
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(work.getByRole("img", { name: photo(1).path })).toBeTruthy();
+  });
+
+  it("compares up to four Ctrl-clicked Photos side by side and chooses them by clicking", async () => {
+    const { work, tile, onChosenChange } = await browseSort({ photos: [0, 1, 2, 3, 4].map(photo) });
+    fireEvent.click(tile(photo(0).path));
+    fireEvent.click(tile(photo(1).path), { ctrlKey: true });
+    const comparison = work.getByRole("group", { name: "Comparison" });
+    expect(onChosenChange).toHaveBeenLastCalledWith(0);
+    fireEvent.click(work.getByRole("button", { name: `Choose ${photo(1).path}` }));
+    expect(work.getByRole("button", { name: `Unchoose ${photo(1).path}` }).getAttribute("aria-pressed")).toBe("true");
+    expect(onChosenChange).toHaveBeenLastCalledWith(1);
+    for (const index of [2, 3, 4]) fireEvent.click(tile(photo(index).path), { ctrlKey: true });
+    expect(comparison.classList.contains("sort-view--4")).toBe(true);
+    expect(work.queryByRole("button", { name: `Choose ${photo(4).path}` })).toBeNull();
+    fireEvent.click(tile(photo(1).path), { ctrlKey: true });
+    expect(work.queryByRole("button", { name: /photo-1\.jpg/ })).toBeNull();
+    expect(onChosenChange).toHaveBeenLastCalledWith(0);
+    fireEvent.click(tile(photo(4).path));
+    expect(work.queryByRole("group", { name: "Comparison" })).toBeNull();
+    expect(await work.findByRole("img", { name: photo(4).path })).toBeTruthy();
+  });
+
+  it("offers Show and Comparison actions on right-click in the grid and in the Comparison", async () => {
+    const { work, tile } = await browseSort({ photos: [0, 1, 2, 3, 4].map(photo) });
+    const menuItems = () => within(screen.getByRole("menu", { name: "Photo actions" })).getAllByRole("menuitem");
+    const item = (name: string) => within(screen.getByRole("menu", { name: "Photo actions" })).getByRole("menuitem", { name });
+
+    fireEvent.contextMenu(tile(photo(0).path));
+    expect(menuItems().map((entry) => entry.textContent)).toEqual(["Show", "Add to Comparison", "Send to Folder"]);
+    expect(item("Send to Folder").getAttribute("aria-haspopup")).toBe("menu");
+    fireEvent.click(item("Show"));
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(await work.findByRole("img", { name: photo(0).path })).toBeTruthy();
+
+    fireEvent.contextMenu(tile(photo(1).path));
+    fireEvent.click(item("Add to Comparison"));
+    expect(work.getByRole("group", { name: "Comparison" })).toBeTruthy();
+    fireEvent.contextMenu(tile(photo(1).path));
+    expect(menuItems().map((entry) => entry.textContent)).toEqual(["Show", "Remove from Comparison", "Send to Folder"]);
+    fireEvent.keyDown(screen.getByRole("menu", { name: "Photo actions" }), { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    fireEvent.contextMenu(work.getByRole("button", { name: `Choose ${photo(1).path}` }));
+    expect(menuItems().map((entry) => entry.textContent)).toEqual(["Choose", "Remove from Comparison", "Send to Folder"]);
+    fireEvent.click(item("Choose"));
+    fireEvent.contextMenu(work.getByRole("button", { name: `Unchoose ${photo(1).path}` }));
+    fireEvent.click(item("Unchoose"));
+    fireEvent.contextMenu(work.getByRole("button", { name: `Choose ${photo(1).path}` }));
+    fireEvent.click(item("Remove from Comparison"));
+    expect(work.queryByRole("group", { name: "Comparison" })).toBeNull();
+
+    // A Photo shown on its own always counts as chosen, so it can't be unchosen.
+    fireEvent.contextMenu(await work.findByRole("img", { name: photo(0).path }));
+    expect(menuItems().map((entry) => entry.textContent)).toEqual(["Remove from Comparison", "Send to Folder"]);
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    for (const index of [1, 2, 3]) fireEvent.click(tile(photo(index).path), { ctrlKey: true });
+    fireEvent.contextMenu(tile(photo(4).path));
+    expect((item("Add to Comparison") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("sends a Photo to a nested Folder from the submenu, then shows the next Photo in the grid", async () => {
+    const onSendPhotos = vi.fn(async (paths: string[], target: string) => paths.map((from) => ({ from, to: `${target}/${from}` })));
+    const { work, tile } = await browseSort({ onSendPhotos });
+    fireEvent.click(tile(photo(0).path));
+    fireEvent.contextMenu(await work.findByRole("img", { name: photo(0).path }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Send to Folder" }));
+    const folders = within(screen.getByRole("menu", { name: "Send to Folder" }));
+    expect(folders.getAllByRole("menuitem").map((entry) => entry.textContent)).toEqual(["Library", "kids", "New Folder…"]);
+    expect(folders.getByRole("menuitem", { name: "Library" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.mouseEnter(folders.getByRole("menuitem", { name: "kids" }).parentElement!);
+    const kids = within(screen.getByRole("menu", { name: "kids" }));
+    expect(kids.getAllByRole("menuitem").map((entry) => entry.textContent)).toEqual(["small", "New Folder…"]);
+    fireEvent.click(kids.getByRole("menuitem", { name: "small" }));
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(onSendPhotos).toHaveBeenCalledWith([photo(0).path], "kids/small");
+    expect(await screen.findByText(`Moved "${photo(0).path}" to small.`)).toBeTruthy();
+    expect(await work.findByRole("img", { name: photo(1).path })).toBeTruthy();
+  });
+
+  it("creates a New Folder from the submenu and moves the Photo into it, rejecting a taken name", async () => {
+    const onSendPhotos = vi.fn(async (paths: string[], target: string) => paths.map((from) => ({ from, to: `${target}/${from}` })));
+    const { work, tile, onCreateFolder } = await browseSort({ onSendPhotos });
+    fireEvent.click(tile(photo(1).path));
+    fireEvent.click(tile(photo(2).path), { ctrlKey: true });
+    fireEvent.contextMenu(work.getByRole("button", { name: `Choose ${photo(1).path}` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Send to Folder" }));
+    fireEvent.mouseEnter(screen.getByRole("menuitem", { name: "kids" }).parentElement!);
+    fireEvent.click(within(screen.getByRole("menu", { name: "kids" })).getByRole("menuitem", { name: "New Folder…" }));
+    const dialog = within(screen.getByRole("dialog", { name: "New Folder" }));
+    expect(dialog.getByText(/inside kids/)).toBeTruthy();
+    const name = dialog.getByRole("textbox", { name: "Folder name" });
+    fireEvent.change(name, { target: { value: "Small" } });
+    fireEvent.click(dialog.getByRole("button", { name: "Create and Move" }));
+    expect(dialog.getByRole("alert").textContent).toMatch(/already there/);
+    expect(onCreateFolder).not.toHaveBeenCalled();
+    fireEvent.change(name, { target: { value: "big" } });
+    fireEvent.click(dialog.getByRole("button", { name: "Create and Move" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(onCreateFolder).toHaveBeenCalledWith("kids", "big");
+    expect(onSendPhotos).toHaveBeenCalledWith([photo(1).path], "kids/big");
+    await waitFor(() => expect(work.queryByRole("group", { name: "Comparison" })).toBeNull());
+    expect(await work.findByRole("img", { name: photo(2).path })).toBeTruthy();
+  });
+
+  it("sends the chosen Photos from the command bar's Send to Folder dialog, into an existing or a new Folder", async () => {
+    const onSendPhotos = vi.fn(async (paths: string[], target: string) => paths.map((from) => ({ from, to: `${target}/${from}` })));
+    const { work, tile, rerunCommand, onCreateFolder } = await browseSort({ photos: [0, 1, 2, 3].map(photo), onSendPhotos });
+    fireEvent.click(tile(photo(0).path));
+    for (const index of [1, 2, 3]) fireEvent.click(tile(photo(index).path), { ctrlKey: true });
+    for (const index of [0, 2]) fireEvent.click(work.getByRole("button", { name: `Choose ${photo(index).path}` }));
+    rerunCommand(1);
+    let dialog = within(screen.getByRole("dialog", { name: "Send to Folder" }));
+    expect(dialog.getByText("Moves 2 Photos.")).toBeTruthy();
+    expect(dialog.getAllByRole("radio").map((entry) => entry.closest("label")!.textContent)).toEqual(["Library", "kids", "small"]);
+    const send = dialog.getByRole("button", { name: "Send" }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    fireEvent.click(dialog.getByRole("radio", { name: "kids" }));
+    fireEvent.click(send);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(onSendPhotos).toHaveBeenLastCalledWith([photo(0).path, photo(2).path], "kids");
+    await waitFor(() => expect(work.getAllByRole("button")).toHaveLength(2));
+
+    fireEvent.click(work.getByRole("button", { name: `Choose ${photo(3).path}` }));
+    rerunCommand(2);
+    dialog = within(screen.getByRole("dialog", { name: "Send to Folder" }));
+    fireEvent.click(dialog.getByRole("radio", { name: "Library" }));
+    fireEvent.change(dialog.getByRole("textbox", { name: "New Folder (optional)" }), { target: { value: "trip" } });
+    fireEvent.click(dialog.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(onCreateFolder).toHaveBeenCalledWith("", "trip");
+    expect(onSendPhotos).toHaveBeenLastCalledWith([photo(3).path], "trip");
+  });
 });

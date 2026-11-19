@@ -110,9 +110,16 @@ vi.mock("./LayoutWorkspace", () => ({
   },
 }));
 vi.mock("./PhotoBrowser", () => ({
-  default: ({ compact, onCompactChange }: { compact?: boolean; onCompactChange?: (compact: boolean) => void }) => <>
+  default: ({ compact, onCompactChange, sort }: {
+    compact?: boolean;
+    onCompactChange?: (compact: boolean) => void;
+    sort?: { host: HTMLElement | null; active: boolean; command?: { serial: number }; onChosenChange: (count: number) => void };
+  }) => <>
     <p>{compact ? "Compact Photo browser" : "Photo browser"}</p>
     <button type="button" onClick={() => onCompactChange?.(!compact)}>Toggle mock Compact</button>
+    <button type="button" onClick={() => sort?.onChosenChange(2)}>Choose two mock Photos</button>
+    {sort?.command && <p>Send to Folder command {sort.command.serial}</p>}
+    {sort?.host && createPortal(<p>Mock Sort view {sort.active ? "active" : "inactive"}</p>, sort.host)}
   </>,
 }));
 
@@ -231,7 +238,9 @@ it("switches between Album, Layouts and Sort modes from the Side pane, keeping t
   expect(pane.hidden).toBe(false);
 
   fireEvent.click(modes.getByRole("button", { name: "Sort" }));
-  expect(screen.getByRole("region", { name: "Sort" }).textContent).toContain("028");
+  expect(screen.getByRole("region", { name: "Sort" }).textContent).toBe("Mock Sort view active");
+  expect(within(pane).getByText("Photo browser").closest("[hidden]")).toBeNull();
+  expect(within(pane).queryByRole("tablist")).toBeNull();
   expect(screen.getByRole("region", { name: "Layouts", hidden: true }).closest("[hidden]")).not.toBeNull();
   fireEvent.click(modes.getByRole("button", { name: "Album" }));
   expect(screen.queryByRole("region", { name: "Sort" })).toBeNull();
@@ -239,6 +248,21 @@ it("switches between Album, Layouts and Sort modes from the Side pane, keeping t
   expect(screen.getByText("Edited Album").closest("[hidden]")).toBeNull();
   expect(screen.queryByText("Album workspace inactive")).toBeNull();
   expect(barButton("Add Spread")).toBeTruthy();
+});
+
+it("offers Send to Folder… in Sort mode once a Photo is chosen, and sends it to the Photo grid", async () => {
+  render(<App ports={openAlbumPorts()} />);
+  await screen.findByText("Original");
+  fireEvent.click(modeGroup().getByRole("button", { name: "Sort" }));
+  expect(bar().queryByRole("button", { name: "Add Spread" })).toBeNull();
+  expect(barButton("Send to Folder…").disabled).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Choose two mock Photos" }));
+  expect(barButton("Send to Folder…").disabled).toBe(false);
+  fireEvent.click(barButton("Send to Folder…"));
+  expect(screen.getByText("Send to Folder command 1")).toBeTruthy();
+  fireEvent.click(modeGroup().getByRole("button", { name: "Album" }));
+  expect(bar().queryByRole("button", { name: "Send to Folder…" })).toBeNull();
+  expect(screen.getByText("Mock Sort view inactive")).toBeTruthy();
 });
 
 it("routes Layout commands to Layout mode, swapping Add Slot for the Slot tools when a Slot is selected", async () => {

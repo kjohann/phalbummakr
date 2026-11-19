@@ -6,3 +6,7 @@ export const tauriSortingPorts: SortingPorts = {
   rootAlbums: (root) => invoke<{ name: string; json: string }[]>("root_albums", { root }),
   movePhotos: (root, moves, albums) => invoke<void>("move_photos", { root, moves, albums }),
 };
+
+/** Creates the Folder `name` inside `parent` ("" is the Library root), returning its Library-relative path. */
+export const createFolder = (root: string, parent: string, name: string) =>
+  invoke<string>("create_folder", { root, parent, name });

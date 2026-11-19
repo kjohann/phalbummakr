@@ -82,6 +82,56 @@ pub fn folder_names(root: &Path, folder: &str) -> Result<Vec<String>, String> {
         .map_err(|error| error.to_string())
 }
 
+/// Why `name` can't name a new Folder on Windows or in the Library. The UI checks the same
+/// rules first with `folderNameProblem`, which gives the messages users normally see.
+fn folder_name_problem(name: &str) -> Option<String> {
+    let stem = name.split('.').next().unwrap_or("").to_lowercase();
+    let device_number = |rest: &str| {
+        let mut chars = rest.chars();
+        matches!((chars.next(), chars.next()), (Some(c), None) if c.is_ascii_digit() || "¹²³".contains(c))
+    };
+    let reserved = matches!(stem.as_str(), "con" | "prn" | "aux" | "nul")
+        || ["com", "lpt"]
+            .iter()
+            .any(|prefix| stem.strip_prefix(prefix).is_some_and(device_number));
+    if name.is_empty() {
+        Some("Enter a name for the Folder.".into())
+    } else if name
+        .chars()
+        .any(|c| c.is_control() || "<>:\"/\\|?*".contains(c))
+    {
+        Some(format!(
+            "\"{name}\" contains characters a Folder name can't have."
+        ))
+    } else if name.ends_with('.') || reserved || is_protected(OsStr::new(name)) {
+        Some(format!("\"{name}\" can't be used as a Folder name."))
+    } else {
+        None
+    }
+}
+
+/// Creates the Folder `name` inside `parent` ("" is the Library root), returning its Library-relative path.
+pub fn create_folder(root: &Path, parent: &str, name: &str) -> Result<String, String> {
+    let name = name.trim();
+    if let Some(problem) = folder_name_problem(name) {
+        return Err(problem);
+    }
+    let root = canonical_root(root)?;
+    let folder = existing_folder(&root, parent)?;
+    let taken = folder_names(&root, parent)?
+        .iter()
+        .any(|sibling| sibling.to_lowercase() == name.to_lowercase());
+    if taken {
+        return Err(format!("Something named \"{name}\" is already there."));
+    }
+    fs::create_dir(folder.join(name)).map_err(|error| format!("{name}: {error}"))?;
+    Ok(if parent.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{parent}/{name}")
+    })
+}
+
 fn is_album_name(name: &str) -> bool {
     let path = Path::new(name);
     matches!(
@@ -450,5 +500,40 @@ mod tests {
             entries(dir.path()),
             ["Christmas.phalbum", "Summer.phalbum", "a.jpg", "kids"]
         );
+    }
+
+    #[test]
+    fn creates_a_new_folder_inside_an_existing_one_and_refuses_unsafe_names() {
+        let dir = library();
+        assert_eq!(
+            create_folder(dir.path(), "", "grandparents"),
+            Ok("grandparents".into())
+        );
+        assert_eq!(
+            create_folder(dir.path(), "kids", "  summer "),
+            Ok("kids/summer".into())
+        );
+        assert!(dir.path().join("kids").join("summer").is_dir());
+        for (parent, name) in [
+            ("", "Kids"),
+            ("", "a.jpg"),
+            ("", ".hidden"),
+            ("", "Exports"),
+            ("", "a/b"),
+            ("", "what?"),
+            ("", "CON"),
+            ("", "com¹.txt"),
+            ("", "trailing."),
+            ("", ""),
+            ("missing", "new"),
+            (".phalbummakr", "new"),
+            ("..", "new"),
+        ] {
+            assert!(
+                create_folder(dir.path(), parent, name).is_err(),
+                "{parent}/{name}"
+            );
+        }
+        assert!(!dir.path().join("missing").exists());
     }
 }
