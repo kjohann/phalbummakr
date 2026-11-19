@@ -386,6 +386,24 @@ body {
   background: #d9e0d6;
 }
 
+/* Folders a Photo dragged from the grid can be sent to, and the one under the pointer. */
+.photo-breadcrumbs button.drop-target {
+  border-radius: 2px;
+  outline: 2px dashed #415d50;
+  outline-offset: 2px;
+}
+
+.folder-tile.drop-target .photo-preview {
+  outline: 2px dashed #415d50;
+  outline-offset: -2px;
+}
+
+.photo-breadcrumbs button.drop-target-over,
+.folder-tile.drop-target-over .photo-preview {
+  outline-style: solid;
+  background: #c9d8cd;
+}
+
 .photo-empty {
   margin: 16px;
   line-height: 1.6;

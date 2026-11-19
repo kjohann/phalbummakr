@@ -4,14 +4,15 @@ import { dirname } from "@tauri-apps/api/path";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { createAlbum, deserializeAlbum, serializeAlbum, type Album, type HistoryDirection, type LayoutPorts } from "../core";
-import AlbumWorkspace, { type AlbumCommand, type AlbumCommandName, type CommandBarLink, type HistoryState } from "./AlbumWorkspace";
+import { createAlbum, deserializeAlbum, sendPhotosToFolder, serializeAlbum, type Album, type HistoryDirection, type LayoutPorts } from "../core";
+import AlbumWorkspace, { type AlbumCommand, type AlbumCommandName, type CommandBarLink, type HistoryState, type PhotoMoveRunner } from "./AlbumWorkspace";
 import CommandBar, { type BarCommand } from "./CommandBar";
 import LayoutWorkspace, { type LayoutBarLink, type LayoutBarState, type LayoutCommand, type LayoutCommandName } from "./LayoutWorkspace";
 import type { Mode } from "./modes";
 import PhotoBrowser from "./PhotoBrowser";
 import SidePane, { clampPaneWidth, DEFAULT_SIDE_PANE, type PaneModes, type SidePaneSettings } from "./SidePane";
 import { historyShortcut } from "./historyShortcut";
+import { tauriSortingPorts } from "./tauriSortingPorts";
 import { useLayoutLibrary } from "./useLayoutLibrary";
 
 interface Settings {
@@ -122,6 +123,15 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
   const layoutLibraryReady = !layouts.disabled;
   useEffect(() => onLayoutLibraryReadyChange(layoutLibraryReady), [layoutLibraryReady, onLayoutLibraryReadyChange]);
   useEffect(() => () => onLayoutLibraryReadyChange(false), [onLayoutLibraryReadyChange]);
+  const photoMoves = useRef<PhotoMoveRunner | null>(null);
+  const sendPhotos = useCallback(async (photos: string[], target: string) => {
+    const run = photoMoves.current;
+    if (!run) throw new Error("The open Album is not ready yet.");
+    const name = document.path.split(/[\\/]/).pop()!;
+    return run(async (album) => (await sendPhotosToFolder(tauriSortingPorts, {
+      root: document.root, photos, target, openAlbum: { name, album },
+    })).moves);
+  }, [document.path, document.root]);
   return (
     <div className="library-workspace" style={{ display: hidden ? "none" : undefined }}>
       <SidePane modes={modes} settings={sidePane} onChange={onSidePaneChange}>
@@ -130,7 +140,7 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
           <div className="pane-view" hidden={mode === "album" && paneTab !== "photos"}
             {...mode === "album" ? { role: "tabpanel", id: "pane-panel-photos", "aria-labelledby": "pane-tab-photos" } : {}}>
             <PhotoBrowser root={document.root} album={album} compact={sidePane.compact}
-              onCompactChange={(compact) => onSidePaneChange({ compact })} />
+              onCompactChange={(compact) => onSidePaneChange({ compact })} onSendPhotos={sendPhotos} />
           </div>
           <div className="pane-view" hidden={mode !== "album" || paneTab !== "layouts"} ref={setAlbumLayoutsHost}
             role="tabpanel" id="pane-panel-layouts" aria-labelledby="pane-tab-layouts" />
@@ -140,7 +150,7 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
       {/* Hidden rather than unmounted, so Album mode keeps its Spread and Slot selection. */}
       <div className="mode-view" hidden={mode !== "album"}>
         <AlbumWorkspace root={document.root} document={document} suspended={suspended} active={mode === "album" && !hidden}
-          onBusyChange={reportAlbumBusy} onAlbumChange={reportAlbum} bar={bar}
+          onBusyChange={reportAlbumBusy} onAlbumChange={reportAlbum} bar={bar} photoMoves={photoMoves}
           layouts={{ state: layouts, paneHost: albumLayoutsHost }} />
       </div>
       {layoutsOpened && <div className="mode-view" hidden={mode !== "layouts"}>

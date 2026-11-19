@@ -1,7 +1,19 @@
-import { useEffect, useRef, useState } from "react";
-import { photoUsage, type Album, type Photo, type PhotoScan } from "../core";
+import { useEffect, useRef, useState, type DragEvent } from "react";
+import { isProtectedFolder, photoUsage, type Album, type Photo, type PhotoMove, type PhotoScan } from "../core";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
-import { writePhotoDrag } from "./photoDrag";
+import { hasPhotoDrag, readPhotoDrag, writePhotoDrag } from "./photoDrag";
+
+/** Props that make a folder tile or breadcrumb a drop target while a Photo is dragged from the grid. */
+type FolderDrop = (folder: string) => {
+  className?: string;
+  onDragOver?: (event: DragEvent) => void;
+  onDragLeave?: (event: DragEvent) => void;
+  onDrop?: (event: DragEvent) => void;
+};
+
+function withClass(base: string | undefined, extra: string | undefined) {
+  return [base, extra].filter(Boolean).join(" ") || undefined;
+}
 
 const GRID = {
   regular: { rowHeight: 160, columnWidth: 140 },
@@ -16,7 +28,9 @@ function parentFolder(path: string) {
   return separator < 0 ? "" : path.slice(0, separator);
 }
 
-function PhotoThumbnail({ root, photo, usage, compact }: { root: string; photo: Photo; usage: number; compact: boolean }) {
+function PhotoThumbnail({ root, photo, usage, compact, onDragChange }: {
+  root: string; photo: Photo; usage: number; compact: boolean; onDragChange: (path: string | null) => void;
+}) {
   const [source, setSource] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -38,8 +52,9 @@ function PhotoThumbnail({ root, photo, usage, compact }: { root: string; photo: 
     <figure className="photo-tile" title={`${photo.path}\n${photo.width} x ${photo.height} pixels`}
       draggable onDragStart={(event) => {
         writePhotoDrag(event.dataTransfer, photo, source ?? undefined);
+        onDragChange(photo.path);
         void tauriPhotoPorts.prewarmPreview(root, photo).catch(() => undefined);
-      }}>
+      }} onDragEnd={() => onDragChange(null)}>
       <div className="photo-preview">
         {source && <img src={source} alt={name} loading="lazy" decoding="async" draggable={false} />}
         {!source && !error && <span className="photo-placeholder">{compact ? "…" : "Loading..."}</span>}
@@ -54,10 +69,12 @@ function PhotoThumbnail({ root, photo, usage, compact }: { root: string; photo: 
   );
 }
 
-function FolderTile({ path, compact, onOpen }: { path: string; compact: boolean; onOpen: (path: string) => void }) {
+function FolderTile({ path, compact, onOpen, drop }: { path: string; compact: boolean; onOpen: (path: string) => void; drop: FolderDrop }) {
   const name = path.split("/").pop();
+  const target = drop(path);
   return (
-    <button type="button" className="folder-tile" title={path} aria-label={`Open folder ${name}`} onClick={() => onOpen(path)}>
+    <button type="button" title={path} aria-label={`Open folder ${name}`} onClick={() => onOpen(path)}
+      {...target} className={withClass("folder-tile", target.className)}>
       <span className="photo-preview">
         <svg width="48" height="40" viewBox="0 0 48 40" fill="none" aria-hidden="true">
           <path d="M3 9V5h16l5 5h21v26H3V9Z" fill="currentColor" />
@@ -72,13 +89,15 @@ function FolderTile({ path, compact, onOpen }: { path: string; compact: boolean;
   );
 }
 
-function PhotoGrid({ root, photos, folders, usage, compact, onOpenFolder }: {
+function PhotoGrid({ root, photos, folders, usage, compact, onOpenFolder, onDragChange, drop }: {
   root: string;
   photos: Photo[];
   folders: string[];
   usage: Map<string, number>;
   compact: boolean;
   onOpenFolder: (folder: string) => void;
+  onDragChange: (path: string | null) => void;
+  drop: FolderDrop;
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
@@ -121,8 +140,9 @@ function PhotoGrid({ root, photos, folders, usage, compact, onOpenFolder }: {
                 width: `${100 / columns}%`,
                 height: rowHeight,
               }}>
-              {entry.kind === "photo" ? <PhotoThumbnail root={root} photo={entry.photo} usage={usage.get(entry.photo.path) ?? 0} compact={compact} />
-                : <FolderTile path={entry.path} compact={compact} onOpen={onOpenFolder} />}
+              {entry.kind === "photo" ? <PhotoThumbnail root={root} photo={entry.photo} usage={usage.get(entry.photo.path) ?? 0}
+                compact={compact} onDragChange={onDragChange} />
+                : <FolderTile path={entry.path} compact={compact} onOpen={onOpenFolder} drop={drop} />}
             </div>
           );
         })}
@@ -131,14 +151,35 @@ function PhotoGrid({ root, photos, folders, usage, compact, onOpenFolder }: {
   );
 }
 
-export default function PhotoBrowser({ root, album = null, compact = false, onCompactChange }: {
+function folderName(folder: string) {
+  return folder ? folder.split("/").pop()! : "the Library";
+}
+
+function fileName(path: string) {
+  return path.split("/").pop()!;
+}
+
+function movedMessage(moves: PhotoMove[], target: string) {
+  if (moves.length !== 1) return `Moved ${moves.length} Photos to ${folderName(target)}.`;
+  const [{ from, to }] = moves;
+  return fileName(from) === fileName(to) ? `Moved "${fileName(from)}" to ${folderName(target)}.`
+    : `Moved "${fileName(from)}" to ${folderName(target)} as "${fileName(to)}".`;
+}
+
+export default function PhotoBrowser({ root, album = null, compact = false, onCompactChange, onSendPhotos }: {
   root: string;
   album?: Album | null;
   compact?: boolean;
   onCompactChange?: (compact: boolean) => void;
+  /** Moves Photos to a Folder ("" is the Library root), returning the moves made. Without it, Folders aren't drop targets. */
+  onSendPhotos?: (photos: string[], target: string) => Promise<PhotoMove[]>;
 }) {
   const [scan, setScan] = useState(0);
   const [unusedOnly, setUnusedOnly] = useState(false);
+  const [dragged, setDragged] = useState<string | null>(null);
+  const [dropOver, setDropOver] = useState<string | null>(null);
+  const [moving, setMoving] = useState(false);
+  const [moveMessage, setMoveMessage] = useState<{ text: string; failed: boolean } | null>(null);
   const [result, setResult] = useState<(PhotoScan & {
     generation: number;
     folder: string;
@@ -185,6 +226,68 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
     setResult((previous) => previous && { ...previous, folder: path, notice: null });
   }
 
+  function dragChange(path: string | null) {
+    setDragged(path);
+    setDropOver(null);
+    if (path) setMoveMessage(null);
+  }
+
+  async function send(photo: string, target: string) {
+    setMoving(true);
+    try {
+      const moves = await onSendPhotos!([photo], target);
+      if (moves.length > 0) {
+        setMoveMessage({ text: movedMessage(moves, target), failed: false });
+        setScan((value) => value + 1);
+      }
+    } catch (cause) {
+      setMoveMessage({ text: `Could not move "${fileName(photo)}": ${cause instanceof Error ? cause.message : String(cause)}`, failed: true });
+    } finally {
+      setMoving(false);
+    }
+  }
+
+  // The current Folder and the Photo's own Folder are never targets; from the grid, these are usually the same.
+  const drop: FolderDrop = (target) => {
+    if (!onSendPhotos || !dragged || moving || target === folder || target === parentFolder(dragged)
+      || isProtectedFolder(target)) return {};
+    return {
+      className: dropOver === target ? "drop-target drop-target-over" : "drop-target",
+      onDragOver: (event) => {
+        if (!hasPhotoDrag(event.dataTransfer)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        setDropOver(target);
+      },
+      onDragLeave: (event) => {
+        if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) {
+          setDropOver((current) => current === target ? null : current);
+        }
+      },
+      onDrop: (event) => {
+        const photo = readPhotoDrag(event.dataTransfer);
+        if (!photo) return;
+        event.preventDefault();
+        // The tile being dragged may be gone after the move, so dragend can't be relied on.
+        dragChange(null);
+        if (photo.path === dragged) void send(photo.path, target);
+      },
+    };
+  };
+
+  // A tile that leaves the grid mid-drag, e.g. once placed with "Unused in this Album" on, never gets
+  // its dragend. Browsers send no mouse moves during a drag, so the next one means the drag is over.
+  useEffect(() => {
+    if (!dragged) return;
+    const forget = () => dragChange(null);
+    window.addEventListener("mousemove", forget);
+    window.addEventListener("drop", forget);
+    return () => {
+      window.removeEventListener("mousemove", forget);
+      window.removeEventListener("drop", forget);
+    };
+  }, [dragged]);
+
   return (
     <aside className="photo-browser" aria-label="Library Photos">
       <header className="photo-browser-header">
@@ -202,12 +305,12 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
       {result && (
         <nav className="photo-breadcrumbs" aria-label="Photo folders">
           <button type="button" aria-current={folder === "" ? "page" : undefined}
-            onClick={() => openFolder("")}>Library</button>
+            onClick={() => openFolder("")} {...drop("")}>Library</button>
           {ancestors.map((ancestor) => (
             <span key={ancestor.path}>
               <span aria-hidden="true"> / </span>
               <button type="button" aria-current={ancestor.path === folder ? "page" : undefined}
-                onClick={() => openFolder(ancestor.path)}>{ancestor.name}</button>
+                onClick={() => openFolder(ancestor.path)} {...drop(ancestor.path)}>{ancestor.name}</button>
             </span>
           ))}
         </nav>
@@ -218,6 +321,9 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
       </label>
       <p className="photo-order">Capture date · oldest first</p>
       {result?.notice && <p className="photo-empty" role="status">{result.notice}</p>}
+      {moveMessage && (moveMessage.failed
+        ? <p className="error-banner" role="alert">{moveMessage.text}</p>
+        : <p className="photo-empty" role="status">{moveMessage.text}</p>)}
       {error && <p className="error-banner" role="alert">{error}</p>}
       {result && result.warnings.length > 0 && (
         <details className="photo-warnings">
@@ -231,7 +337,8 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
           : unusedOnly && album ? "No unused Photos in this folder." : "No Photos in this folder."}</p>
       )}
       {result && <PhotoGrid key={`${root}:${result.generation}:${folder}:${unusedOnly}`} root={root}
-        photos={photos} folders={folders} usage={usage} compact={compact} onOpenFolder={openFolder} />}
+        photos={photos} folders={folders} usage={usage} compact={compact} onOpenFolder={openFolder}
+        onDragChange={dragChange} drop={drop} />}
     </aside>
   );
 }

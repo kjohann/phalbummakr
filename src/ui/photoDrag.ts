@@ -8,7 +8,8 @@ function isCachedThumbnail(value: string): boolean {
 
 export function writePhotoDrag(dataTransfer: DataTransfer, photo: PlaceablePhoto, thumbnail?: string) {
   const { path, width, height, orientation } = photo;
-  dataTransfer.effectAllowed = "copy";
+  // Copy places the Photo on a Page; move sends it to a Folder.
+  dataTransfer.effectAllowed = "copyMove";
   dataTransfer.setData(PHOTO_TYPE, JSON.stringify({
     path, width, height, orientation,
     ...(thumbnail && isCachedThumbnail(thumbnail) ? { thumbnail } : {}),

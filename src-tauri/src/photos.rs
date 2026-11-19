@@ -87,7 +87,7 @@ fn scan_folder(root: &Path, folder: &Path, result: &mut ScanResult) -> Result<()
     Ok(())
 }
 
-fn is_photo(path: &Path) -> bool {
+pub(crate) fn is_photo(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| {
@@ -198,7 +198,7 @@ fn resolve_photo(
 }
 
 /// Folders the scan hides: app data and Exports anywhere.
-fn is_hidden_folder(name: &std::ffi::OsStr) -> bool {
+pub(crate) fn is_hidden_folder(name: &std::ffi::OsStr) -> bool {
     name.eq_ignore_ascii_case(".phalbummakr") || name.eq_ignore_ascii_case("Exports")
 }
 

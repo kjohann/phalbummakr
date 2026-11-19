@@ -68,7 +68,7 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 023 | [Command bar and mode switch](023-command-bar.md)              | 016, 019, 020 | done   |
 | 024 | [Slot tools in the command bar](024-slot-tools-in-command-bar.md) | 023     | done   |
 | 025 | [Folder tree in the Photo pane](025-folder-tree.md)            | 023        | closed |
-| 026 | [Sorting core: send Photos to a Folder](026-sorting-core.md)   | 023        | todo   |
+| 026 | [Sorting core: send Photos to a Folder](026-sorting-core.md)   | 023        | done   |
 | 027 | [Create and rename Folders](027-create-and-rename-folders.md)  | 026        | todo   |
 | 028 | [Sort mode](028-sort-mode.md)                                  | 023, 026   | todo   |
 | 029 | [Applying Layouts in Album mode](029-apply-layouts.md)         | 010, 023   | done   |

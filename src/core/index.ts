@@ -6,3 +6,4 @@ export * from "./slots";
 export * from "./layouts";
 export * from "./usage";
 export * from "./history";
+export * from "./sorting";

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
-  canRedo, canUndo, createAlbum, deserializeAlbum, emptyHistory, endGroup, recordChange, serializeAlbum, stepHistory,
-  type Album, type AlbumPorts, type HistoryDirection, type PhotoPreviewPorts, type UndoHistory,
+  canRedo, canUndo, createAlbum, deserializeAlbum, emptyHistory, endGroup, recordChange, relinkPlacements, serializeAlbum, stepHistory,
+  type Album, type AlbumPorts, type HistoryDirection, type PhotoMove, type PhotoPreviewPorts, type UndoHistory,
 } from "../core";
 import AlbumView from "./AlbumView";
 import ModalDialog from "./ModalDialog";
@@ -33,6 +33,17 @@ export interface AlbumCommand {
   serial: number;
 }
 
+/**
+ * Runs a Photo move against the open Album. Edits and autosave pause while `move` runs with the
+ * current Album, which `move` writes to disk itself. The Album then adopts the moves, outside undo.
+ */
+export type PhotoMoveRunner = (move: (album: Album) => Promise<PhotoMove[]>) => Promise<PhotoMove[]>;
+
+/** Where the open Album puts its Photo move runner for the Photo pane to use. */
+export interface PhotoMoveLink {
+  current: PhotoMoveRunner | null;
+}
+
 /** How the open Album and the command bar talk to each other. */
 export interface CommandBarLink {
   command?: AlbumCommand;
@@ -57,6 +68,7 @@ interface Props {
   /** False while another mode is shown; the hidden workspace then leaves keyboard shortcuts alone. */
   active?: boolean;
   layouts?: AlbumLayouts;
+  photoMoves?: PhotoMoveLink;
 }
 
 /** The shared Layout Library, and where Album mode lists it: the Layouts tab of the Side pane. */
@@ -65,7 +77,7 @@ export interface AlbumLayouts {
   paneHost: HTMLElement | null;
 }
 
-export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document, suspended = false, bar = {}, active = true, layouts }: Props) {
+export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document, suspended = false, bar = {}, active = true, layouts, photoMoves }: Props) {
   const { command, onEditableChange, onHistoryChange } = bar;
   const [names, setNames] = useState<string[]>([]);
   const [current, setCurrent] = useState<{ filename: string; album: Album } | null>(
@@ -96,6 +108,9 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
   const historyRef = useRef(emptyHistory<Album>());
   const [historyState, setHistoryState] = useState<HistoryState>({ canUndo: false, canRedo: false });
   const saveInFlight = useRef(false);
+  // Settles when the autosave being written finishes, so a Photo move can wait for it.
+  const savePromise = useRef<Promise<boolean>>(Promise.resolve(true));
+  const moving = useRef(false);
   const locked = busy || listing || saveStatus !== "saved" || cropPending;
   const handledCommand = useRef(command?.serial);
 
@@ -150,7 +165,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
   }, [current?.album, onAlbumChange]);
 
   useEffect(() => {
-    if (!current || cropPending || saveInFlight.current || saveStatus === "error") return;
+    if (!current || busy || cropPending || saveInFlight.current || saveStatus === "error") return;
     const json = serializeAlbum(current.album);
     if (json === savedJson.current) {
       setSaveStatus("saved");
@@ -159,19 +174,55 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
     const timer = window.setTimeout(() => {
       saveInFlight.current = true;
       setSaveStatus("saving");
-      ports.write(root, current.filename, json, false).then(() => {
+      savePromise.current = ports.write(root, current.filename, json, false).then(() => {
         saveInFlight.current = false;
         savedJson.current = json;
         const latest = currentRef.current;
         setSaveStatus(latest?.filename === current.filename && serializeAlbum(latest.album) === json ? "saved" : "pending");
+        return true;
       }).catch((cause: unknown) => {
         saveInFlight.current = false;
         setError(`Could not save Album: ${String(cause)}`);
         setSaveStatus("error");
+        return false;
       });
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [current, root, ports, retry, cropPending, saveStatus]);
+  }, [current, root, ports, retry, cropPending, saveStatus, busy]);
+
+  async function runPhotoMove(move: (album: Album) => Promise<PhotoMove[]>): Promise<PhotoMove[]> {
+    if (!currentRef.current || suspended || busy || listing || cropPending || moving.current) {
+      throw new Error("The open Album is busy. Try again in a moment.");
+    }
+    if (saveStatus === "error") throw new Error("The open Album could not be saved. Retry saving it first.");
+    moving.current = true;
+    setBusy(true);
+    try {
+      if (!await savePromise.current) throw new Error("The open Album could not be saved. Retry saving it first.");
+      const present = currentRef.current;
+      const moves = await move(present.album);
+      const relinked = relinkPlacements(present.album, moves);
+      // The move wrote the relinked Album to its file, so it is already saved.
+      if (relinked !== present.album) savedJson.current = serializeAlbum(relinked);
+      const { past, future } = historyRef.current;
+      setHistory({
+        ...historyRef.current,
+        past: past.map((album) => relinkPlacements(album, moves)),
+        future: future.map((album) => relinkPlacements(album, moves)),
+      });
+      setCurrentAlbum({ ...present, album: relinked });
+      return moves;
+    } finally {
+      moving.current = false;
+      setBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!photoMoves) return;
+    photoMoves.current = runPhotoMove;
+    return () => { photoMoves.current = null; };
+  });
 
   useEffect(() => {
     if (!locked) return;

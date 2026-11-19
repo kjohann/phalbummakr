@@ -3,6 +3,7 @@ mod fonts;
 mod layouts;
 mod photos;
 mod settings;
+mod sorting;
 
 use base64::Engine;
 use std::path::{Path, PathBuf};
@@ -93,6 +94,33 @@ async fn scan_photos(root: String) -> Result<photos::ScanResult, String> {
 }
 
 #[tauri::command]
+async fn folder_names(root: String, folder: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || sorting::folder_names(Path::new(&root), &folder))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn root_albums(root: String) -> Result<Vec<sorting::RootAlbum>, String> {
+    tauri::async_runtime::spawn_blocking(move || sorting::root_albums(Path::new(&root)))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn move_photos(
+    root: String,
+    moves: Vec<sorting::PhotoMove>,
+    albums: Vec<sorting::AlbumRewrite>,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        sorting::move_photos(Path::new(&root), &moves, &albums)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn photo_thumbnail(
     app: tauri::AppHandle,
     root: String,
@@ -175,6 +203,9 @@ pub fn run() {
             read_layout_library,
             write_layout_library,
             scan_photos,
+            folder_names,
+            root_albums,
+            move_photos,
             photo_thumbnail,
             photo_page_thumbnail,
             photo_preview,

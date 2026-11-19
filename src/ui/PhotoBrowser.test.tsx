@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { addPhotoSlot, createAlbum, duplicatePage, placePhoto } from "../core";
+import { addPhotoSlot, createAlbum, duplicatePage, placePhoto, type PhotoMove } from "../core";
 import PhotoBrowser from "./PhotoBrowser";
 import { hasPhotoDrag, readPhotoDrag } from "./photoDrag";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
@@ -307,7 +307,7 @@ it("lets a Photo tile be dragged with the Photo as its payload", async () => {
     getData: (type: string) => data.get(type) ?? "",
   };
   fireEvent.dragStart(tile, { dataTransfer });
-  expect(dataTransfer.effectAllowed).toBe("copy");
+  expect(dataTransfer.effectAllowed).toBe("copyMove");
   expect(hasPhotoDrag(dataTransfer as unknown as DataTransfer)).toBe(true);
   expect(readPhotoDrag(dataTransfer as unknown as DataTransfer)).toEqual({
     path: "holiday/tree.jpg", width: 4000, height: 3000, orientation: 6,
@@ -337,4 +337,107 @@ it("reuses completed previews only when the current Photo revision is known", as
 
   await tauriPhotoPorts.preview(root, original.path);
   expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "photo_preview")).toHaveLength(3);
+});
+
+describe("sending Photos to a Folder by dragging", () => {
+  function photoTransfer() {
+    const data = new Map<string, string>();
+    return {
+      effectAllowed: "none", dropEffect: "none",
+      get types() { return [...data.keys()]; },
+      setData: (type: string, value: string) => data.set(type, value),
+      getData: (type: string) => data.get(type) ?? "",
+    };
+  }
+
+  async function browseTrips(onSendPhotos: (photos: string[], target: string) => Promise<PhotoMove[]>) {
+    let scans = 0;
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "scan_photos") {
+        scans++;
+        return scans === 1
+          ? { photos: [{ ...photo(0), path: "trips/a.jpg" }], folders: ["trips", "trips/kids"], warnings: [] }
+          : { photos: [{ ...photo(0), path: "trips/kids/a (2).jpg" }], folders: ["trips", "trips/kids"], warnings: [] };
+      }
+      return "data:image/png;base64,dGVzdA==";
+    });
+    render(<PhotoBrowser root="D:\\Photos" onSendPhotos={onSendPhotos} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open folder trips" }));
+    const tile = (await screen.findByText("a.jpg")).closest("figure")!;
+    const folder = screen.getByRole("button", { name: "Open folder kids" });
+    const breadcrumbs = within(screen.getByRole("navigation", { name: "Photo folders" }));
+    return { tile, folder, library: breadcrumbs.getByRole("button", { name: "Library" }), current: breadcrumbs.getByRole("button", { name: "trips" }), scans: () => scans };
+  }
+
+  it("outlines the Folders a dragged Photo can go to and sends it to the one it is dropped on", async () => {
+    let finish!: (moves: PhotoMove[]) => void;
+    const onSendPhotos = vi.fn(() => new Promise<PhotoMove[]>((resolve) => { finish = resolve; }));
+    const { tile, folder, library, current, scans } = await browseTrips(onSendPhotos);
+    for (const target of [folder, library, current]) expect(target.classList.contains("drop-target")).toBe(false);
+
+    const transfer = photoTransfer();
+    fireEvent.dragStart(tile, { dataTransfer: transfer });
+    expect(folder.classList.contains("drop-target")).toBe(true);
+    expect(library.classList.contains("drop-target")).toBe(true);
+    expect(current.classList.contains("drop-target")).toBe(false);
+    expect(fireEvent.dragOver(current, { dataTransfer: transfer })).toBe(true);
+    expect(fireEvent.dragOver(folder, { dataTransfer: transfer })).toBe(false);
+    expect(transfer.dropEffect).toBe("move");
+    expect(folder.classList.contains("drop-target-over")).toBe(true);
+    expect(library.classList.contains("drop-target-over")).toBe(false);
+    fireEvent.dragLeave(folder, { dataTransfer: transfer });
+    expect(folder.classList.contains("drop-target-over")).toBe(false);
+
+    fireEvent.dragOver(folder, { dataTransfer: transfer });
+    fireEvent.drop(folder, { dataTransfer: transfer });
+    expect(onSendPhotos).toHaveBeenCalledWith(["trips/a.jpg"], "trips/kids");
+    expect(folder.classList.contains("drop-target")).toBe(false);
+    finish([{ from: "trips/a.jpg", to: "trips/kids/a (2).jpg" }]);
+    expect(await screen.findByText('Moved "a.jpg" to kids as "a (2).jpg".')).toBeTruthy();
+    await waitFor(() => expect(scans()).toBe(2));
+    await screen.findByText("No Photos in this folder.");
+  });
+
+  it("sends a Photo to the Library root from a breadcrumb and reports a failed move", async () => {
+    const onSendPhotos = vi.fn(async () => { throw new Error("Album locked"); });
+    const { tile, library } = await browseTrips(onSendPhotos);
+    const transfer = photoTransfer();
+    fireEvent.dragStart(tile, { dataTransfer: transfer });
+    fireEvent.dragOver(library, { dataTransfer: transfer });
+    fireEvent.drop(library, { dataTransfer: transfer });
+    expect(onSendPhotos).toHaveBeenCalledWith(["trips/a.jpg"], "");
+    expect((await screen.findByRole("alert")).textContent).toMatch(/Could not move "a.jpg".*Album locked/);
+    expect(screen.getByText("a.jpg")).toBeTruthy();
+  });
+
+  it("ignores Photos not dragged from the grid, such as Placements from a Page", async () => {
+    const onSendPhotos = vi.fn(async () => []);
+    const { folder } = await browseTrips(onSendPhotos);
+    const transfer = photoTransfer();
+    transfer.setData("application/x-phalbummakr-photo", JSON.stringify({ path: "trips/a.jpg", width: 1, height: 1, orientation: 1 }));
+    expect(fireEvent.dragOver(folder, { dataTransfer: transfer })).toBe(true);
+    fireEvent.drop(folder, { dataTransfer: transfer });
+    expect(folder.classList.contains("drop-target")).toBe(false);
+    expect(onSendPhotos).not.toHaveBeenCalled();
+  });
+});
+
+it("forgets a grid drag whose tile disappeared before the drag ended, and only takes Photo drags", async () => {
+  const onSendPhotos = vi.fn(async () => []);
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "scan_photos") return { photos: [photo(0)], folders: ["kids"], warnings: [] };
+    return "data:image/png;base64,dGVzdA==";
+  });
+  render(<PhotoBrowser root="D:\\Photos" onSendPhotos={onSendPhotos} />);
+  const tile = (await screen.findByText(photo(0).path)).closest("figure")!;
+  const folder = screen.getByRole("button", { name: "Open folder kids" });
+  fireEvent.dragStart(tile, { dataTransfer: { effectAllowed: "none", setData: () => {} } });
+  expect(folder.classList.contains("drop-target")).toBe(true);
+  const layoutDrag = { types: ["application/x-phalbummakr-layout"], getData: () => "layout-1", dropEffect: "none" };
+  expect(fireEvent.dragOver(folder, { dataTransfer: layoutDrag })).toBe(true);
+  fireEvent.drop(folder, { dataTransfer: layoutDrag });
+  expect(onSendPhotos).not.toHaveBeenCalled();
+  // Browsers send no mouse moves during a drag, so the first one means it ended.
+  fireEvent.mouseMove(window);
+  expect(folder.classList.contains("drop-target")).toBe(false);
 });

@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { useState, type ComponentProps, type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { addPhotoSlot, addTextSlot, createAlbum, deserializeAlbum, photoUsage, placePhoto, readLayoutLibrary, rotateSlot, serializeAlbum, serializeLayoutLibrary, setSlotPlaceholder, setSlotText, type Album, type AlbumPorts, type Layout, type LayoutPorts } from "../core";
-import Workspace, { type AlbumCommand, type AlbumCommandName } from "./AlbumWorkspace";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { addPhotoSlot, addTextSlot, createAlbum, deserializeAlbum, photoUsage, placePhoto, readLayoutLibrary, relinkPlacements, rotateSlot, serializeAlbum, serializeLayoutLibrary, setSlotPlaceholder, setSlotText, type Album, type AlbumPorts, type Layout, type LayoutPorts } from "../core";
+import Workspace, { type AlbumCommand, type AlbumCommandName, type PhotoMoveLink } from "./AlbumWorkspace";
 import PhotoBrowser from "./PhotoBrowser";
 import { PhotoSlotTools } from "./SlotTools";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
@@ -2167,4 +2167,52 @@ it("counts a Slot drag and a session of typing as one undo step each", () => {
   expect(slots()).toHaveLength(1);
   fireEvent.click(screen.getByRole("button", { name: "Bar undo" }));
   expect(slots()[0]).toEqual(before);
+});
+
+describe("moving Photos while their Album is open", () => {
+  const moves = [{ from: "a.jpg", to: "kids/a.jpg" }];
+  function openWithPhoto() {
+    const { ports, files } = disk();
+    const album = placePhoto(addPhotoSlot(createAlbum({ name: "Existing" }), "page-1"), "page-1", "slot-1",
+      { path: "a.jpg", width: 6000, height: 4000, orientation: 1 });
+    files.set("Existing", serializeAlbum(album));
+    const onAlbumChange = vi.fn<(album: Album | null) => void>();
+    const onHistoryChange = vi.fn();
+    const photoMoves: PhotoMoveLink = { current: null };
+    render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} onAlbumChange={onAlbumChange}
+      bar={{ onHistoryChange }} photoMoves={photoMoves} document={{ path: "Existing", album }} />);
+    const latest = () => onAlbumChange.mock.lastCall![0]!;
+    return { ports, files, photoMoves, latest, onHistoryChange };
+  }
+
+  it("relinks the open Album and its undo steps without adding a step or saving over the move", async () => {
+    const { ports, files, photoMoves, latest, onHistoryChange } = openWithPhoto();
+    fireEvent.click(screen.getByRole("button", { name: "Bar add-spread" }));
+    let given: Album | undefined;
+    await act(() => photoMoves.current!(async (album) => {
+      given = album;
+      files.set("Existing", serializeAlbum(relinkPlacements(album, moves)));
+      return moves;
+    }));
+    expect(given!.pages).toHaveLength(4);
+    expect([...photoUsage(latest())]).toEqual([["kids/a.jpg", 1]]);
+    expect(onHistoryChange).toHaveBeenLastCalledWith({ canUndo: true, canRedo: false });
+    await act(() => new Promise((resolve) => setTimeout(resolve, 700)));
+    expect(ports.write).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Bar undo" }));
+    expect(latest().pages).toHaveLength(2);
+    expect([...photoUsage(latest())]).toEqual([["kids/a.jpg", 1]]);
+    expect(onHistoryChange).toHaveBeenLastCalledWith({ canUndo: false, canRedo: true });
+    await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages).toHaveLength(2));
+    expect(photoUsage(deserializeAlbum(files.get("Existing")!)).get("kids/a.jpg")).toBe(1);
+  });
+
+  it("keeps the Album as it was when the move fails, then saves pending edits as usual", async () => {
+    const { files, photoMoves, latest } = openWithPhoto();
+    fireEvent.click(screen.getByRole("button", { name: "Bar add-spread" }));
+    await act(() => expect(photoMoves.current!(async () => { throw new Error("Album locked"); })).rejects.toThrow("Album locked"));
+    expect([...photoUsage(latest())]).toEqual([["a.jpg", 1]]);
+    await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages).toHaveLength(4));
+  });
 });
