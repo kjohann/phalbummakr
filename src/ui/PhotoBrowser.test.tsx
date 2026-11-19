@@ -601,6 +601,50 @@ describe("Sort mode", () => {
     expect(await work.findByRole("img", { name: photo(2).path })).toBeTruthy();
   });
 
+  it("sends every chosen Photo from the right-click menu of a chosen one, and only an unchosen Photo itself", async () => {
+    const onSendPhotos = vi.fn(async (paths: string[], target: string) => paths.map((from) => ({ from, to: `${target}/${from}` })));
+    const { work, tile, onCreateFolder } = await browseSort({ photos: [0, 1, 2, 3].map(photo), onSendPhotos });
+    fireEvent.click(tile(photo(0).path));
+    for (const index of [1, 2]) fireEvent.click(tile(photo(index).path), { ctrlKey: true });
+    for (const index of [0, 1]) fireEvent.click(work.getByRole("button", { name: `Choose ${photo(index).path}` }));
+    const sendVia = (target: HTMLElement, folder: string) => {
+      fireEvent.contextMenu(target);
+      fireEvent.click(screen.getByRole("menuitem", { name: "Send to Folder" }));
+      fireEvent.click(within(screen.getByRole("menu", { name: "Send to Folder" })).getByRole("menuitem", { name: folder }));
+    };
+    // Each move rescans, which replaces the grid; wait for the new one before using its tiles.
+    const grid = () => screen.getByRole("list", { name: "Folders and Photos" });
+    const rescanned = (before: HTMLElement) => waitFor(() => {
+      expect(grid()).not.toBe(before);
+      expect(tile(photo(3).path)).toBeTruthy();
+    });
+
+    let before = grid();
+    sendVia(work.getByRole("button", { name: `Unchoose ${photo(1).path}` }), "New Folder…");
+    const dialog = within(screen.getByRole("dialog", { name: "New Folder" }));
+    expect(dialog.getByText(/moves 2 Photos/)).toBeTruthy();
+    fireEvent.change(dialog.getByRole("textbox", { name: "Folder name" }), { target: { value: "best" } });
+    fireEvent.click(dialog.getByRole("button", { name: "Create and Move" }));
+    await waitFor(() => expect(onSendPhotos).toHaveBeenCalledWith([photo(0).path, photo(1).path], "best"));
+    expect(onCreateFolder).toHaveBeenCalledWith("", "best");
+    await waitFor(() => expect(work.queryByRole("button", { name: /photo-[01]\.jpg/ })).toBeNull());
+    await rescanned(before);
+
+    // An unchosen Photo goes on its own, from the grid as from the Comparison.
+    fireEvent.click(tile(photo(3).path), { ctrlKey: true });
+    fireEvent.click(work.getByRole("button", { name: `Choose ${photo(2).path}` }));
+    before = grid();
+    sendVia(tile(photo(3).path), "kids");
+    await waitFor(() => expect(onSendPhotos).toHaveBeenLastCalledWith([photo(3).path], "kids"));
+    await rescanned(before);
+    // A chosen Photo right-clicked in the grid takes the other chosen Photos with it.
+    fireEvent.click(tile(photo(0).path), { ctrlKey: true });
+    fireEvent.click(work.getByRole("button", { name: `Choose ${photo(0).path}` }));
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    sendVia(tile(photo(2).path), "kids");
+    await waitFor(() => expect(onSendPhotos).toHaveBeenLastCalledWith([photo(2).path, photo(0).path], "kids"));
+  });
+
   it("sends the chosen Photos from the command bar's Send to Folder dialog, into an existing or a new Folder", async () => {
     const onSendPhotos = vi.fn(async (paths: string[], target: string) => paths.map((from) => ({ from, to: `${target}/${from}` })));
     const { work, tile, rerunCommand, onCreateFolder } = await browseSort({ photos: [0, 1, 2, 3].map(photo), onSendPhotos });

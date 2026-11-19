@@ -2,6 +2,8 @@
 
 Status: done · Type: feature · Depends on: 023, 026
 
+Addendum: [028 addendum - Right-click sends the chosen Photos](028-addendum.md)
+
 ## What
 
 A mode for looking at Photos large, comparing up to four and sending the chosen ones to a Folder. The work area shows Photos instead of Spreads, and the Photo pane shows only Photos.
@@ -51,8 +53,9 @@ A mode for looking at Photos large, comparing up to four and sending the chosen 
     and "New Folder…" at every level. Protected Folders are left out. A Folder
     already holding every Photo being sent is disabled, but its submenu can
     still be opened.
-  - Right-click "Send to Folder ▸" sends the right-clicked Photo. The command
-    bar's "Send to Folder…" sends the chosen Photos.
+  - Right-click "Send to Folder ▸" sends the right-clicked Photo, or every
+    chosen Photo if it is one of them (see the [028 addendum](028-addendum.md)).
+    The command bar's "Send to Folder…" sends the chosen Photos.
   - `SendToFolderDialog` serves both "New Folder…" (name only) and the command
     bar (Folder tree in depth-first order, plus an optional New Folder name).
   - Drag-to-Folder from 026 and the menus share one `send`, so moved Photos

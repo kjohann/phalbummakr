@@ -97,6 +97,7 @@ Work order for modes: 023, then 024, the 016 addendum and 011; 026 → 027/028; 
 | [016 addendum - Stable native menu during autosave](016-addendum.md#section-2---stable-native-menu-during-autosave) | 016 | done |
 | [023 addendum - Photo pane controls inside the pane](023-addendum.md) | 023 | done |
 | [023 addendum - Mode bar on the left pane](023-addendum.md#section-2---mode-bar-on-the-left-pane) | 023 | done |
+| [028 addendum - Right-click sends the chosen Photos](028-addendum.md) | 028 | done |
 
 ## After the MVP
 

@@ -376,7 +376,9 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
 
   function menuItems({ path, where }: PhotoMenu): MenuItem[] {
     const inComparison = comparison.shown.includes(path);
-    const sendItem = { label: "Send to Folder", items: sendToFolderItems([path]) };
+    // Like a file manager's selection: a chosen Photo takes the other chosen Photos with it.
+    const chosen = chosenPhotos(comparison);
+    const sendItem = { label: "Send to Folder", items: sendToFolderItems(chosen.includes(path) ? chosen : [path]) };
     if (where === "grid") {
       return [
         { label: "Show", onSelect: () => setComparison(showPhoto(path)) },
@@ -387,9 +389,9 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
         sendItem,
       ];
     }
-    const chosen = comparison.chosen.includes(path);
+    const isChosen = comparison.chosen.includes(path);
     return [
-      ...comparison.shown.length > 1 ? [{ label: chosen ? "Unchoose" : "Choose", onSelect: () => setComparison((current) => toggleChosen(current, path)) }] : [],
+      ...comparison.shown.length > 1 ? [{ label: isChosen ? "Unchoose" : "Choose", onSelect: () => setComparison((current) => toggleChosen(current, path)) }] : [],
       { label: "Remove from Comparison", onSelect: () => setComparison((current) => toggleComparison(current, path)) },
       sendItem,
     ];
