@@ -32,6 +32,11 @@ For code fixes or tweaks not covered by an addendum, create and index a new
 numbered issue using the [issue template](issues/README.md#new-issues) before
 implementing the change.
 
+The [inbox](issues/inbox.md) holds raw feedback from real use. Its notes are not
+work items: don't implement them directly. When asked to sort the inbox, turn
+each note into an issue, addendum or backlog item, or discard it, and then
+delete the note.
+
 # Finishing an issue
 
 After implementing an issue, review the "Future considerations (low priority)"

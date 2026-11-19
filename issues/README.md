@@ -104,3 +104,8 @@ Work order for modes: 023, then 024, the 016 addendum and 011; 026 → 027/028; 
 ## After the MVP
 
 See [backlog.md](backlog.md).
+
+## Inbox
+
+Raw feedback from real use goes in [inbox.md](inbox.md) until it is sorted into
+issues, addenda or the backlog, or discarded.
