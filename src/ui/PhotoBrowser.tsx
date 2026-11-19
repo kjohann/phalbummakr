@@ -237,7 +237,7 @@ function movedMessage(moves: PhotoMove[], target: string) {
     : `Moved "${fileName(from)}" to ${folderName(target)} as "${fileName(to)}".`;
 }
 
-export default function PhotoBrowser({ root, album = null, compact = false, onCompactChange, onSendPhotos, onCreateFolder, onRenameFolder, sort, mode = "album", visible = true }: {
+export default function PhotoBrowser({ root, album = null, compact = false, onCompactChange, onSendPhotos, onCreateFolder, onRenameFolder, onPhotosChange, sort, mode = "album", visible = true }: {
   root: string;
   album?: Album | null;
   compact?: boolean;
@@ -248,6 +248,8 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
   onCreateFolder?: (parent: string, name: string) => Promise<string>;
   /** Renames `folder` to `name`, with everything under it, returning its new Library-relative path. */
   onRenameFolder?: (folder: string, name: string) => Promise<string>;
+  /** Receives every Photo in the Library after each scan. */
+  onPhotosChange?: (photos: readonly Photo[]) => void;
   /** Set in Sort mode, where Photos are shown large and compared. */
   sort?: SortLink;
   /** Whose current Folder and back/forward history are shown. */
@@ -304,6 +306,9 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
       });
     return () => { active = false; };
   }, [root, scan]);
+  useEffect(() => {
+    if (result) onPhotosChange?.(result.photos);
+  }, [result, onPhotosChange]);
 
   const { history, notice } = places[mode];
   const folder = result ? currentFolder(history) : "";

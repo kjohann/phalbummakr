@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { exportWarnings, type Album } from "../core";
+import { exportWarnings, lowResolutionPlacements, type Album, type PhotoSize } from "../core";
 import { plural } from "./LayoutLibraryPane";
 import ModalDialog from "./ModalDialog";
 import { exportPages, type ExportProgress, type PageExportPorts } from "./pageExport";
@@ -15,14 +15,26 @@ function listed(numbers: number[]) {
   return numbers.length === 1 ? String(numbers[0]) : `${numbers.slice(0, -1).join(", ")} and ${numbers[numbers.length - 1]}`;
 }
 
+/** Low Effective Resolution Placements per Page, with the lowest Effective Resolution on each, in Page order. */
+function lowResolutionByPage(album: Album, photoSizes: ReadonlyMap<string, PhotoSize>) {
+  const pages = new Map<number, { count: number; lowest: number }>();
+  for (const { page, effectiveResolution } of lowResolutionPlacements(album, photoSizes)) {
+    const current = pages.get(page);
+    pages.set(page, { count: (current?.count ?? 0) + 1, lowest: Math.min(current?.lowest ?? Infinity, effectiveResolution) });
+  }
+  // Rounded down, so a flagged Photo never reads as being at the threshold.
+  return [...pages].map(([page, { count, lowest }]) => ({ page, count, lowest: Math.floor(lowest) }));
+}
+
 /** Confirms a Page Export with its warnings, then exports every Page while showing progress. */
-export default function ExportDialog({ album, root, name, ports, onClose }: {
-  album: Album; root: string; name: string; ports: PageExportPorts; onClose: () => void;
+export default function ExportDialog({ album, root, name, ports, photoSizes, onClose }: {
+  album: Album; root: string; name: string; ports: PageExportPorts; photoSizes: ReadonlyMap<string, PhotoSize>; onClose: () => void;
 }) {
   const [phase, setPhase] = useState<Phase>({ name: "confirm" });
   const controller = useRef<AbortController | null>(null);
   useEffect(() => () => controller.current?.abort(), []);
   const warnings = exportWarnings(album);
+  const lowResolution = lowResolutionByPage(album, photoSizes);
   const destination = `Exports/${name}`;
   const running = phase.name === "running";
   const [openError, setOpenError] = useState<string | null>(null);
@@ -63,12 +75,17 @@ export default function ExportDialog({ album, root, name, ports, onClose }: {
         <h2>Export Pages</h2>
         {phase.name === "confirm" && <>
           <p>{plural(album.pages.length, "Page")} will be exported to {destination}.</p>
-          {(warnings.emptyPages.length > 0 || warnings.emptyPhotoSlots.length > 0) && (
+          {(warnings.emptyPages.length > 0 || warnings.emptyPhotoSlots.length > 0 || lowResolution.length > 0) && (
             <ul className="export-warnings" aria-label="Export warnings">
               {warnings.emptyPages.length > 0 && <li>{warnings.emptyPages.length === 1
                 ? `Page ${warnings.emptyPages[0]} is empty.` : `Pages ${listed(warnings.emptyPages)} are empty.`}</li>}
               {warnings.emptyPhotoSlots.map(({ page, count }) => (
                 <li key={page}>{`Page ${page} has ${plural(count, "empty Photo Slot")}.`}</li>
+              ))}
+              {lowResolution.map(({ page, count, lowest }) => (
+                <li key={`resolution-${page}`}>{count === 1
+                  ? `Page ${page} has a Photo at ${lowest} DPI, below ${album.pageFormat.minEffectiveDpi} DPI.`
+                  : `Page ${page} has ${count} Photos below ${album.pageFormat.minEffectiveDpi} DPI, the lowest at ${lowest} DPI.`}</li>
               ))}
             </ul>
           )}

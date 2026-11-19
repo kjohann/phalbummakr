@@ -1502,6 +1502,26 @@ button.sort-photo--chosen:hover {
   pointer-events: none;
 }
 
+/* A low Effective Resolution badge; it lives in the DOM overlay, so it is never exported. */
+.slot-resolution-warning {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid #ffffff;
+  border-radius: 50%;
+  background: #b5651d;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+}
+
 /* The selected Slot's tools, rendered into the middle of the command bar. */
 .command-tools,
 .slot-tools {

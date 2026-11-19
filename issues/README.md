@@ -64,7 +64,7 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 019 | [Slot toolbar and menus](019-slot-toolbar.md)                 | 018        | done   |
 | 020 | [Resizable Photo pane](020-photo-pane.md)                     | 016        | done   |
 | 021 | [Move a Slot between Pages in a Spread](021-move-slot-between-pages.md) | 013, 014, 015, 017 | closed |
-| 022 | [Effective Resolution warning](022-effective-resolution-warning.md) | 007, 012 | todo   |
+| 022 | [Effective Resolution warning](022-effective-resolution-warning.md) | 007, 012 | done   |
 | 023 | [Command bar and mode switch](023-command-bar.md)              | 016, 019, 020 | done   |
 | 024 | [Slot tools in the command bar](024-slot-tools-in-command-bar.md) | 023     | done   |
 | 025 | [Folder tree in the Photo pane](025-folder-tree.md)            | 023        | closed |

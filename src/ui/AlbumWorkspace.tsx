@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   canRedo, canUndo, createAlbum, deserializeAlbum, emptyHistory, endGroup, recordChange, relinkPlacements, serializeAlbum, stepHistory,
-  type Album, type AlbumPorts, type HistoryDirection, type PhotoPreviewPorts, type PlacementRelink, type UndoHistory,
+  type Album, type AlbumPorts, type HistoryDirection, type PhotoPreviewPorts, type PhotoSize, type PlacementRelink, type UndoHistory,
 } from "../core";
 import AlbumView from "./AlbumView";
 import ExportDialog from "./ExportDialog";
@@ -73,6 +73,8 @@ interface Props {
   layouts?: AlbumLayouts;
   photoMoves?: PhotoMoveLink;
   exportPorts?: PageExportPorts;
+  /** Scanned pixel sizes of the Library's Photos by path, for Effective Resolution warnings. */
+  photoSizes?: ReadonlyMap<string, PhotoSize>;
 }
 
 /** The shared Layout Library, and where Album mode lists it: the Layouts tab of the Side pane. */
@@ -81,7 +83,9 @@ export interface AlbumLayouts {
   paneHost: HTMLElement | null;
 }
 
-export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document, suspended = false, bar = {}, active = true, layouts, photoMoves, exportPorts = tauriPageExportPorts }: Props) {
+const NO_PHOTO_SIZES: ReadonlyMap<string, PhotoSize> = new Map();
+
+export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document, suspended = false, bar = {}, active = true, layouts, photoMoves, exportPorts = tauriPageExportPorts, photoSizes = NO_PHOTO_SIZES }: Props) {
   const { command, onEditableChange, onHistoryChange } = bar;
   const [names, setNames] = useState<string[]>([]);
   const [current, setCurrent] = useState<{ filename: string; album: Album } | null>(
@@ -273,6 +277,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
         bleedMm: Number(form.get("bleedMm")),
         safeZoneMm: Number(form.get("safeZoneMm")),
         dpi: Number(form.get("dpi")),
+        minEffectiveDpi: Number(form.get("minEffectiveDpi")),
       });
       await ports.write(root, album.title, serializeAlbum(album), true);
       savedJson.current = serializeAlbum(album);
@@ -379,6 +384,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
           <label>Bleed (mm)<input name="bleedMm" type="number" min="0" step="any" defaultValue="3" required disabled={busy} /></label>
           <label>Safe Zone (mm)<input name="safeZoneMm" type="number" min="0" max="104.99" step="any" defaultValue="5" required disabled={busy} /></label>
           <label>Export resolution (DPI)<input name="dpi" type="number" min="1" step="any" defaultValue="300" required disabled={busy} /></label>
+          <label>Effective Resolution warning below (DPI)<input name="minEffectiveDpi" type="number" min="1" step="any" defaultValue="150" required disabled={busy} /></label>
           <label>Page count<input name="pageCount" type="number" min="2" max="10000" step="2" defaultValue="2" required disabled={busy} /></label>
           <div className="album-toolbar">
             <button type="submit" className="button-primary" disabled={busy}>Create Album</button>
@@ -398,6 +404,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
                     bleedMm: Number(form.get("bleedMm")),
                     safeZoneMm: Number(form.get("safeZoneMm")),
                     dpi: Number(form.get("dpi")),
+                    minEffectiveDpi: Number(form.get("minEffectiveDpi")),
                   } }));
                 }}>
                 <h2>Album settings</h2>
@@ -411,6 +418,8 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
                     defaultValue={current.album.pageFormat.safeZoneMm} required /></label>
                   <label>Export resolution (DPI)<input name="dpi" type="number" min="1" step="any"
                     defaultValue={current.album.pageFormat.dpi} required /></label>
+                  <label>Effective Resolution warning below (DPI)<input name="minEffectiveDpi" type="number" min="1" step="any"
+                    defaultValue={current.album.pageFormat.minEffectiveDpi} required /></label>
                 </fieldset>
                 <div className="album-toolbar">
                   <button type="submit" className="button-primary"
@@ -421,11 +430,11 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
             </ModalDialog>
           )}
           {exporting && (
-            <ExportDialog album={exporting.album} root={root} ports={exportPorts} onClose={() => setExporting(null)}
+            <ExportDialog album={exporting.album} root={root} ports={exportPorts} photoSizes={photoSizes} onClose={() => setExporting(null)}
               name={exporting.filename.split(/[\\/]/).pop()!.replace(/\.[^.]+$/, "")} />
           )}
           <AlbumView key={current.filename} album={current.album} onChange={changeAlbum} history={history}
-            root={root} photoPorts={photoPorts} fontPorts={fontPorts}
+            root={root} photoPorts={photoPorts} fontPorts={fontPorts} photoSizes={photoSizes}
             bar={bar} active={active} layouts={layouts} onNotice={setNotice}
             onDuplicatePhoto={setDuplicateWarning}
             onCropPendingChange={setCropPending}

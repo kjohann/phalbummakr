@@ -1,7 +1,5 @@
-import { pageDimensions, type Album, type Page, type PageFormat } from "./album";
-import { placementDisplayCrop, type Crop } from "./slots";
-
-const MM_PER_INCH = 25.4;
+import { MM_PER_INCH, pageDimensions, type Album, type Page, type PageFormat } from "./album";
+import { placementDisplayCrop, slotContentSizeMm, type Crop } from "./slots";
 
 export interface ExportWarnings {
   /** Page numbers of Pages with nothing that prints: no placed Photo and no text. */
@@ -41,23 +39,20 @@ export interface ExportedPage {
 
 /** Every Page of the Album, never the Inside Covers, as `001.jpg`, `002.jpg` and so on in Page order. */
 export function exportPlan(album: Album): ExportedPage[] {
-  const { widthMm, heightMm } = pageDimensions(album.pageFormat);
   const { pixelsPerMm } = exportPageSize(album.pageFormat);
   return album.pages.map((page, index) => ({
     page,
     fileName: `${String(index + 1).padStart(3, "0")}.jpg`,
     photos: page.slots.flatMap((slot) => {
       if (slot.type !== "photo" || !slot.placement) return [];
-      const width = slot.width * widthMm * pixelsPerMm;
-      const height = slot.height * heightMm * pixelsPerMm;
-      const sideways = slot.rotation === 90 || slot.rotation === 270;
+      const { widthMm, heightMm } = slotContentSizeMm(album.pageFormat, slot);
       return [{
         slotId: slot.id,
         photoPath: slot.placement.photoPath,
         crop: placementDisplayCrop(slot.placement),
         fit: slot.placement.fit,
-        width: Math.max(1, Math.round(sideways ? height : width)),
-        height: Math.max(1, Math.round(sideways ? width : height)),
+        width: Math.max(1, Math.round(widthMm * pixelsPerMm)),
+        height: Math.max(1, Math.round(heightMm * pixelsPerMm)),
       }];
     }),
   }));

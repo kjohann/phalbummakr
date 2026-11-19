@@ -9,6 +9,9 @@ export interface Photo {
   revision: string;
 }
 
+/** A Photo's pixel size and EXIF orientation, as scanned. */
+export type PhotoSize = Pick<Photo, "width" | "height" | "orientation">;
+
 export interface PhotoScan {
   photos: Photo[];
   /** All scanned folders relative to the Library root, with forward slashes, including empty folders. */

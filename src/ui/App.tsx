@@ -4,7 +4,7 @@ import { dirname } from "@tauri-apps/api/path";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { createAlbum, deserializeAlbum, renameFolder, sendPhotosToFolder, serializeAlbum, type Album, type HistoryDirection, type LayoutPorts, type PlacementRelink } from "../core";
+import { createAlbum, deserializeAlbum, renameFolder, sendPhotosToFolder, serializeAlbum, type Album, type HistoryDirection, type LayoutPorts, type Photo, type PhotoSize, type PlacementRelink } from "../core";
 import AlbumWorkspace, { type AlbumCommand, type AlbumCommandName, type CommandBarLink, type HistoryState, type PhotoMoveRunner } from "./AlbumWorkspace";
 import CommandBar, { type BarCommand } from "./CommandBar";
 import LayoutWorkspace, { type LayoutBarLink, type LayoutBarState, type LayoutCommand, type LayoutCommandName } from "./LayoutWorkspace";
@@ -140,6 +140,11 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
     (await renameFolder(tauriSortingPorts, { root: document.root, folder, name, openAlbum })).rename)).to, [withOpenAlbum, document.root]);
   const photoPaneVisible = !hidden && !suspended && !sidePane.collapsed && (mode === "sort" || (mode === "album" && paneTab === "photos"));
   const [sortHost, setSortHost] = useState<HTMLElement | null>(null);
+  // Effective Resolution uses the scanned pixel sizes, so warnings appear once the Library has been scanned.
+  const [photoSizes, setPhotoSizes] = useState<ReadonlyMap<string, PhotoSize>>(() => new Map());
+  const reportPhotos = useCallback((photos: readonly Photo[]) => {
+    setPhotoSizes(new Map(photos.map(({ path, width, height, orientation }) => [path, { width, height, orientation }])));
+  }, []);
   return (
     <div className="library-workspace" style={{ display: hidden ? "none" : undefined }}>
       <SidePane modes={modes} settings={sidePane} onChange={onSidePaneChange}>
@@ -149,7 +154,7 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
             {...mode === "album" ? { role: "tabpanel", id: "pane-panel-photos", "aria-labelledby": "pane-tab-photos" } : {}}>
             <PhotoBrowser root={document.root} album={album} compact={sidePane.compact}
               onCompactChange={(compact) => onSidePaneChange({ compact })} onSendPhotos={sendPhotos} onCreateFolder={createPhotoFolder}
-              onRenameFolder={renamePhotoFolder} mode={mode === "sort" ? "sort" : "album"} visible={photoPaneVisible}
+              onRenameFolder={renamePhotoFolder} onPhotosChange={reportPhotos} mode={mode === "sort" ? "sort" : "album"} visible={photoPaneVisible}
               sort={{ ...sortBar, host: sortHost, active: mode === "sort" && !hidden && !suspended }} />
           </div>
           <div className="pane-view" hidden={mode !== "album" || paneTab !== "layouts"} ref={setAlbumLayoutsHost}
@@ -160,7 +165,7 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
       {/* Hidden rather than unmounted, so Album mode keeps its Spread and Slot selection. */}
       <div className="mode-view" hidden={mode !== "album"}>
         <AlbumWorkspace root={document.root} document={document} suspended={suspended} active={mode === "album" && !hidden}
-          onBusyChange={reportAlbumBusy} onAlbumChange={reportAlbum} bar={bar} photoMoves={photoMoves}
+          onBusyChange={reportAlbumBusy} onAlbumChange={reportAlbum} bar={bar} photoMoves={photoMoves} photoSizes={photoSizes}
           layouts={{ state: layouts, paneHost: albumLayoutsHost }} />
       </div>
       {layoutsOpened && <div className="mode-view" hidden={mode !== "layouts"}>
@@ -499,6 +504,7 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
         bleedMm: Number(form.get("bleedMm")),
         safeZoneMm: Number(form.get("safeZoneMm")),
         dpi: Number(form.get("dpi")),
+        minEffectiveDpi: Number(form.get("minEffectiveDpi")),
       });
       await ports.write(draft, serializeAlbum(album), true);
       const root = await ports.parent(draft);
@@ -565,6 +571,7 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
           <label>Bleed (mm)<input name="bleedMm" type="number" min="0" step="any" defaultValue="3" required disabled={busy} /></label>
           <label>Safe Zone (mm)<input name="safeZoneMm" type="number" min="0" max="104.99" step="any" defaultValue="5" required disabled={busy} /></label>
           <label>Export resolution (DPI)<input name="dpi" type="number" min="1" step="any" defaultValue="300" required disabled={busy} /></label>
+          <label>Effective Resolution warning below (DPI)<input name="minEffectiveDpi" type="number" min="1" step="any" defaultValue="150" required disabled={busy} /></label>
           <label>Page count<input name="pageCount" type="number" min="2" max="10000" step="2" defaultValue="2" required disabled={busy} /></label>
           <div className="album-toolbar">
             <button type="submit" className="button-primary" disabled={busy}>Create Album</button>

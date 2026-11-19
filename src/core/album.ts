@@ -6,7 +6,11 @@ export interface PageFormat {
   bleedMm: number;
   safeZoneMm: number;
   dpi: number;
+  /** The Effective Resolution threshold: Placements below it are flagged. */
+  minEffectiveDpi: number;
 }
+
+export const DEFAULT_MIN_EFFECTIVE_DPI = 150;
 
 export interface Page {
   id: string;
@@ -27,6 +31,7 @@ export interface AlbumOptions {
   bleedMm?: number;
   safeZoneMm?: number;
   dpi?: number;
+  minEffectiveDpi?: number;
 }
 
 export interface Spread {
@@ -102,6 +107,8 @@ export function movePage(album: Album, id: string, toIndex: number): Album {
   return { ...album, pages };
 }
 
+export const MM_PER_INCH = 25.4;
+
 export function pageDimensions(format: PageFormat): { widthMm: number; heightMm: number } {
   const dimensions = { A4: { widthMm: 297, heightMm: 210 } };
   return { ...dimensions[format.size] };
@@ -119,6 +126,7 @@ export function createAlbum(options: AlbumOptions): Album {
       bleedMm: options.bleedMm ?? 3,
       safeZoneMm: options.safeZoneMm ?? 5,
       dpi: options.dpi ?? 300,
+      minEffectiveDpi: options.minEffectiveDpi ?? DEFAULT_MIN_EFFECTIVE_DPI,
     },
     pages: Array.from({ length: pageCount }, (_, index) => ({
       id: `page-${index + 1}`,
@@ -137,6 +145,10 @@ export function serializeAlbum(album: Album): string {
 
 export function deserializeAlbum(json: string): Album {
   const album: unknown = JSON.parse(json);
+  const format = (album as { pageFormat?: unknown } | null)?.pageFormat;
+  if (typeof format === "object" && format !== null && !Array.isArray(format) && !("minEffectiveDpi" in format)) {
+    (format as Record<string, unknown>).minEffectiveDpi = DEFAULT_MIN_EFFECTIVE_DPI;
+  }
   validateAlbum(album);
   for (const page of album.pages) {
     for (const slot of page.slots) {
@@ -173,7 +185,7 @@ function validateAlbum(value: unknown): asserts value is Album {
     throw new Error("Album title must be text.");
   }
   const format = value.pageFormat;
-  if (!record(format, ["size", "orientation", "bleedMm", "safeZoneMm", "dpi"])
+  if (!record(format, ["size", "orientation", "bleedMm", "safeZoneMm", "dpi", "minEffectiveDpi"])
     || format.size !== "A4" || format.orientation !== "landscape") {
     throw new Error("Only A4 landscape Page Format is supported.");
   }
@@ -181,9 +193,10 @@ function validateAlbum(value: unknown): asserts value is Album {
     ["Bleed", format.bleedMm, Infinity],
     ["Safe Zone", format.safeZoneMm, 105],
     ["Export resolution", format.dpi, Infinity],
+    ["Effective Resolution threshold", format.minEffectiveDpi, Infinity],
   ] as const) {
     if (typeof number !== "number" || !Number.isFinite(number) || number < 0 || number >= limit
-      || (label === "Export resolution" && number === 0)) {
+      || ((label === "Export resolution" || label === "Effective Resolution threshold") && number === 0)) {
       throw new Error(`${label} is invalid${label === "Safe Zone" ? " (must be less than 105 mm)" : ""}.`);
     }
   }

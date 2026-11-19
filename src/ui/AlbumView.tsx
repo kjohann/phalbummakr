@@ -2,10 +2,10 @@ import { Fragment, useCallback, useEffect, useRef, useState, type DragEvent as R
 import { createPortal } from "react-dom";
 import { Layer, Rect, Stage } from "react-konva";
 import {
-  addPage, addPhotoSlot, addTextSlot, albumSpreads, applyLayout, deletePage, deleteSlot, duplicatePage, movePage, pageDimensions,
+  addPage, addPhotoSlot, addTextSlot, albumSpreads, applyLayout, deletePage, deleteSlot, duplicatePage, lowResolutionPlacements, movePage, pageDimensions,
   panCrop, placePhoto, placePhotoOnPage, placementDisplayCrop, photoUsage, rotateSlot, saveLayoutFromPage, setPlacementCrop,
   setPlacementFit, setSlotText, setTextStyle, swapPlacements, zoomCrop, POINTS_PER_MM, TEXT_LINE_HEIGHT,
-  type Album, type AppliedLayout, type HistoryDirection, type Crop, type Page, type PageFormat, type PhotoPreviewPorts, type Slot, type SlotAddress, type TextStyle,
+  type Album, type AppliedLayout, type HistoryDirection, type Crop, type Page, type PageFormat, type PhotoPreviewPorts, type PhotoSize, type Slot, type SlotAddress, type TextStyle,
 } from "../core";
 import { hasLayoutDrag, hasPhotoDrag, readLayoutDrag, readPhotoDrag, writeLayoutDrag } from "./photoDrag";
 import { historyShortcut } from "./historyShortcut";
@@ -41,6 +41,8 @@ interface Props {
   layouts?: AlbumLayouts;
   /** Reports what happened when a Layout was applied or saved; `null` clears the notice. */
   onNotice?: (message: string | null) => void;
+  /** Scanned pixel sizes of the Library's Photos by path, for Effective Resolution warnings. */
+  photoSizes: ReadonlyMap<string, PhotoSize>;
 }
 
 /** Tells the user what applying a Layout dropped, and when it was made for another Page shape. */
@@ -56,7 +58,7 @@ function appliedLayoutNotice({ dropped, aspectMismatch }: AppliedLayout, pageNum
   return messages.length ? messages.join(" ") : null;
 }
 
-export default function AlbumView({ album: savedAlbum, onChange, history, disabled, textDisabled, root, photoPorts, fontPorts, onDuplicatePhoto, onCropPendingChange, bar, active = true, layouts, onNotice }: Props) {
+export default function AlbumView({ album: savedAlbum, onChange, history, disabled, textDisabled, root, photoPorts, fontPorts, onDuplicatePhoto, onCropPendingChange, bar, active = true, layouts, onNotice, photoSizes }: Props) {
   const { command, toolsHost, onSlotSelectedChange } = bar;
   const viewportRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLElement>(null);
@@ -113,6 +115,9 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
   const spreadIndex = spreads.findIndex((spread) => spread.left?.id === selectedPage.id || spread.right?.id === selectedPage.id);
   const spread = spreads[spreadIndex];
   const pageNumbers = new Map(album.pages.map((page, index) => [page.id, index + 1]));
+  // Follows in-progress Crop and resize gestures, so the warning updates while dragging.
+  const lowResolution = new Map(lowResolutionPlacements(album, photoSizes)
+    .map(({ pageId, slotId, effectiveResolution }) => [`${pageId}:${slotId}`, effectiveResolution]));
 
   useEffect(() => {
     stripRef.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -649,6 +654,10 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
           const previewState = slot.placement && previewStates[targetId]?.path === slot.placement.photoPath
             ? previewStates[targetId] : undefined;
           const previewStatus = previewState?.status ?? "loading";
+          const resolution = lowResolution.get(targetId);
+          // Rounded down, so a flagged Slot never reads as being at the threshold.
+          const resolutionWarning = resolution === undefined ? null
+            : `Low Effective Resolution: ${Math.floor(resolution)} DPI, below ${album.pageFormat.minEffectiveDpi} DPI`;
           return (
             <Fragment key={targetId}>
             <div className={`slot-overlay${photoDragActive && slot.type === "photo" ? " slot-overlay--dragging" : ""}${dropTargetId === targetId ? " slot-overlay--drop-target" : ""}`} role="button" tabIndex={0}
@@ -757,6 +766,9 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
                 <span className="slot-crop-handle" role="button" aria-label={`Pan Photo in ${name}`}
                   title="Drag to move the Photo inside the Slot"
                   onMouseDown={(event) => startCropPan(event, page.id, slot.id)}>✥</span>
+              )}
+              {resolutionWarning && (
+                <span className="slot-resolution-warning" role="img" aria-label={resolutionWarning} title={resolutionWarning}>!</span>
               )}
               {slot.type === "text" && editingText === targetId && (
                 <textarea className="slot-text-editor" aria-label={`Edit ${name}`} autoFocus value={slot.text} disabled={textDisabled}

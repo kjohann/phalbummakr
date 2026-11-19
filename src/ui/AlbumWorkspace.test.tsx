@@ -2388,6 +2388,20 @@ describe("Page Export", () => {
     expect(dialog.getByText("Exported 2 Pages to Exports/Christmas.")).toBeTruthy();
   });
 
+  it("warns about Photos below the Effective Resolution threshold and still exports them", async () => {
+    const { ports } = exportPorts();
+    // a.jpg is 300 x 200 pixels in a Slot 84 mm tall: about 60 DPI.
+    const photoSizes = new Map([["a.jpg", { width: 300, height: 200, orientation: 1 }]]);
+    render(<AlbumWorkspace root={"D:\\Photos"} ports={disk().ports} photoPorts={previews()} exportPorts={ports}
+      photoSizes={photoSizes} document={{ path: "D:\\Photos\\Christmas.phalbum", album: exportAlbum() }} />);
+    fireEvent.click(bar().getByRole("button", { name: "Bar export-pages" }));
+    const dialog = within(screen.getByRole("dialog", { name: "Export Pages" }));
+    expect(dialog.getByText("Page 1 has a Photo at 60 DPI, below 150 DPI.")).toBeTruthy();
+
+    fireEvent.click(dialog.getByRole("button", { name: "Export" }));
+    expect(await dialog.findByText("Exported 4 Pages to Exports/Christmas.")).toBeTruthy();
+  });
+
   it("leaves an earlier export alone when Photos are missing", async () => {
     const { ports } = exportPorts();
     ports.missing.mockResolvedValue(["a.jpg"]);
@@ -2399,5 +2413,38 @@ describe("Page Export", () => {
       .toBe("Could not export Pages: Missing Photos must be relinked or replaced first: a.jpg");
     expect(ports.missing).toHaveBeenCalledWith("D:\\Photos", ["a.jpg"]);
     expect(ports.prepare).not.toHaveBeenCalled();
+  });
+});
+
+describe("Effective Resolution", () => {
+  it("badges Photo Slots below the threshold and rechecks when the Crop or the threshold changes", async () => {
+    let album = createAlbum({ name: "Christmas", pageCount: 2 });
+    album = addPhotoSlot(addPhotoSlot(album, "page-1"), "page-1");
+    // Both Slots print 84 mm (3.31 inches) tall and are filled edge to edge by the Photo's height.
+    album = placePhoto(album, "page-1", "slot-1", { path: "small.jpg", width: 300, height: 200, orientation: 1 });
+    album = placePhoto(album, "page-1", "slot-2", { path: "medium.jpg", width: 780, height: 520, orientation: 1 });
+    const photoSizes = new Map([
+      ["small.jpg", { width: 300, height: 200, orientation: 1 }],
+      ["medium.jpg", { width: 780, height: 520, orientation: 1 }],
+    ]);
+    render(<AlbumWorkspace root={"D:\\Photos"} ports={disk().ports} photoPorts={previews()} photoSizes={photoSizes}
+      document={{ path: "D:\\Photos\\Christmas.phalbum", album }} />);
+    const small = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+    const medium = screen.getByRole("button", { name: "Page 1 Photo Slot 2" });
+    const badge = (slot: HTMLElement) => within(slot).queryByRole("img", { name: /^Low Effective Resolution/ });
+    expect(badge(small)?.getAttribute("aria-label")).toBe("Low Effective Resolution: 60 DPI, below 150 DPI");
+    // 520 pixels over 3.31 inches is 157 DPI.
+    expect(badge(medium)).toBeNull();
+
+    fireEvent.click(medium);
+    fireEvent.click(within(bar().getByRole("group", { name: "Photo Slot tools" })).getByRole("button", { name: "Zoom in" }));
+    // 520 pixels zoomed by 1.1 over 3.31 inches is 142.96 DPI, shown rounded down.
+    expect(badge(medium)?.getAttribute("aria-label")).toBe("Low Effective Resolution: 142 DPI, below 150 DPI");
+
+    fireEvent.click(bar().getByRole("button", { name: "Bar album-settings" }));
+    fireEvent.change(screen.getByLabelText("Effective Resolution warning below (DPI)"), { target: { value: "50" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply print settings" }));
+    expect(badge(small)).toBeNull();
+    expect(badge(medium)).toBeNull();
   });
 });

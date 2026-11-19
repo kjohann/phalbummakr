@@ -45,7 +45,7 @@ One printed side of a leaf in an Album, and the unit that gets designed and expo
 _Avoid_: Sheet, side
 
 **Page Format**:
-The page size, bleed, safe-zone margin and export resolution shared by every Page in an Album. It is chosen when the Album is created and adjusted to match the Print Provider.
+The page size, bleed, safe-zone margin, export resolution and Effective Resolution threshold shared by every Page in an Album. It is chosen when the Album is created and adjusted to match the Print Provider.
 _Avoid_: Page size, paper size
 
 **Page Format Preset**:

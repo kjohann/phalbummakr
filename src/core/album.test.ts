@@ -107,7 +107,7 @@ it("creates empty white A4 landscape Pages and round trips JSON", () => {
   expect(album.schemaVersion).toBe(2);
   expect(album.title).toBe("Christmas");
   expect(album.pageFormat).toEqual({
-    size: "A4", orientation: "landscape", bleedMm: 3, safeZoneMm: 5, dpi: 300,
+    size: "A4", orientation: "landscape", bleedMm: 3, safeZoneMm: 5, dpi: 300, minEffectiveDpi: 150,
   });
   expect(pageDimensions(album.pageFormat)).toEqual({ widthMm: 297, heightMm: 210 });
   expect(album.pages).toHaveLength(2);
@@ -135,18 +135,27 @@ it("loads an Album saved before Placements had the Fit field", () => {
   expect(JSON.parse(serializeAlbum(loaded)).pages[0].slots[0].placement.fit).toBe(false);
 });
 
+it("gives an Album saved before the Effective Resolution threshold the 150 DPI default", () => {
+  const oldSave = JSON.parse(serializeAlbum(createAlbum({ name: "Old Album" })));
+  delete oldSave.pageFormat.minEffectiveDpi;
+
+  const loaded = deserializeAlbum(JSON.stringify(oldSave));
+  expect(loaded.pageFormat.minEffectiveDpi).toBe(150);
+  expect(JSON.parse(serializeAlbum(loaded)).pageFormat.minEffectiveDpi).toBe(150);
+});
+
 it("accepts a custom Page count and print settings", () => {
-  const album = createAlbum({ name: " Summer ", pageCount: 4, bleedMm: 0, safeZoneMm: 8, dpi: 600 });
+  const album = createAlbum({ name: " Summer ", pageCount: 4, bleedMm: 0, safeZoneMm: 8, dpi: 600, minEffectiveDpi: 200 });
   expect(album.title).toBe(" Summer ");
   expect(album.pages).toHaveLength(4);
-  expect(album.pageFormat).toMatchObject({ bleedMm: 0, safeZoneMm: 8, dpi: 600 });
+  expect(album.pageFormat).toMatchObject({ bleedMm: 0, safeZoneMm: 8, dpi: 600, minEffectiveDpi: 200 });
 });
 
 it("rejects invalid print settings and malformed or unsupported Albums instead of losing data", () => {
   for (const pageCount of [0, -1, 1.5, Infinity, 10001]) {
     expect(() => createAlbum({ name: "Test", pageCount })).toThrow(/page count/i);
   }
-  for (const settings of [{ bleedMm: -1 }, { safeZoneMm: 105 }, { dpi: 0 }, { dpi: NaN }]) {
+  for (const settings of [{ bleedMm: -1 }, { safeZoneMm: 105 }, { dpi: 0 }, { dpi: NaN }, { minEffectiveDpi: 0 }, { minEffectiveDpi: NaN }]) {
     expect(() => createAlbum({ name: "Test", ...settings })).toThrow();
   }
   const valid = createAlbum({ name: "Test" });

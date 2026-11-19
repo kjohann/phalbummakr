@@ -1,4 +1,5 @@
-import { pageDimensions, type Album, type Page } from "./album";
+import { pageDimensions, type Album, type Page, type PageFormat } from "./album";
+import type { PhotoSize } from "./photos";
 
 export interface Rectangle {
   x: number;
@@ -216,9 +217,17 @@ export interface PlaceablePhoto {
 }
 
 function slotAspect(album: Album, slot: Slot): number {
-  const { widthMm, heightMm } = pageDimensions(album.pageFormat);
-  const aspect = (slot.width * widthMm) / (slot.height * heightMm);
-  return slot.rotation === 90 || slot.rotation === 270 ? 1 / aspect : aspect;
+  const { widthMm, heightMm } = slotContentSizeMm(album.pageFormat, slot);
+  return widthMm / heightMm;
+}
+
+/** A Slot's printed size in its own upright orientation: width and height swap for 90° and 270° Slot rotation. */
+export function slotContentSizeMm(format: PageFormat, slot: Slot): { widthMm: number; heightMm: number } {
+  const page = pageDimensions(format);
+  const width = slot.width * page.widthMm;
+  const height = slot.height * page.heightMm;
+  return slot.rotation === 90 || slot.rotation === 270
+    ? { widthMm: height, heightMm: width } : { widthMm: width, heightMm: height };
 }
 
 function centredCrop(photoAspect: number, targetAspect: number, centreX = 0.5, centreY = 0.5): Crop {
@@ -277,13 +286,19 @@ export function swapPlacements(album: Album, from: SlotAddress, to: SlotAddress)
   });
 }
 
+/** A Photo's pixel size as shown: EXIF orientations 5–8 swap width and height. */
+export function uprightPhotoSize(photo: PhotoSize): { width: number; height: number } {
+  return photo.orientation >= 5 && photo.orientation <= 8
+    ? { width: photo.height, height: photo.width } : { width: photo.width, height: photo.height };
+}
+
 function uprightPhotoAspect(photo: PlaceablePhoto): number {
   if (!isRelativePhotoPath(photo.path)) throw new Error("Photo path must be relative to the Library root.");
   if (!(photo.width > 0) || !(photo.height > 0) || !Number.isFinite(photo.width) || !Number.isFinite(photo.height)) {
     throw new Error("Photo size must be a positive number of pixels.");
   }
-  return photo.orientation >= 5 && photo.orientation <= 8
-    ? photo.height / photo.width : photo.width / photo.height;
+  const { width, height } = uprightPhotoSize(photo);
+  return width / height;
 }
 
 function isRelativePhotoPath(path: unknown): path is string {
