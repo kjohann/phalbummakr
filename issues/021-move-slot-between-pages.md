@@ -1,6 +1,15 @@
 # 021 – Move a Slot between Pages in a Spread
 
-Status: todo · Depends on: 013, 014, 015, 017
+Status: closed · Depends on: 013, 014, 015, 017
+
+## Close reason
+
+Closed without implementation to keep the MVP focused. Moving Slots between the
+Pages of a Spread is not needed for the MVP; a Slot stays on its own Page and
+Placements still move between Pages by drag-to-swap ([015](015-drag-to-swap.md)).
+The scope moved to the [backlog](backlog.md#editing) as "Move a Slot between
+Pages in a Spread". If it is picked up after the MVP, create a new issue that
+follows this one and reuse the acceptance criteria below.
 
 ## What
 
