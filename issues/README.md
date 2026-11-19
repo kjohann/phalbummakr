@@ -72,7 +72,7 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 027 | [Folder interactions](027-create-and-rename-folders.md)        | 026        | done   |
 | 028 | [Sort mode](028-sort-mode.md)                                  | 023, 026   | done   |
 | 029 | [Applying Layouts in Album mode](029-apply-layouts.md)         | 010, 023   | done   |
-| 030 | [Slot shortcuts and inline text formatting](030-slot-shortcuts-and-inline-format.md) | 024 | todo   |
+| 030 | [Slot shortcuts and inline text formatting](030-slot-shortcuts-and-inline-format.md) | 024 | done   |
 
 Work order for the layout rework: 016, 017, 018, 019, 020, then 011.
 

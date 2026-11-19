@@ -180,15 +180,20 @@ it("offers the Slot tools without content commands, and saves style, rotation an
   fireEvent.click((await cards())[9]);
   fireEvent.click(screen.getByRole("button", { name: "Text Slot 2" }));
   const textTools = within(bar().getByRole("group", { name: "Text Slot tools" }));
-  fireEvent.change(textTools.getByLabelText("Text alignment"), { target: { value: "right" } });
+  fireEvent.click(textTools.getByRole("button", { name: "Align right" }));
+  fireEvent.click(textTools.getByRole("button", { name: "Italic" }));
+  expect(textTools.getByRole("button", { name: "Italic" }).getAttribute("aria-pressed")).toBe("true");
   fireEvent.click(screen.getByRole("button", { name: "Photo Slot 1" }));
   const photoTools = within(bar().getByRole("group", { name: "Photo Slot tools" }));
   expect(photoTools.queryByRole("button", { name: "Fit Photo" })).toBeNull();
   expect(photoTools.queryByRole("button", { name: "Zoom in" })).toBeNull();
   fireEvent.click(photoTools.getByRole("button", { name: "Rotate Slot clockwise" }));
+  fireEvent.keyDown(document.body, { key: "ArrowRight", ctrlKey: true });
+  fireEvent.keyDown(document.body, { key: "ArrowLeft", ctrlKey: true });
+  fireEvent.keyDown(document.body, { key: "ArrowRight", ctrlKey: true });
   await waitFor(() => expect(store.json).not.toBeNull());
-  await waitFor(() => expect(saved(store).layouts[9].slots[0].rotation).toBe(90));
-  expect(saved(store).layouts[9].slots[1]).toMatchObject({ type: "text", text: "", style: { align: "right" } });
+  await waitFor(() => expect(saved(store).layouts[9].slots[0].rotation).toBe(180));
+  expect(saved(store).layouts[9].slots[1]).toMatchObject({ type: "text", text: "", style: { align: "right", italic: true } });
   fireEvent.click(within(bar().getByRole("group", { name: "Photo Slot tools" })).getByRole("button", { name: "Delete Slot" }));
   await waitFor(() => expect(saved(store).layouts[9].slots.map((slot) => slot.type)).toEqual(["text"]));
 });
@@ -200,7 +205,9 @@ it("leaves the Delete key alone while another mode is shown", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Photo Slot 1" }));
   rerender(<Harness ports={ports} active={false} />);
   fireEvent.keyDown(window, { key: "Delete" });
+  fireEvent.keyDown(window, { key: "ArrowRight", ctrlKey: true });
   expect(screen.getByRole("button", { name: "Photo Slot 1" })).toBeTruthy();
+  expect(document.querySelector('[data-slot-rotation="90"]')).toBeNull();
   expect(bar().queryByRole("group", { name: "Photo Slot tools" })).toBeNull();
 });
 

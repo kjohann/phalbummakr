@@ -120,15 +120,16 @@ if Slot shapes differ, the Crop is refit around its center, preserving relative
 zoom where the Photo edges allow it. Dropping a Photo from the Library still
 replaces an occupied Slot.
 
-Select either kind of Slot and use **Rotate left** or **Rotate right** to turn
+Select either kind of Slot and use **Rotate left** or **Rotate right** (Ctrl+Left
+and Ctrl+Right) to turn
 it and its content by 90 degrees. Rotation keeps the Slot's centre fixed and
 may extend it beyond the Bleed. Newly placed or replacement Photos keep their
 original upright orientation (including EXIF orientation), without changing the
 Slot's position or dimensions. Rotating an occupied Slot still turns its current
 content, and that orientation is saved with the Album.
 
-Select a filled Slot and enable **Crop photo** to pan by dragging the Photo. Use
-the mouse wheel over the selected Placement or the zoom buttons to adjust its
+Select a filled Slot and drag its ✥ handle to pan the Photo. Use the zoom
+buttons, or Ctrl+Plus and Ctrl+Minus, to adjust its
 Crop; the Photo always covers the Slot. **Fit** instead shows the whole Photo
 with white space as needed, and turning Fit off restores the Crop. Resizing a
 Slot preserves its zoom relative to the minimum cover and retains the Crop
@@ -160,9 +161,11 @@ Hold **Alt** at any point during the gesture to bypass snapping and place or
 resize freely; releasing it restores snapping. Text Slot height still fits its
 content automatically.
 
-A compact toolbar follows the selected Text Slot. It offers installed Windows
+The selected Text Slot's tools are in the command bar. They offer installed Windows
 fonts, size presets (12, 18, 24, 36, 48 and 72 pt), **Custom...** for an exact point
-size, colour and alignment. **Format** groups bold, italic and underline.
+size, colour, **B**, **I** and **U** buttons and left, centre and right alignment
+buttons. In a narrow window, the formatting and alignment buttons fold into a
+**Format** menu and an alignment list.
 Ctrl+B, Ctrl+I and Ctrl+U (Command on macOS) toggle formatting for the whole box,
 including while editing. Text is never automatically reduced in size.
 

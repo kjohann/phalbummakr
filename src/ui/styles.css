@@ -1519,6 +1519,38 @@ button.sort-photo--chosen:hover {
   position: relative;
 }
 
+/* Formatting and alignment buttons, which fold into dropdowns when the bar is narrow. */
+.slot-tools-set {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+}
+
+.slot-tools-set .command {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 14px;
+}
+
+.slot-tools .text-format-bold {
+  font-weight: 800;
+}
+
+.slot-tools .text-format-italic {
+  font-style: italic;
+}
+
+.slot-tools .text-format-underline {
+  font-weight: 600;
+  text-decoration: underline;
+}
+
 .text-format-menu summary {
   display: flex;
   align-items: center;

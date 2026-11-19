@@ -11,6 +11,7 @@ import ModalDialog from "./ModalDialog";
 import { historyShortcut } from "./historyShortcut";
 import { applySlotDrag, LayerPage, SnapGuides, TextContent, type SlotDrag } from "./pageCanvas";
 import { PhotoSlotTools, SlotActions } from "./SlotTools";
+import { useSlotShortcuts } from "./slotShortcuts";
 import { tauriFontPorts, type FontPorts } from "./tauriFontPorts";
 import { fitTextSlots } from "./textLayout";
 import TextSlotTools from "./TextSlotTools";
@@ -335,18 +336,7 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
     else if (command.name === "undo" || command.name === "redo") undoOrRedo(command.name);
   });
 
-  useEffect(() => {
-    const deleteSelected = (event: KeyboardEvent) => {
-      if (!active || event.key !== "Delete" || event.defaultPrevented || !selectedSlot) return;
-      const target = event.target;
-      if (target instanceof HTMLElement && (target.isContentEditable || target.closest("input, textarea, select"))) return;
-      if (document.querySelector("[aria-modal='true']")) return;
-      event.preventDefault();
-      deleteSlotAt();
-    };
-    window.addEventListener("keydown", deleteSelected);
-    return () => window.removeEventListener("keydown", deleteSelected);
-  });
+  useSlotShortcuts(active, selectedSlot && !disabled ? { delete: () => deleteSlotAt(), rotate: rotateSelectedSlot } : {});
 
   useEffect(() => {
     if (!canvasMenu) return;

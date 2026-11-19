@@ -378,8 +378,7 @@ it("shows a Text Slot's style controls in the command bar with presets and an ex
   fireEvent.change(within(controls).getByLabelText("Font size"), { target: { value: "custom" } });
   fireEvent.change(within(controls).getByLabelText("Font size (pt)"), { target: { value: "22.5" } });
   fireEvent.keyDown(within(controls).getByLabelText("Font size (pt)"), { key: "Enter" });
-  fireEvent.click(within(controls).getByText("Format"));
-  fireEvent.click(within(controls).getByLabelText("Underline"));
+  fireEvent.click(within(controls).getByRole("button", { name: "Underline" }));
   await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0]).toMatchObject({
     style: { fontSize: 22.5, underline: true },
   }));
@@ -397,9 +396,13 @@ it("toggles whole-box formatting with standard shortcuts while editing and selec
     fireEvent(editor, event);
     expect(event.defaultPrevented).toBe(true);
   }
-  expect((screen.getByLabelText("Bold") as HTMLInputElement).checked).toBe(true);
-  expect((screen.getByLabelText("Italic") as HTMLInputElement).checked).toBe(true);
-  expect((screen.getByLabelText("Underline") as HTMLInputElement).checked).toBe(true);
+  const tools = within(bar().getByRole("group", { name: "Text Slot tools" }));
+  for (const [name, shortcut] of [["Bold", "B"], ["Italic", "I"], ["Underline", "U"]]) {
+    const button = tools.getByRole("button", { name });
+    expect([button.getAttribute("aria-pressed"), button.title, button.getAttribute("aria-keyshortcuts")])
+      .toEqual(["true", `${name} (Ctrl+${shortcut})`, `Control+${shortcut}`]);
+  }
+  expect(tools.queryByText("Format")).toBeNull();
   expect((editor as HTMLTextAreaElement).style.textDecoration).toBe("underline");
   fireEvent.keyDown(editor, { key: "Escape" });
   fireEvent.keyDown(screen.getByRole("button", { name: "Page 1 Text Slot 1" }), { key: "b", metaKey: true });
@@ -419,10 +422,12 @@ it("edits a Text Slot in place and persists its content and styling", async () =
   fireEvent.change(await screen.findByLabelText("Font family"), { target: { value: "Georgia" } });
   fireEvent.change(screen.getByLabelText("Font size"), { target: { value: "24" } });
   fireEvent.change(screen.getByLabelText("Text colour"), { target: { value: "#123456" } });
-  fireEvent.click(screen.getByText("Format"));
-  fireEvent.click(screen.getByLabelText("Bold"));
-  fireEvent.click(screen.getByLabelText("Italic"));
-  fireEvent.change(screen.getByLabelText("Text alignment"), { target: { value: "center" } });
+  fireEvent.click(screen.getByRole("button", { name: "Bold" }));
+  fireEvent.click(screen.getByRole("button", { name: "Italic" }));
+  fireEvent.click(screen.getByRole("button", { name: "Align centre" }));
+  expect(screen.getByRole("button", { name: "Align centre" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByRole("button", { name: "Align left" }).getAttribute("aria-pressed")).toBe("false");
+  expect(screen.queryByLabelText("Text alignment")).toBeNull();
   await waitFor(() => {
     const saved = deserializeAlbum(files.get("Existing")!);
     expect(saved.pages[0].slots[0]).toMatchObject({
@@ -893,6 +898,70 @@ it("shows Photo Slot tools in the command bar and zooms the Crop in 10% steps", 
   expect(toolbar.queryByRole("button", { name: "Zoom out" })).toBeNull();
 });
 
+/** Sends a Ctrl key press and reports whether something handled it. */
+function pressCtrl(target: Element, init: KeyboardEventInit) {
+  const event = new KeyboardEvent("keydown", { ctrlKey: true, bubbles: true, cancelable: true, ...init });
+  fireEvent(target, event);
+  return event.defaultPrevented;
+}
+
+it("zooms the Crop with Ctrl+Plus and Ctrl+Minus and rotates the Slot with Ctrl+Left and Ctrl+Right", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Photo Slot" }));
+  fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }),
+    photoDrop({ path: "a.jpg", width: 6000, height: 4000, orientation: 1 }));
+  await waitForAutosave();
+  const width = () => deserializeAlbum(files.get("Existing")!).pages[0].slots[0].placement!.crop.width;
+  const before = width();
+  const press = (init: KeyboardEventInit) => pressCtrl(document.body, init);
+
+  expect(press({ key: "+" })).toBe(true);
+  expect(press({ key: "=" })).toBe(true);
+  expect(press({ key: "+", code: "NumpadAdd" })).toBe(true);
+  await waitFor(() => expect(width()).toBeCloseTo(before / 1.1 ** 3));
+  expect(press({ key: "-" })).toBe(true);
+  expect(press({ key: "-", code: "NumpadSubtract" })).toBe(true);
+  await waitFor(() => expect(width()).toBeCloseTo(before / 1.1));
+  const toolbar = within(bar().getByRole("group", { name: "Photo Slot tools" }));
+  expect(toolbar.getByRole("button", { name: "Zoom in" }).getAttribute("aria-keyshortcuts")).toBe("Control+Plus");
+  expect(toolbar.getByRole("button", { name: "Zoom out" }).title).toBe("Zoom out (Ctrl+Minus)");
+
+  expect(press({ key: "ArrowRight" })).toBe(true);
+  expect(document.querySelector('[data-slot-rotation="90"]')).not.toBeNull();
+  expect(press({ key: "ArrowLeft" })).toBe(true);
+  expect(press({ key: "ArrowLeft" })).toBe(true);
+  expect(document.querySelector('[data-slot-rotation="270"]')).not.toBeNull();
+  const rotateLeft = toolbar.getByRole("button", { name: "Rotate Slot counterclockwise" });
+  expect([rotateLeft.title, rotateLeft.getAttribute("aria-keyshortcuts")]).toEqual(["Rotate left (Ctrl+Left)", "Control+ArrowLeft"]);
+
+  // With Fit on, the Crop can't zoom.
+  fireEvent.click(toolbar.getByRole("button", { name: "Fit Photo" }));
+  await waitForAutosave();
+  const fitted = files.get("Existing");
+  expect(press({ key: "+" })).toBe(false);
+  expect(files.get("Existing")).toBe(fitted);
+});
+
+it("leaves Slot shortcuts to text fields and dialogs", async () => {
+  const { ports } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
+  fireEvent.click(screen.getByRole("button", { name: "Add Text Slot" }));
+  const editor = screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" });
+  expect(pressCtrl(editor, { key: "ArrowRight" })).toBe(false);
+  expect(document.querySelector('[data-slot-rotation="90"]')).toBeNull();
+  fireEvent.keyDown(editor, { key: "Escape" });
+  fireEvent.click(screen.getByRole("button", { name: "Bar album-settings" }));
+  expect(pressCtrl(document.body, { key: "ArrowRight" })).toBe(false);
+  expect(document.querySelector('[data-slot-rotation="90"]')).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  expect(pressCtrl(document.body, { key: "ArrowRight" })).toBe(true);
+  expect(document.querySelector('[data-slot-rotation="90"]')).not.toBeNull();
+});
+
 it("leaves Fit and Zoom out of Photo Slot tools where Slots hold no content, as in Layout mode", () => {
   render(<PhotoSlotTools fit={false} content={false} disabled={false}
     onFit={vi.fn()} onZoom={vi.fn()} onRotate={vi.fn()} onDelete={vi.fn()} />);
@@ -934,7 +1003,8 @@ it("keeps focus and selection in the text being edited while its style changes f
   editor.setSelectionRange(2, 5);
   const toolbar = within(bar().getByRole("group", { name: "Text Slot tools" }));
 
-  for (const button of [toolbar.getByText("Format"), toolbar.getByRole("button", { name: "Rotate Slot clockwise" })]) {
+  for (const name of ["Bold", "Underline", "Align right", "Rotate Slot clockwise"]) {
+    const button = toolbar.getByRole("button", { name });
     const press = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
     fireEvent(button, press);
     expect(press.defaultPrevented).toBe(true);
@@ -946,6 +1016,12 @@ it("keeps focus and selection in the text being edited while its style changes f
   expect(document.activeElement).toBe(editor);
   expect([editor.selectionStart, editor.selectionEnd]).toEqual([2, 5]);
   expect(editor.style.fontFamily).toBe("Georgia");
+
+  fireEvent.click(toolbar.getByRole("button", { name: "Bold" }));
+  fireEvent.click(toolbar.getByRole("button", { name: "Align right" }));
+  expect(document.activeElement).toBe(editor);
+  expect([editor.selectionStart, editor.selectionEnd]).toEqual([2, 5]);
+  expect([editor.style.fontWeight, editor.style.textAlign]).toEqual(["bold", "right"]);
 });
 
 it("pans with the centred crop handle while dragging elsewhere moves the Slot", async () => {

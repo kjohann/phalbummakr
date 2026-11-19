@@ -666,6 +666,20 @@ it("collapses the Side pane to a mode rail and expands it from the selected mode
   expect(ports.setSidePane).toHaveBeenLastCalledWith({ width: 300, collapsed: false, compact: true });
 });
 
+it("stops Ctrl+Plus and Ctrl+Minus zooming the page in Album and Layout mode, even with no Album open", async () => {
+  const ports = sidePanePorts();
+  render(<App ports={{ ...ports, settings: async () => ({ lastAlbum: null, recentAlbums: [] }) }} />);
+  await screen.findByRole("heading", { name: "Open an Album" });
+  for (const init of [{ key: "+" }, { key: "=" }, { key: "-" }, { key: "+", code: "NumpadAdd" }]) {
+    const event = new KeyboardEvent("keydown", { ctrlKey: true, bubbles: true, cancelable: true, ...init });
+    fireEvent(document.body, event);
+    expect(event.defaultPrevented).toBe(true);
+  }
+  const plain = new KeyboardEvent("keydown", { key: "+", bubbles: true, cancelable: true });
+  fireEvent(document.body, plain);
+  expect(plain.defaultPrevented).toBe(false);
+});
+
 it("leaves Ctrl+B to text fields, Text Slots that handle it and open dialogs", async () => {
   native.enabled = true;
   const ports = sidePanePorts();

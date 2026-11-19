@@ -31,13 +31,18 @@ function CommandButton({ command, measure }: { command: BarCommand; measure: boo
     onClick={command.run}>{command.label}</button>;
 }
 
+/** The gap between commands, measured on the bar's invisible copy. */
+function commandGap(measure: HTMLElement) {
+  return parseFloat(getComputedStyle(measure.querySelector(".command-group") ?? measure).columnGap) || 0;
+}
+
 /** Which overflowable commands must move into the "⋯" menu for the bar to fit. */
 function overflowing(bar: HTMLElement, measure: HTMLElement, more: HTMLElement, tools: HTMLElement, commands: BarCommand[]): string[] {
   const available = bar.clientWidth;
   // The tools are rendered from outside the bar, so the invisible copy cannot lay them out.
   let needed = measure.offsetWidth + tools.scrollWidth;
   if (needed <= available) return [];
-  const gap = parseFloat(getComputedStyle(measure.querySelector(".command-group") ?? measure).columnGap) || 0;
+  const gap = commandGap(measure);
   needed += more.offsetWidth + gap;
   const widths = new Map(Array.from(measure.querySelectorAll<HTMLElement>("[data-command]"),
     (element) => [element.dataset.command, element.offsetWidth]));
@@ -48,6 +53,22 @@ function overflowing(bar: HTMLElement, measure: HTMLElement, more: HTMLElement, 
     needed -= (widths.get(command.id) ?? 0) + gap;
   }
   return hidden;
+}
+
+/**
+ * Reports the room that Slot tools rendered in `element` have in its command bar with every command shown,
+ * now and whenever the bar or its commands resize. Reports nothing outside a command bar.
+ */
+export function observeToolsRoom(element: HTMLElement, onRoom: (room: number) => void): () => void {
+  const bar = element.closest<HTMLElement>(".command-bar");
+  const measure = bar?.querySelector<HTMLElement>(".command-bar--measure");
+  if (!bar || !measure) return () => {};
+  const update = () => onRoom(bar.clientWidth - measure.offsetWidth - commandGap(measure));
+  update();
+  const observer = new ResizeObserver(update);
+  observer.observe(bar);
+  observer.observe(measure);
+  return () => observer.disconnect();
 }
 
 function OverflowMenu({ commands }: { commands: BarCommand[] }) {

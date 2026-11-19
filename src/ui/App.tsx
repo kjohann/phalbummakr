@@ -12,6 +12,7 @@ import type { Mode } from "./modes";
 import PhotoBrowser, { type SortLink } from "./PhotoBrowser";
 import SidePane, { clampPaneWidth, DEFAULT_SIDE_PANE, type PaneModes, type SidePaneSettings } from "./SidePane";
 import { historyShortcut } from "./historyShortcut";
+import { isPageZoomKey } from "./slotShortcuts";
 import { createFolder, tauriSortingPorts } from "./tauriSortingPorts";
 import { useLayoutLibrary } from "./useLayoutLibrary";
 
@@ -378,6 +379,14 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
     window.addEventListener("keydown", step);
     return () => window.removeEventListener("keydown", step);
   }, []);
+
+  useEffect(() => {
+    if (mode !== "album" && mode !== "layouts") return;
+    // Ctrl+Plus/Minus zoom a Photo's Crop in these modes, so they never zoom the whole page.
+    const blockPageZoom = (event: KeyboardEvent) => { if (isPageZoomKey(event)) event.preventDefault(); };
+    window.addEventListener("keydown", blockPageZoom);
+    return () => window.removeEventListener("keydown", blockPageZoom);
+  }, [mode]);
 
   useEffect(() => {
     if (!isTauri()) return;

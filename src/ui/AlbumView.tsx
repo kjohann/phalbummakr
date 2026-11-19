@@ -15,6 +15,7 @@ import type { FontPorts } from "./tauriFontPorts";
 import { fitTextSlots } from "./textLayout";
 import TextSlotTools from "./TextSlotTools";
 import { PhotoSlotTools, SlotActions } from "./SlotTools";
+import { useSlotShortcuts } from "./slotShortcuts";
 import type { AlbumHistory, AlbumLayouts, CommandBarLink } from "./AlbumWorkspace";
 
 const PLACEMENT_DRAG_TYPE = "application/x-phalbummakr-placement";
@@ -500,19 +501,12 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
     else if (command.name === "undo" || command.name === "redo") undoOrRedo(command.name);
   });
 
-  useEffect(() => {
-    const deleteSelected = (event: KeyboardEvent) => {
-      if (!active || event.key !== "Delete" || event.defaultPrevented || !selectedSlot) return;
-      const target = event.target;
-      if (target instanceof HTMLElement && (target.isContentEditable || target.closest("input, textarea, select"))) return;
-      // Dialogs, including the New Album form, own the keyboard.
-      if (document.querySelector("[aria-modal='true']")) return;
-      event.preventDefault();
-      deleteSlotAt();
-    };
-    window.addEventListener("keydown", deleteSelected);
-    return () => window.removeEventListener("keydown", deleteSelected);
-  });
+  const zoomable = selectedSlot?.type === "photo" && selectedSlot.placement && !selectedSlot.placement.fit;
+  useSlotShortcuts(active, selectedSlot && !disabled ? {
+    delete: () => deleteSlotAt(),
+    rotate: rotateSelectedSlot,
+    zoom: zoomable ? (factor) => zoomPlacementBy(selectedPage.id, selectedSlot.id, factor) : undefined,
+  } : {});
 
   function addSlot(type: "photo" | "text", pageId: string, centre?: { x: number; y: number }) {
     if (disabled) return;
