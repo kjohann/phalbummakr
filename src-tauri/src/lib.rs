@@ -130,6 +130,26 @@ async fn move_photos(
 }
 
 #[tauri::command]
+async fn rename_folder(
+    root: String,
+    rename: sorting::FolderRename,
+    albums: Vec<sorting::AlbumRewrite>,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        sorting::rename_folder(Path::new(&root), &rename, &albums)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn folder_exists(root: String, folder: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || sorting::folder_exists(Path::new(&root), &folder))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn photo_thumbnail(
     app: tauri::AppHandle,
     root: String,
@@ -216,6 +236,8 @@ pub fn run() {
             root_albums,
             create_folder,
             move_photos,
+            rename_folder,
+            folder_exists,
             photo_thumbnail,
             photo_page_thumbnail,
             photo_preview,

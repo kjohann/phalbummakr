@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addPhotoSlot, createAlbum, placePhoto, serializeAlbum, setPlacementFit, type Album } from ".";
-import { folderNameProblem, planPhotoMove, relinkPlacements, sendPhotosToFolder, type AlbumRewrite, type PhotoMove, type SortingPorts } from "./sorting";
+import { folderNameProblem, planPhotoMove, relinkPlacements, renameFolder, sendPhotosToFolder, type AlbumRewrite, type FolderRename, type PhotoMove, type SortingPorts } from "./sorting";
 
 function photo(path: string) {
   return { path, width: 4000, height: 3000, orientation: 1 };
@@ -68,6 +68,7 @@ describe("sendPhotosToFolder", () => {
       folderNames: async () => namesInTarget,
       rootAlbums: async () => Object.entries(albums).map(([name, json]) => ({ name, json })),
       movePhotos: async (_root, moves, rewrites) => { moved.push({ moves, albums: rewrites }); },
+      renameFolder: async () => { throw new Error("not a rename"); },
     };
     return { ports, moved };
   }
@@ -129,5 +130,72 @@ describe("naming a new Folder", () => {
       expect(folderNameProblem(name, []), name).toMatch(/\S/);
     }
     expect(folderNameProblem("Kids", ["kids"])).toMatch(/already/);
+  });
+});
+
+describe("renaming a Folder", () => {
+  function fakeLibrary(albums: Record<string, string>, namesInParent: string[]) {
+    const renamed: { rename: FolderRename; albums: AlbumRewrite[] }[] = [];
+    const ports: SortingPorts = {
+      folderNames: async () => namesInParent,
+      rootAlbums: async () => Object.entries(albums).map(([name, json]) => ({ name, json })),
+      movePhotos: async () => { throw new Error("not a move"); },
+      renameFolder: async (_root, rename, rewrites) => { renamed.push({ rename, albums: rewrites }); },
+    };
+    return { ports, renamed };
+  }
+
+  it("points Placements of every Photo under the Folder at its new name", () => {
+    const album = albumWith("2024/trips/a.jpg", "2024/trips/kids/b.jpg", "2024/trips-old/c.jpg", "2024/d.jpg");
+    const relinked = relinkPlacements(album, { from: "2024/trips", to: "2024/travels" });
+    expect(relinked.pages[0].slots.map((slot) => slot.type === "photo" ? slot.placement?.photoPath : null))
+      .toEqual(["2024/travels/a.jpg", "2024/travels/kids/b.jpg", "2024/trips-old/c.jpg", "2024/d.jpg"]);
+    expect(relinkPlacements(album, { from: "pets", to: "animals" })).toBe(album);
+  });
+
+  it("renames the Folder and rewrites every root Album that places a Photo under it, taking the open Album from memory", async () => {
+    const onDisk = albumWith("2024/trips/a.jpg");
+    const unsaved = addPhotoSlot(onDisk, "page-2");
+    const other = albumWith("2024/trips/kids/b.jpg");
+    const library = fakeLibrary({
+      "Christmas.phalbum": serializeAlbum(onDisk),
+      "Summer.phalbum": serializeAlbum(other),
+      "Easter.phalbum": serializeAlbum(albumWith("b.jpg")),
+    }, ["trips", "pets"]);
+
+    const result = await renameFolder(library.ports, {
+      root: "D:\\Photos", folder: "2024/trips", name: " travels ", openAlbum: { name: "Christmas.phalbum", album: unsaved },
+    });
+
+    const rename = { from: "2024/trips", to: "2024/travels" };
+    expect(result).toEqual({ rename, openAlbum: relinkPlacements(unsaved, rename) });
+    expect(library.renamed).toEqual([{
+      rename,
+      albums: [
+        { name: "Christmas.phalbum", original: serializeAlbum(onDisk), updated: serializeAlbum(relinkPlacements(unsaved, rename)) },
+        { name: "Summer.phalbum", original: serializeAlbum(other), updated: serializeAlbum(relinkPlacements(other, rename)) },
+      ],
+    }]);
+  });
+
+  it("allows changing only the case of the name", async () => {
+    const library = fakeLibrary({}, ["trips"]);
+    await renameFolder(library.ports, { root: "D:\\Photos", folder: "trips", name: "Trips", openAlbum: null });
+    expect(library.renamed[0].rename).toEqual({ from: "trips", to: "Trips" });
+  });
+
+  it.each([
+    ["", "new", /Library/],
+    [".git", "git", /can't be renamed/],
+    ["Exports", "Out", /can't be renamed/],
+    ["trips/.cache", "cache", /can't be renamed/],
+    ["trips", "Pets", /already/],
+    ["trips", "trips", /already called/],
+    ["trips", "a:b", /can't contain/],
+    ["trips", "CON", /reserved/],
+  ])("refuses to rename %j to %j", async (folder, name, problem) => {
+    const library = fakeLibrary({}, ["trips", "pets"]);
+    await expect(renameFolder(library.ports, { root: "D:\\Photos", folder, name, openAlbum: null })).rejects.toThrow(problem);
+    expect(library.renamed).toEqual([]);
   });
 });

@@ -1,14 +1,18 @@
 import { useEffect, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
 import {
-  afterMove, canAddToComparison, chosenPhotos, EMPTY_COMPARISON, isProtectedFolder, photoUsage, showPhoto, stepPhoto,   toggleChosen, toggleComparison, withoutPhotos,
-  type Album, type Comparison, type Photo, type PhotoMove, type PhotoScan,
+  afterMove, canAddToComparison, canStepFolder, chosenPhotos, currentFolder, EMPTY_COMPARISON, folderNameProblem, folderRenameProblem,
+  historyAfterRename, historyAfterRescan, isProtectedFolder, photoUsage, renamedPath, showPhoto, START_FOLDER_HISTORY, stepFolder, stepPhoto,
+  toggleChosen, toggleComparison, visitFolder, withoutPhotos,
+  type Album, type Comparison, type FolderHistory, type FolderRename, type Photo, type PhotoMove, type PhotoScan,
 } from "../core";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
+import { folderExists } from "./tauriSortingPorts";
 import { hasPhotoDrag, readPhotoDrag, writePhotoDrag } from "./photoDrag";
 import SortView, { usageLabel } from "./SortView";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
 import SendToFolderDialog from "./SendToFolderDialog";
+import FolderNameDialog from "./FolderNameDialog";
 
 /** Connects the Photo grid to Sort mode's work area and command bar. */
 export interface SortLink {
@@ -25,13 +29,32 @@ export interface SortLink {
 /** What a click on a Photo in the grid does, given whether Ctrl (or ⌘) was held. */
 type PhotoClick = (photo: string, event: ReactMouseEvent) => void;
 
-/** A right-click menu for a Photo in the grid or in Sort mode's work area. */
+/**
+ * A right-click menu: for a Photo in the grid or in Sort mode's work area, for a folder tile,
+ * or for empty grid space, where `path` is the current Folder.
+ */
 interface PhotoMenu {
   path: string;
-  where: "grid" | "view";
+  where: "grid" | "view" | "folder" | "space";
   x: number;
   y: number;
 }
+
+/** Whose current Folder and history the Photo pane shows. */
+export type PhotoPaneMode = "album" | "sort";
+
+type FolderPlaces = Record<PhotoPaneMode, { history: FolderHistory; notice: string | null }>;
+const START_PLACES: FolderPlaces = {
+  album: { history: START_FOLDER_HISTORY, notice: null },
+  sort: { history: START_FOLDER_HISTORY, notice: null },
+};
+
+function mapPlaces(places: FolderPlaces, change: (place: FolderPlaces[PhotoPaneMode]) => FolderPlaces[PhotoPaneMode]): FolderPlaces {
+  return { album: change(places.album), sort: change(places.sort) };
+}
+
+/** A dialog asking for a Folder name: a new Folder inside `parent`, or a new name for `folder`. */
+type FolderNaming = { kind: "create"; parent: string } | { kind: "rename"; folder: string };
 
 /** Props that make a folder tile or breadcrumb a drop target while a Photo is dragged from the grid. */
 type FolderDrop = (folder: string) => {
@@ -102,11 +125,14 @@ function PhotoThumbnail({ root, photo, usage, compact, onDragChange, shown, onCl
   );
 }
 
-function FolderTile({ path, compact, onOpen, drop }: { path: string; compact: boolean; onOpen: (path: string) => void; drop: FolderDrop }) {
+function FolderTile({ path, compact, onOpen, onContextMenu, drop }: {
+  path: string; compact: boolean; onOpen: (path: string) => void; onContextMenu: PhotoClick; drop: FolderDrop;
+}) {
   const name = path.split("/").pop();
   const target = drop(path);
   return (
     <button type="button" title={path} aria-label={`Open folder ${name}`} onClick={() => onOpen(path)}
+      onContextMenu={(event) => { event.preventDefault(); onContextMenu(path, event); }}
       {...target} className={withClass("folder-tile", target.className)}>
       <span className="photo-preview">
         <svg width="48" height="40" viewBox="0 0 48 40" fill="none" aria-hidden="true">
@@ -122,7 +148,7 @@ function FolderTile({ path, compact, onOpen, drop }: { path: string; compact: bo
   );
 }
 
-function PhotoGrid({ root, photos, folders, usage, compact, onOpenFolder, onDragChange, drop, shown, onPhotoClick, onPhotoContextMenu }: {
+function PhotoGrid({ root, photos, folders, usage, compact, onOpenFolder, onDragChange, drop, shown, onPhotoClick, onPhotoContextMenu, onFolderContextMenu, onSpaceContextMenu }: {
   root: string;
   photos: Photo[];
   folders: string[];
@@ -134,6 +160,8 @@ function PhotoGrid({ root, photos, folders, usage, compact, onOpenFolder, onDrag
   shown: readonly string[];
   onPhotoClick?: PhotoClick;
   onPhotoContextMenu?: PhotoClick;
+  onFolderContextMenu: PhotoClick;
+  onSpaceContextMenu: (event: ReactMouseEvent) => void;
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
@@ -161,7 +189,13 @@ function PhotoGrid({ root, photos, folders, usage, compact, onOpenFolder, onDrag
 
   return (
     <div className={compact ? "photo-grid photo-grid-compact" : "photo-grid"} ref={viewportRef} aria-label="Photo grid" tabIndex={0}
-      onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}>
+      onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+      onContextMenu={(event) => {
+        // Tiles have menus of their own, or none; only empty space gets the grid's menu.
+        if (event.defaultPrevented || (event.target instanceof Element && event.target.closest(".photo-cell"))) return;
+        event.preventDefault();
+        onSpaceContextMenu(event);
+      }}>
       <div className="photo-grid-content" role="list" aria-label="Folders and Photos"
         style={{ height: rows * rowHeight }}>
         {visible.map((entry, offset) => {
@@ -179,7 +213,7 @@ function PhotoGrid({ root, photos, folders, usage, compact, onOpenFolder, onDrag
               {entry.kind === "photo" ? <PhotoThumbnail root={root} photo={entry.photo} usage={usage.get(entry.photo.path) ?? 0}
                 compact={compact} onDragChange={onDragChange} shown={shown.includes(entry.photo.path)}
                 onClick={onPhotoClick} onContextMenu={onPhotoContextMenu} />
-                : <FolderTile path={entry.path} compact={compact} onOpen={onOpenFolder} drop={drop} />}
+                : <FolderTile path={entry.path} compact={compact} onOpen={onOpenFolder} onContextMenu={onFolderContextMenu} drop={drop} />}
             </div>
           );
         })}
@@ -203,7 +237,7 @@ function movedMessage(moves: PhotoMove[], target: string) {
     : `Moved "${fileName(from)}" to ${folderName(target)} as "${fileName(to)}".`;
 }
 
-export default function PhotoBrowser({ root, album = null, compact = false, onCompactChange, onSendPhotos, onCreateFolder, sort }: {
+export default function PhotoBrowser({ root, album = null, compact = false, onCompactChange, onSendPhotos, onCreateFolder, onRenameFolder, sort, mode = "album", visible = true }: {
   root: string;
   album?: Album | null;
   compact?: boolean;
@@ -212,23 +246,33 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
   onSendPhotos?: (photos: string[], target: string) => Promise<PhotoMove[]>;
   /** Creates Folder `name` inside `parent`, returning its Library-relative path, for "New Folder…". */
   onCreateFolder?: (parent: string, name: string) => Promise<string>;
+  /** Renames `folder` to `name`, with everything under it, returning its new Library-relative path. */
+  onRenameFolder?: (folder: string, name: string) => Promise<string>;
   /** Set in Sort mode, where Photos are shown large and compared. */
   sort?: SortLink;
+  /** Whose current Folder and back/forward history are shown. */
+  mode?: PhotoPaneMode;
+  /** Whether the pane is on screen, so the mouse back/forward buttons and Alt+←/→ go back and forward. */
+  visible?: boolean;
 }) {
   const [comparison, setComparison] = useState<Comparison>(EMPTY_COMPARISON);
   const [menu, setMenu] = useState<PhotoMenu | null>(null);
   const [folderDialog, setFolderDialog] = useState<{ paths: string[]; parent?: string } | null>(null);
+  const [naming, setNaming] = useState<FolderNaming | null>(null);
   const [scan, setScan] = useState(0);
   const [unusedOnly, setUnusedOnly] = useState(false);
   const [dragged, setDragged] = useState<string | null>(null);
   const [dropOver, setDropOver] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
   const [moveMessage, setMoveMessage] = useState<{ text: string; failed: boolean } | null>(null);
-  const [result, setResult] = useState<(PhotoScan & {
-    generation: number;
-    folder: string;
-    notice: string | null;
-  }) | null>(null);
+  const [result, setResult] = useState<(PhotoScan & { generation: number }) | null>(null);
+  // Each mode keeps its own place, in memory only; a new Library starts both at its root.
+  const [places, setPlaces] = useState<FolderPlaces>(START_PLACES);
+  const [placesRoot, setPlacesRoot] = useState(root);
+  if (placesRoot !== root) {
+    setPlacesRoot(root);
+    setPlaces(START_PLACES);
+  }
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -241,17 +285,16 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
         // Photos removed outside the app leave the work area.
         const scanned = new Set(result.photos.map((photo) => photo.path));
         setComparison((current) => withoutPhotos(current, current.shown.filter((path) => !scanned.has(path))));
-        setResult((previous) => {
-          const selected = previous?.folder ?? "";
-          let folder = selected;
-          while (folder && !result.folders.includes(folder)) folder = parentFolder(folder);
+        setResult({ ...result, generation: scan });
+        const fit = ({ history }: FolderPlaces[PhotoPaneMode]) => {
+          const { history: next, fellBackFrom } = historyAfterRescan(history, result.folders);
           return {
-            ...result, generation: scan, folder,
-            notice: folder !== selected
-              ? `The folder "${selected}" is no longer available in this scan. Showing ${folder || "the Library root"}.`
-              : null,
+            history: next,
+            notice: fellBackFrom === null ? null
+              : `The folder "${fellBackFrom}" is no longer available in this scan. Showing ${currentFolder(next) || "the Library root"}.`,
           };
-        });
+        };
+        setPlaces((current) => mapPlaces(current, fit));
       })
       .catch((cause: unknown) => {
         if (active) setError(`Could not scan the Library: ${String(cause)}`);
@@ -262,7 +305,8 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
     return () => { active = false; };
   }, [root, scan]);
 
-  const folder = result?.folder ?? "";
+  const { history, notice } = places[mode];
+  const folder = result ? currentFolder(history) : "";
   const usage = album ? photoUsage(album) : new Map<string, number>();
   const photos = result?.photos.filter((photo) => parentFolder(photo.path) === folder
     && (!unusedOnly || !usage.has(photo.path))) ?? [];
@@ -271,8 +315,47 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
     name, path: parts.slice(0, index + 1).join("/"),
   })) : [];
   function openFolder(path: string) {
-    setResult((previous) => previous && { ...previous, folder: path, notice: null });
+    setPlaces((current) => ({ ...current, [mode]: { history: visitFolder(current[mode].history, path), notice: null } }));
   }
+
+  /** Goes back (-1) or forward (1). A Folder gone from disk is found by a rescan, which falls back to its parent. */
+  function stepFolderHistory(direction: 1 | -1) {
+    if (!result || !canStepFolder(history, direction)) return;
+    const next = stepFolder(history, direction);
+    setPlaces((current) => ({ ...current, [mode]: { history: next, notice: null } }));
+    const target = currentFolder(next);
+    if (target && !result.folders.includes(target)) setScan((value) => value + 1);
+    else {
+      void folderExists(root, target)
+        .then((exists) => { if (!exists) setScan((value) => value + 1); })
+        .catch(() => undefined);
+    }
+  }
+  const stepHistoryRef = useRef(stepFolderHistory);
+  stepHistoryRef.current = stepFolderHistory;
+
+  useEffect(() => {
+    if (!visible) return;
+    const blocked = () => window.document.querySelector("[aria-modal='true']") !== null;
+    const key = (event: KeyboardEvent) => {
+      const direction = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
+      if (!direction || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.defaultPrevented || blocked()) return;
+      event.preventDefault();
+      stepHistoryRef.current(direction);
+    };
+    // Mouse buttons 3 and 4 are back and forward; the webview's own navigation is blocked in App.
+    const mouse = (event: MouseEvent) => {
+      if (event.button !== 3 && event.button !== 4) return;
+      event.preventDefault();
+      if (!blocked()) stepHistoryRef.current(event.button === 3 ? -1 : 1);
+    };
+    window.addEventListener("keydown", key);
+    window.addEventListener("mouseup", mouse);
+    return () => {
+      window.removeEventListener("keydown", key);
+      window.removeEventListener("mouseup", mouse);
+    };
+  }, [visible]);
 
   const sortActive = sort?.active ?? false;
   const grid = photos.map((photo) => photo.path);
@@ -352,6 +435,26 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
     ].map(fileName);
   }
 
+  async function createFolder(parent: string, name: string) {
+    await onCreateFolder!(parent, name);
+    setNaming(null);
+    setScan((value) => value + 1);
+  }
+
+  async function renameFolder(folder: string, name: string) {
+    const rename: FolderRename = { from: folder, to: await onRenameFolder!(folder, name) };
+    setNaming(null);
+    const follow = (path: string) => renamedPath(path, rename) ?? path;
+    setComparison((current) => ({ shown: current.shown.map(follow), chosen: current.chosen.map(follow) }));
+    setPlaces((current) => mapPlaces(current, (place) => ({ ...place, history: historyAfterRename(place.history, rename) })));
+    setMoveMessage({ text: `Renamed "${fileName(rename.from)}" to "${fileName(rename.to)}".`, failed: false });
+    setScan((value) => value + 1);
+  }
+
+  const canRename = (path: string) => onRenameFolder !== undefined && !moving && path !== "" && !isProtectedFolder(path);
+  const openFolderMenu = (where: "folder" | "space") => (path: string, event: ReactMouseEvent) =>
+    setMenu({ path, where, x: event.clientX, y: event.clientY });
+
   async function sendFromDialog(paths: string[], target: string, name: string | null) {
     let destination = target;
     if (name !== null) {
@@ -375,6 +478,12 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
   }, [commandSerial]);
 
   function menuItems({ path, where }: PhotoMenu): MenuItem[] {
+    if (where === "folder") {
+      return [{ label: "Rename…", onSelect: () => setNaming({ kind: "rename", folder: path }), disabled: !canRename(path) }];
+    }
+    if (where === "space") {
+      return [{ label: "New Folder…", onSelect: () => setNaming({ kind: "create", parent: path }), disabled: !onCreateFolder }];
+    }
     const inComparison = comparison.shown.includes(path);
     // Like a file manager's selection: a chosen Photo takes the other chosen Photos with it.
     const chosen = chosenPhotos(comparison);
@@ -445,6 +554,8 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
           {loading ? "Scanning Library..." : result ? `${photos.length.toLocaleString()} Photos` : "Scan failed"}
         </span>
         <div className="photo-browser-tools">
+          {onCreateFolder && <button type="button" className="button-quiet" disabled={!result}
+            onClick={() => setNaming({ kind: "create", parent: folder })}>New Folder…</button>}
           {onCompactChange && <button type="button" className="button-quiet" aria-pressed={compact}
             onClick={() => onCompactChange(!compact)}>Compact</button>}
           <button type="button" className="button-quiet" disabled={loading} onClick={() => setScan(scan + 1)}>
@@ -453,24 +564,30 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
         </div>
       </header>
       {result && (
-        <nav className="photo-breadcrumbs" aria-label="Photo folders">
-          <button type="button" aria-current={folder === "" ? "page" : undefined}
-            onClick={() => openFolder("")} {...drop("")}>Library</button>
-          {ancestors.map((ancestor) => (
-            <span key={ancestor.path}>
-              <span aria-hidden="true"> / </span>
-              <button type="button" aria-current={ancestor.path === folder ? "page" : undefined}
-                onClick={() => openFolder(ancestor.path)} {...drop(ancestor.path)}>{ancestor.name}</button>
-            </span>
-          ))}
-        </nav>
+        <div className="photo-folder-bar">
+          <button type="button" className="photo-history-button" aria-label="Back" title="Back (Alt+←)"
+            disabled={!canStepFolder(history, -1)} onClick={() => stepFolderHistory(-1)}>←</button>
+          <button type="button" className="photo-history-button" aria-label="Forward" title="Forward (Alt+→)"
+            disabled={!canStepFolder(history, 1)} onClick={() => stepFolderHistory(1)}>→</button>
+          <nav className="photo-breadcrumbs" aria-label="Photo folders">
+            <button type="button" aria-current={folder === "" ? "page" : undefined}
+              onClick={() => openFolder("")} {...drop("")}>Library</button>
+            {ancestors.map((ancestor) => (
+              <span key={ancestor.path}>
+                <span aria-hidden="true"> / </span>
+                <button type="button" aria-current={ancestor.path === folder ? "page" : undefined}
+                  onClick={() => openFolder(ancestor.path)} {...drop(ancestor.path)}>{ancestor.name}</button>
+              </span>
+            ))}
+          </nav>
+        </div>
       )}
       <label className="photo-filter">
         <input type="checkbox" checked={unusedOnly} disabled={!album} onChange={(event) => setUnusedOnly(event.target.checked)} />
         Unused in this Album
       </label>
       <p className="photo-order">Capture date · oldest first</p>
-      {result?.notice && <p className="photo-empty" role="status">{result.notice}</p>}
+      {notice && <p className="photo-empty" role="status">{notice}</p>}
       {moveMessage && (moveMessage.failed
         ? <p className="error-banner" role="alert">{moveMessage.text}</p>
         : <p className="photo-empty" role="status">{moveMessage.text}</p>)}
@@ -489,7 +606,8 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
       {result && <PhotoGrid key={`${root}:${result.generation}:${folder}:${unusedOnly}`} root={root}
         photos={photos} folders={folders} usage={usage} compact={compact} onOpenFolder={openFolder}
         onDragChange={dragChange} drop={drop} shown={sortActive ? comparison.shown : []}
-        onPhotoClick={photoClick} onPhotoContextMenu={sortActive ? openMenu("grid") : undefined} />}
+        onPhotoClick={photoClick} onPhotoContextMenu={sortActive ? openMenu("grid") : undefined}
+        onFolderContextMenu={openFolderMenu("folder")} onSpaceContextMenu={(event) => openFolderMenu("space")(folder, event)} />}
       {sort?.host && createPortal(<SortView root={root} photos={shownPhotos} chosen={comparison.chosen} usage={usage}
         onToggleChosen={(path) => setComparison((current) => toggleChosen(current, path))}
         onContextMenu={openMenu("view")} />, sort.host)}
@@ -497,6 +615,15 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
       {folderDialog && <SendToFolderDialog count={folderDialog.paths.length} folders={sendTargets} parent={folderDialog.parent}
         siblings={siblingNames} alreadyIn={isAllIn(folderDialog.paths)}
         onSend={(target, name) => sendFromDialog(folderDialog.paths, target, name)} onClose={() => setFolderDialog(null)} />}
+      {naming?.kind === "create" && <FolderNameDialog label="New Folder" submitLabel="Create"
+        description={`Creates a Folder inside ${folderName(naming.parent)}.`}
+        problem={(name) => folderNameProblem(name, siblingNames(naming.parent))}
+        onSubmit={(name) => createFolder(naming.parent, name)} onClose={() => setNaming(null)} />}
+      {naming?.kind === "rename" && <FolderNameDialog label="Rename Folder" submitLabel="Rename" initialName={fileName(naming.folder)}
+        description={`Renames the Folder ${fileName(naming.folder)} and everything in it.`}
+        problem={(name) => folderRenameProblem(naming.folder, name, siblingNames(parentFolder(naming.folder)))}
+        confirm={(name) => `Rename "${fileName(naming.folder)}" to "${name}"? Everything in it moves with it, and the Albums in the Library are updated to match.`}
+        onSubmit={(name) => renameFolder(naming.folder, name)} onClose={() => setNaming(null)} />}
     </aside>
   );
 }

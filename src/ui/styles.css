@@ -333,11 +333,42 @@ body {
   font-size: 12px;
 }
 
-.photo-breadcrumbs {
+.photo-folder-bar {
+  display: flex;
   flex-shrink: 0;
+  align-items: flex-start;
+  gap: 2px;
+  padding-left: 12px;
+}
+
+.photo-history-button {
+  flex-shrink: 0;
+  min-width: 24px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 4px;
+  color: #415d50;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.photo-history-button:hover:not(:disabled) {
+  background: #e7ebe4;
+}
+
+.photo-history-button:disabled {
+  color: #b5bbb5;
+  cursor: default;
+}
+
+.photo-breadcrumbs {
+  flex: 1;
+  min-width: 0;
   max-height: 100px;
   overflow: auto;
-  padding: 4px 16px 12px;
+  padding: 4px 16px 12px 4px;
   color: #6f7771;
   font-size: 12px;
   overflow-wrap: anywhere;

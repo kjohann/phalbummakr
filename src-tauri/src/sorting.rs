@@ -230,15 +230,15 @@ fn undo_moves(moved: &[(PathBuf, PathBuf)]) -> String {
     failures
 }
 
-/// Moves Photo files and rewrites Albums in the Library root as one step: when
-/// anything fails, the files and Albums that were already changed are put back.
-pub fn move_photos(
+/// Album rewrites written to temporary files next to the Albums, ready to replace them.
+type StagedAlbums<'a> = Vec<(&'a AlbumRewrite, PathBuf, tempfile::NamedTempFile)>;
+
+/// Stages Album rewrites, refusing any Album whose file changed since it was read.
+fn stage_albums<'a>(
     root: &Path,
-    moves: &[PhotoMove],
-    albums: &[AlbumRewrite],
-) -> Result<(), String> {
-    let root = canonical_root(root)?;
-    let moves = checked_moves(&root, moves)?;
+    albums: &'a [AlbumRewrite],
+    action: &str,
+) -> Result<StagedAlbums<'a>, String> {
     let mut staged = Vec::new();
     for album in albums {
         if !is_album_name(&album.name) {
@@ -252,12 +252,12 @@ pub fn move_photos(
             .map_err(|error| format!("Could not read the Album \"{}\": {error}", album.name))?;
         if current != album.original {
             return Err(format!(
-                "The Album \"{}\" changed while moving Photos. Try again.",
+                "The Album \"{}\" changed while {action}. Try again.",
                 album.name
             ));
         }
         let stage = || -> io::Result<tempfile::NamedTempFile> {
-            let mut temp = tempfile::NamedTempFile::new_in(&root)?;
+            let mut temp = tempfile::NamedTempFile::new_in(root)?;
             temp.write_all(album.updated.as_bytes())?;
             temp.as_file().sync_all()?;
             Ok(temp)
@@ -266,6 +266,54 @@ pub fn move_photos(
             .map_err(|error| format!("Could not update the Album \"{}\": {error}", album.name))?;
         staged.push((album, path, temp));
     }
+    Ok(staged)
+}
+
+/// Replaces the Albums with their staged rewrites. If one can't be replaced, the Albums already
+/// written are restored and `undo` puts the files back; it returns what it could not undo.
+fn commit_albums(
+    staged: StagedAlbums,
+    undo: impl FnOnce() -> String,
+    nothing_changed: &str,
+) -> Result<(), String> {
+    let mut written: Vec<(&AlbumRewrite, PathBuf)> = Vec::new();
+    for (album, path, temp) in staged {
+        if let Err(error) = temp.persist(&path) {
+            let mut failures = String::new();
+            for (album, path) in written.iter().rev() {
+                if let Err(error) = crate::albums::write_file(path, &album.original, false) {
+                    failures.push_str(&format!(
+                        " Could not restore the Album \"{}\": {error}.",
+                        album.name
+                    ));
+                }
+            }
+            failures.push_str(&undo());
+            let outcome = if failures.is_empty() {
+                format!(" {nothing_changed}")
+            } else {
+                failures
+            };
+            return Err(format!(
+                "Could not update the Album \"{}\": {}.{outcome}",
+                album.name, error.error
+            ));
+        }
+        written.push((album, path));
+    }
+    Ok(())
+}
+
+/// Moves Photo files and rewrites Albums in the Library root as one step: when
+/// anything fails, the files and Albums that were already changed are put back.
+pub fn move_photos(
+    root: &Path,
+    moves: &[PhotoMove],
+    albums: &[AlbumRewrite],
+) -> Result<(), String> {
+    let root = canonical_root(root)?;
+    let moves = checked_moves(&root, moves)?;
+    let staged = stage_albums(&root, albums, "moving Photos")?;
 
     let mut moved = Vec::new();
     for (source, destination) in moves {
@@ -284,33 +332,72 @@ pub fn move_photos(
         }
         moved.push((source, destination));
     }
+    commit_albums(staged, || undo_moves(&moved), "No Photos were moved.")
+}
 
-    let mut written: Vec<(&AlbumRewrite, PathBuf)> = Vec::new();
-    for (album, path, temp) in staged {
-        if let Err(error) = temp.persist(&path) {
-            let mut failures = String::new();
-            for (album, path) in written.iter().rev() {
-                if let Err(error) = crate::albums::write_file(path, &album.original, false) {
-                    failures.push_str(&format!(
-                        " Could not restore the Album \"{}\": {error}.",
-                        album.name
-                    ));
-                }
-            }
-            failures.push_str(&undo_moves(&moved));
-            let outcome = if failures.is_empty() {
-                " No Photos were moved.".to_owned()
-            } else {
-                failures
-            };
-            return Err(format!(
-                "Could not update the Album \"{}\": {}.{outcome}",
-                album.name, error.error
-            ));
-        }
-        written.push((album, path));
+#[derive(Debug, Deserialize)]
+pub struct FolderRename {
+    pub from: String,
+    pub to: String,
+}
+
+fn split_folder(path: &str) -> (&str, &str) {
+    path.rsplit_once('/').unwrap_or(("", path))
+}
+
+/// Renames a Folder in place, with everything under it, and rewrites Albums in the Library
+/// root as one step: when an Album can't be written, the Folder gets its old name back.
+pub fn rename_folder(
+    root: &Path,
+    rename: &FolderRename,
+    albums: &[AlbumRewrite],
+) -> Result<(), String> {
+    let root = canonical_root(root)?;
+    let FolderRename { from, to } = rename;
+    let (parent, old_name) = split_folder(from);
+    let (new_parent, new_name) = split_folder(to);
+    if from.is_empty() {
+        return Err("The Library itself can't be renamed.".into());
     }
-    Ok(())
+    if new_parent != parent {
+        return Err(format!("\"{to}\" is not a new name for \"{from}\"."));
+    }
+    if let Some(problem) = folder_name_problem(new_name) {
+        return Err(problem);
+    }
+    let source = existing_folder(&root, from)?;
+    let taken = folder_names(&root, parent)?
+        .iter()
+        .any(|sibling| sibling.to_lowercase() == new_name.to_lowercase() && sibling != old_name);
+    if taken || new_name == old_name {
+        return Err(format!("Something named \"{new_name}\" is already there."));
+    }
+    let destination = source.with_file_name(new_name);
+    let staged = stage_albums(&root, albums, "renaming the Folder")?;
+    fs::rename(&source, &destination)
+        .map_err(|error| format!("Could not rename \"{from}\": {error}."))?;
+    commit_albums(
+        staged,
+        || match fs::rename(&destination, &source) {
+            Ok(()) => String::new(),
+            Err(error) => format!(" Could not rename \"{to}\" back: {error}."),
+        },
+        "Nothing was renamed.",
+    )
+}
+
+/// Whether `folder` is a real directory in the Library ("" is the root), protected or not.
+pub fn folder_exists(root: &Path, folder: &str) -> bool {
+    let Ok(root) = canonical_root(root) else {
+        return false;
+    };
+    let Some(path) = join_plain(&root, folder) else {
+        return false;
+    };
+    fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_dir() && !metadata.is_symlink())
+        && path
+            .canonicalize()
+            .is_ok_and(|canonical| canonical.starts_with(&root))
 }
 
 #[cfg(test)]
@@ -535,5 +622,113 @@ mod tests {
             );
         }
         assert!(!dir.path().join("missing").exists());
+    }
+
+    fn folder_rename(from: &str, to: &str) -> FolderRename {
+        FolderRename {
+            from: from.into(),
+            to: to.into(),
+        }
+    }
+
+    #[test]
+    fn renames_a_folder_with_everything_in_it_and_rewrites_the_albums() {
+        let dir = library();
+        fs::create_dir(dir.path().join("kids/small")).unwrap();
+        fs::write(dir.path().join("kids/small/b.jpg"), "photo b").unwrap();
+        let albums = [rewrite(
+            dir.path(),
+            "Christmas.phalbum",
+            "{\"photo\":\"children/small/b.jpg\"}",
+        )];
+        rename_folder(dir.path(), &folder_rename("kids", "children"), &albums).unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.path().join("children/small/b.jpg")).unwrap(),
+            "photo b"
+        );
+        assert!(!dir.path().join("kids").exists());
+        assert_eq!(
+            fs::read_to_string(dir.path().join("Christmas.phalbum")).unwrap(),
+            "{\"photo\":\"children/small/b.jpg\"}"
+        );
+        rename_folder(
+            dir.path(),
+            &folder_rename("children/small", "children/Small"),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(entries(&dir.path().join("children")), ["Small"]);
+    }
+
+    #[test]
+    fn refuses_to_rename_the_root_protected_folders_or_onto_a_taken_name() {
+        let dir = library();
+        for folder in [".phalbummakr", "Exports", ".git", "kids/older"] {
+            fs::create_dir_all(dir.path().join(folder)).unwrap();
+        }
+        for (from, to) in [
+            ("", "new"),
+            (".phalbummakr", "app"),
+            ("Exports", "out"),
+            (".git", "git"),
+            ("kids", "a.jpg"),
+            ("kids", "kids"),
+            ("kids", "Exports"),
+            ("kids", "what?"),
+            ("kids", "kids/older/new"),
+            ("kids", "../kids2"),
+            ("kids/older", "older"),
+            ("missing", "new"),
+        ] {
+            assert!(
+                rename_folder(dir.path(), &folder_rename(from, to), &[]).is_err(),
+                "{from} -> {to}"
+            );
+        }
+        assert!(dir.path().join("kids/older").is_dir());
+    }
+
+    #[test]
+    fn cancels_a_rename_when_an_album_changed_since_it_was_read() {
+        let dir = library();
+        let albums = [rewrite(dir.path(), "Christmas.phalbum", "updated")];
+        fs::write(dir.path().join("Christmas.phalbum"), "saved meanwhile").unwrap();
+        assert!(rename_folder(dir.path(), &folder_rename("kids", "children"), &albums).is_err());
+        assert!(dir.path().join("kids").is_dir());
+        assert!(!dir.path().join("children").exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn renames_the_folder_back_when_an_album_cannot_be_written() {
+        let dir = library();
+        let albums = [rewrite(dir.path(), "Summer.phalbum", "updated")];
+        let summer = dir.path().join("Summer.phalbum");
+        let mut permissions = fs::metadata(&summer).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&summer, permissions.clone()).unwrap();
+        let result = rename_folder(dir.path(), &folder_rename("kids", "children"), &albums);
+        #[allow(clippy::permissions_set_readonly_false)]
+        permissions.set_readonly(false);
+        fs::set_permissions(&summer, permissions).unwrap();
+        assert!(result.unwrap_err().contains("Nothing was renamed"));
+        assert!(dir.path().join("kids").is_dir());
+        assert!(!dir.path().join("children").exists());
+    }
+
+    #[test]
+    fn tells_whether_a_folder_exists_in_the_library() {
+        let dir = library();
+        fs::create_dir(dir.path().join(".hidden")).unwrap();
+        for (folder, exists) in [
+            ("", true),
+            ("kids", true),
+            (".hidden", true),
+            ("missing", false),
+            ("a.jpg", false),
+            ("..", false),
+        ] {
+            assert_eq!(folder_exists(dir.path(), folder), exists, "{folder}");
+        }
     }
 }

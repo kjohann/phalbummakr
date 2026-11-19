@@ -674,3 +674,155 @@ describe("Sort mode", () => {
     expect(onSendPhotos).toHaveBeenLastCalledWith([photo(3).path], "trip");
   });
 });
+
+describe("Folder history and Folder interactions", () => {
+  const library = { photos: [{ ...photo(0), path: "trips/kids/a.jpg" }], folders: ["trips", "trips/kids", "pets", ".hidden"], warnings: [] };
+
+  function mockLibrary(scans: (typeof library)[] = [library], exists: (folder: string) => boolean = () => true) {
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      if (command === "scan_photos") return scans.length > 1 ? scans.shift() : scans[0];
+      if (command === "folder_exists") return exists((args as { folder: string }).folder);
+      return "data:image/png;base64,dGVzdA==";
+    });
+  }
+
+  const nav = () => within(screen.getByRole("navigation", { name: "Photo folders" }));
+  const current = () => nav().getAllByRole("button").find((button) => button.getAttribute("aria-current") === "page")!.textContent;
+  const back = () => screen.getByRole("button", { name: "Back" }) as HTMLButtonElement;
+  const forward = () => screen.getByRole("button", { name: "Forward" }) as HTMLButtonElement;
+  const open = async (name: string) => fireEvent.click(await screen.findByRole("button", { name: `Open folder ${name}` }));
+
+  it("keeps a separate current Folder and back/forward history for Album mode and Sort mode", async () => {
+    mockLibrary();
+    const view = render(<PhotoBrowser root="D:\\Photos" mode="album" />);
+    await screen.findByRole("button", { name: "Open folder trips" });
+    expect(back().disabled).toBe(true);
+    expect(forward().disabled).toBe(true);
+    await open("trips");
+    await open("kids");
+    fireEvent.click(nav().getByRole("button", { name: "kids" }));
+    fireEvent.click(back());
+    expect(current()).toBe("trips");
+    expect(forward().disabled).toBe(false);
+
+    view.rerender(<PhotoBrowser root="D:\\Photos" mode="sort" />);
+    expect(current()).toBe("Library");
+    expect(back().disabled).toBe(true);
+    await open("pets");
+    expect(back().disabled).toBe(false);
+
+    view.rerender(<PhotoBrowser root="D:\\Photos" mode="album" />);
+    expect(current()).toBe("trips");
+    fireEvent.click(forward());
+    expect(current()).toBe("kids");
+    fireEvent.click(back());
+    fireEvent.click(back());
+    expect(current()).toBe("Library");
+    expect(back().disabled).toBe(true);
+  });
+
+  it("goes back and forward with Alt+arrows and the mouse buttons only while the Photo pane is visible", async () => {
+    mockLibrary();
+    const view = render(<PhotoBrowser root="D:\\Photos" />);
+    await open("trips");
+    await open("kids");
+    expect(fireEvent.keyDown(window, { key: "ArrowLeft", altKey: true })).toBe(false);
+    expect(current()).toBe("trips");
+    expect(fireEvent.mouseUp(window, { button: 3 })).toBe(false);
+    expect(current()).toBe("Library");
+    expect(fireEvent.mouseUp(window, { button: 4 })).toBe(false);
+    fireEvent.keyDown(window, { key: "ArrowRight", altKey: true });
+    expect(current()).toBe("kids");
+
+    view.rerender(<PhotoBrowser root="D:\\Photos" visible={false} />);
+    fireEvent.mouseUp(window, { button: 3 });
+    fireEvent.keyDown(window, { key: "ArrowLeft", altKey: true });
+    expect(current()).toBe("kids");
+  });
+
+  it("rescans and falls back without an error when Back reaches a Folder that no longer exists", async () => {
+    mockLibrary([library, { ...library, photos: [], folders: ["trips", "pets"] }], (folder) => folder !== "trips/kids");
+    render(<PhotoBrowser root="D:\\Photos" />);
+    await open("trips");
+    await open("kids");
+    fireEvent.click(nav().getByRole("button", { name: "Library" }));
+    fireEvent.click(back());
+    expect(await screen.findByText(/trips\/kids.*no longer available/)).toBeTruthy();
+    expect(current()).toBe("trips");
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.click(back());
+    expect(current()).toBe("trips");
+    fireEvent.click(back());
+    expect(current()).toBe("Library");
+  });
+
+  it("creates a New Folder in the current Folder from the header and from empty grid space", async () => {
+    mockLibrary();
+    const onCreateFolder = vi.fn(async (parent: string, name: string) => parent ? `${parent}/${name}` : name);
+    render(<PhotoBrowser root="D:\\Photos" onCreateFolder={onCreateFolder} />);
+    await open("trips");
+    fireEvent.click(screen.getByRole("button", { name: "New Folder…" }));
+    let dialog = within(screen.getByRole("dialog", { name: "New Folder" }));
+    fireEvent.change(dialog.getByRole("textbox", { name: "Folder name" }), { target: { value: "Kids" } });
+    fireEvent.click(dialog.getByRole("button", { name: "Create" }));
+    expect(dialog.getByRole("alert").textContent).toMatch(/already there/);
+    fireEvent.change(dialog.getByRole("textbox", { name: "Folder name" }), { target: { value: "summer" } });
+    fireEvent.click(dialog.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(onCreateFolder).toHaveBeenCalledWith("trips", "summer");
+
+    fireEvent.click(nav().getByRole("button", { name: "Library" }));
+    fireEvent.contextMenu(screen.getByRole("list", { name: "Folders and Photos" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "New Folder…" }));
+    dialog = within(screen.getByRole("dialog", { name: "New Folder" }));
+    fireEvent.change(dialog.getByRole("textbox", { name: "Folder name" }), { target: { value: "winter" } });
+    fireEvent.click(dialog.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(onCreateFolder).toHaveBeenLastCalledWith("", "winter"));
+  });
+
+  it("renames a Folder after confirmation, and every mode's history follows it", async () => {
+    const renamed = { photos: [{ ...photo(0), path: "trips/children/a.jpg" }], folders: ["trips", "trips/children", "pets", ".hidden"], warnings: [] };
+    mockLibrary([library, renamed]);
+    const onRenameFolder = vi.fn(async (folder: string, name: string) => `${folder.slice(0, folder.lastIndexOf("/"))}/${name}`);
+    const props = { root: "D:\\Photos", onRenameFolder };
+    const view = render(<PhotoBrowser {...props} mode="sort" />);
+    await open("trips");
+    await open("kids");
+    view.rerender(<PhotoBrowser {...props} mode="album" />);
+    await open("pets");
+    fireEvent.click(back());
+    await open("trips");
+    expect(back().disabled).toBe(false);
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Open folder kids" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
+    const dialog = within(screen.getByRole("dialog", { name: "Rename Folder" }));
+    const name = dialog.getByRole("textbox", { name: "Folder name" }) as HTMLInputElement;
+    expect(name.value).toBe("kids");
+    fireEvent.change(name, { target: { value: "children" } });
+    fireEvent.click(dialog.getByRole("button", { name: "Rename" }));
+    expect(dialog.getByText(/Rename "kids" to "children"\?/)).toBeTruthy();
+    expect(onRenameFolder).not.toHaveBeenCalled();
+    fireEvent.click(dialog.getByRole("button", { name: "Rename" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(onRenameFolder).toHaveBeenCalledWith("trips/kids", "children");
+    await screen.findByRole("button", { name: "Open folder children" });
+    // Album mode never visited kids, so its history stays; Sort mode's is cleared and follows the rename.
+    expect(current()).toBe("trips");
+    expect(back().disabled).toBe(false);
+    view.rerender(<PhotoBrowser {...props} mode="sort" />);
+    expect(current()).toBe("children");
+    expect(back().disabled).toBe(true);
+    expect(screen.getByText("a.jpg")).toBeTruthy();
+  });
+
+  it("never renames the Library root or a protected Folder", async () => {
+    mockLibrary();
+    render(<PhotoBrowser root="D:\\Photos" onRenameFolder={vi.fn()} />);
+    fireEvent.contextMenu(await screen.findByRole("button", { name: "Open folder .hidden" }));
+    expect((screen.getByRole("menuitem", { name: "Rename…" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    fireEvent.contextMenu(nav().getByRole("button", { name: "Library" }));
+    expect(screen.queryByRole("menuitem", { name: "Rename…" })).toBeNull();
+  });
+});

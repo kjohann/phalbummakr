@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   canRedo, canUndo, createAlbum, deserializeAlbum, emptyHistory, endGroup, recordChange, relinkPlacements, serializeAlbum, stepHistory,
-  type Album, type AlbumPorts, type HistoryDirection, type PhotoMove, type PhotoPreviewPorts, type UndoHistory,
+  type Album, type AlbumPorts, type HistoryDirection, type PhotoPreviewPorts, type PlacementRelink, type UndoHistory,
 } from "../core";
 import AlbumView from "./AlbumView";
 import ModalDialog from "./ModalDialog";
@@ -34,10 +34,11 @@ export interface AlbumCommand {
 }
 
 /**
- * Runs a Photo move against the open Album. Edits and autosave pause while `move` runs with the
- * current Album, which `move` writes to disk itself. The Album then adopts the moves, outside undo.
+ * Runs a Photo move or Folder rename against the open Album. Edits and autosave pause while `move`
+ * runs with the current Album, which `move` writes to disk itself. The Album then adopts the new
+ * Photo paths `move` returns, outside undo.
  */
-export type PhotoMoveRunner = (move: (album: Album) => Promise<PhotoMove[]>) => Promise<PhotoMove[]>;
+export type PhotoMoveRunner = <T extends PlacementRelink>(move: (album: Album) => Promise<T>) => Promise<T>;
 
 /** Where the open Album puts its Photo move runner for the Photo pane to use. */
 export interface PhotoMoveLink {
@@ -190,7 +191,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
     return () => window.clearTimeout(timer);
   }, [current, root, ports, retry, cropPending, saveStatus, busy]);
 
-  async function runPhotoMove(move: (album: Album) => Promise<PhotoMove[]>): Promise<PhotoMove[]> {
+  async function runPhotoMove<T extends PlacementRelink>(move: (album: Album) => Promise<T>): Promise<T> {
     if (!currentRef.current || suspended || busy || listing || cropPending || moving.current) {
       throw new Error("The open Album is busy. Try again in a moment.");
     }

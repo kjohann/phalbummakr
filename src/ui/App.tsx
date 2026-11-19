@@ -4,7 +4,7 @@ import { dirname } from "@tauri-apps/api/path";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { createAlbum, deserializeAlbum, sendPhotosToFolder, serializeAlbum, type Album, type HistoryDirection, type LayoutPorts } from "../core";
+import { createAlbum, deserializeAlbum, renameFolder, sendPhotosToFolder, serializeAlbum, type Album, type HistoryDirection, type LayoutPorts, type PlacementRelink } from "../core";
 import AlbumWorkspace, { type AlbumCommand, type AlbumCommandName, type CommandBarLink, type HistoryState, type PhotoMoveRunner } from "./AlbumWorkspace";
 import CommandBar, { type BarCommand } from "./CommandBar";
 import LayoutWorkspace, { type LayoutBarLink, type LayoutBarState, type LayoutCommand, type LayoutCommandName } from "./LayoutWorkspace";
@@ -125,15 +125,19 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
   useEffect(() => onLayoutLibraryReadyChange(layoutLibraryReady), [layoutLibraryReady, onLayoutLibraryReadyChange]);
   useEffect(() => () => onLayoutLibraryReadyChange(false), [onLayoutLibraryReadyChange]);
   const photoMoves = useRef<PhotoMoveRunner | null>(null);
-  const sendPhotos = useCallback(async (photos: string[], target: string) => {
+  /** Runs a Photo move or Folder rename with the open Album, by its file name, paused and kept in step. */
+  const withOpenAlbum = useCallback(<T extends PlacementRelink>(change: (openAlbum: { name: string; album: Album }) => Promise<T>) => {
     const run = photoMoves.current;
     if (!run) throw new Error("The open Album is not ready yet.");
     const name = document.path.split(/[\\/]/).pop()!;
-    return run(async (album) => (await sendPhotosToFolder(tauriSortingPorts, {
-      root: document.root, photos, target, openAlbum: { name, album },
-    })).moves);
-  }, [document.path, document.root]);
+    return run((album) => change({ name, album }));
+  }, [document.path]);
+  const sendPhotos = useCallback(async (photos: string[], target: string) => withOpenAlbum(async (openAlbum) =>
+    (await sendPhotosToFolder(tauriSortingPorts, { root: document.root, photos, target, openAlbum })).moves), [withOpenAlbum, document.root]);
   const createPhotoFolder = useCallback((parent: string, name: string) => createFolder(document.root, parent, name), [document.root]);
+  const renamePhotoFolder = useCallback(async (folder: string, name: string) => (await withOpenAlbum(async (openAlbum) =>
+    (await renameFolder(tauriSortingPorts, { root: document.root, folder, name, openAlbum })).rename)).to, [withOpenAlbum, document.root]);
+  const photoPaneVisible = !hidden && !suspended && !sidePane.collapsed && (mode === "sort" || (mode === "album" && paneTab === "photos"));
   const [sortHost, setSortHost] = useState<HTMLElement | null>(null);
   return (
     <div className="library-workspace" style={{ display: hidden ? "none" : undefined }}>
@@ -144,6 +148,7 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
             {...mode === "album" ? { role: "tabpanel", id: "pane-panel-photos", "aria-labelledby": "pane-tab-photos" } : {}}>
             <PhotoBrowser root={document.root} album={album} compact={sidePane.compact}
               onCompactChange={(compact) => onSidePaneChange({ compact })} onSendPhotos={sendPhotos} onCreateFolder={createPhotoFolder}
+              onRenameFolder={renamePhotoFolder} mode={mode === "sort" ? "sort" : "album"} visible={photoPaneVisible}
               sort={{ ...sortBar, host: sortHost, active: mode === "sort" && !hidden && !suspended }} />
           </div>
           <div className="pane-view" hidden={mode !== "album" || paneTab !== "layouts"} ref={setAlbumLayoutsHost}
@@ -207,6 +212,16 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
     setSidePaneState(next);
     ports.setSidePane(next).catch((cause: unknown) => setError(`Could not save the Side pane layout: ${String(cause)}`));
   }, [ports]);
+
+  // The mouse back and forward buttons never navigate the webview; the Photo pane uses them for its own history.
+  useEffect(() => {
+    const block = (event: MouseEvent) => {
+      if (event.button === 3 || event.button === 4) event.preventDefault();
+    };
+    const events = ["mousedown", "mouseup", "auxclick"] as const;
+    events.forEach((type) => window.addEventListener(type, block));
+    return () => events.forEach((type) => window.removeEventListener(type, block));
+  }, []);
 
   async function refreshRecent() {
     setRecent((await ports.settings()).recentAlbums);

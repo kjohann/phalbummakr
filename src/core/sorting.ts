@@ -5,14 +5,34 @@ export interface PhotoMove {
   to: string;
 }
 
+/** A Folder renamed, with everything under it, from one Library-relative path to another. */
+export interface FolderRename {
+  from: string;
+  to: string;
+}
+
+/** Where `path` is after `rename`, or undefined if it is neither the Folder nor under it. */
+export function renamedPath(path: string, { from, to }: FolderRename): string | undefined {
+  if (path === from) return to;
+  return path.startsWith(`${from}/`) ? to + path.slice(from.length) : undefined;
+}
+
+/** Where placed Photos went: moved one by one, or with their Folder when it was renamed. */
+export type PlacementRelink = readonly PhotoMove[] | FolderRename;
+
 /** Points Placements of moved Photos at their new paths; returns `album` itself when none moved. */
-export function relinkPlacements(album: Album, moves: readonly PhotoMove[]): Album {
-  const destinations = new Map(moves.map(({ from, to }) => [from, to]));
+export function relinkPlacements(album: Album, relink: PlacementRelink): Album {
+  let destination: (path: string) => string | undefined;
+  if ("from" in relink) destination = (path) => renamedPath(path, relink);
+  else {
+    const destinations = new Map(relink.map(({ from, to }) => [from, to]));
+    destination = (path) => destinations.get(path);
+  }
   let changed = false;
   const pages = album.pages.map((page) => {
     let pageChanged = false;
     const slots = page.slots.map((slot) => {
-      const to = slot.type === "photo" && slot.placement ? destinations.get(slot.placement.photoPath) : undefined;
+      const to = slot.type === "photo" && slot.placement ? destination(slot.placement.photoPath) : undefined;
       if (to === undefined || slot.type !== "photo" || !slot.placement) return slot;
       pageChanged = true;
       return { ...slot, placement: { ...slot.placement, photoPath: to } };
@@ -28,7 +48,8 @@ function fileName(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1);
 }
 
-function parentFolder(path: string): string {
+/** The Folder holding path ("" is the Library root). */
+export function parentFolder(path: string): string {
   const separator = path.lastIndexOf("/");
   return separator < 0 ? "" : path.slice(0, separator);
 }
@@ -88,6 +109,19 @@ export function folderNameProblem(name: string, siblings: readonly string[]): st
   return null;
 }
 
+/**
+ * Why `folder` can't be renamed to `name` next to `siblings` (the names in its parent, its own
+ * included), or null if it can. The Library root and protected Folders are never renamed.
+ */
+export function folderRenameProblem(folder: string, name: string, siblings: readonly string[]): string | null {
+  if (folder === "") return "The Library itself can't be renamed.";
+  if (isProtectedFolder(folder)) return `The Folder "${folder}" can't be renamed.`;
+  const current = fileName(folder);
+  if (name.trim() === current) return `The Folder is already called "${current}".`;
+  // Changing only the case of the name is allowed, so the Folder's own name doesn't count as taken.
+  return folderNameProblem(name, siblings.filter((sibling) => sibling.toLowerCase() !== current.toLowerCase()));
+}
+
 /** An Album file directly in the Library root, rewritten with the moved Photos' new paths. */
 export interface AlbumRewrite {
   /** The file name, such as "Christmas.phalbum". */
@@ -104,6 +138,8 @@ export interface SortingPorts {
   rootAlbums(root: string): Promise<{ name: string; json: string }[]>;
   /** Moves the Photo files and rewrites the Albums together: if any step fails, nothing changes. */
   movePhotos(root: string, moves: PhotoMove[], albums: AlbumRewrite[]): Promise<void>;
+  /** Renames the Folder and rewrites the Albums together: if any step fails, nothing changes. */
+  renameFolder(root: string, rename: FolderRename, albums: AlbumRewrite[]): Promise<void>;
 }
 
 export interface SendPhotosRequest {
@@ -122,10 +158,46 @@ export async function sendPhotosToFolder(ports: SortingPorts, request: SendPhoto
   const { root, photos, target, openAlbum } = request;
   const moves = planPhotoMove(photos, target, await ports.folderNames(root, target));
   if (moves.length === 0) return { moves, openAlbum: null };
+  const { albums, relinkedOpen } = await albumRewrites(ports, root, openAlbum, moves);
+  await ports.movePhotos(root, moves, albums);
+  return { moves, openAlbum: relinkedOpen };
+}
+
+export interface RenameFolderRequest {
+  root: string;
+  /** The Library-relative path of the Folder to rename. */
+  folder: string;
+  /** The new name; surrounding spaces are ignored. */
+  name: string;
+  /** The Album being edited, which may have changes not yet saved to its file. */
+  openAlbum: { name: string; album: Album } | null;
+}
+
+/**
+ * Renames a Folder, with everything under it, and keeps every Album directly in the Library root
+ * pointing at its Photos. Returns the rename and the open Album relinked, or null if it was unaffected.
+ */
+export async function renameFolder(ports: SortingPorts, request: RenameFolderRequest): Promise<{ rename: FolderRename; openAlbum: Album | null }> {
+  const { root, folder, name, openAlbum } = request;
+  const parent = parentFolder(folder);
+  const problem = folderRenameProblem(folder, name, folder ? await ports.folderNames(root, parent) : []);
+  if (problem) throw new Error(problem);
+  const trimmed = name.trim();
+  const rename = { from: folder, to: parent ? `${parent}/${trimmed}` : trimmed };
+  const { albums, relinkedOpen } = await albumRewrites(ports, root, openAlbum, rename);
+  await ports.renameFolder(root, rename, albums);
+  return { rename, openAlbum: relinkedOpen };
+}
+
+/**
+ * The Albums in the Library root that `relink` changes, taking the open Album from memory.
+ * Throws before anything is changed if an Album can't be read.
+ */
+async function albumRewrites(ports: SortingPorts, root: string, openAlbum: SendPhotosRequest["openAlbum"], relink: PlacementRelink) {
   const files = await ports.rootAlbums(root);
   const openFile = openAlbum && (files.find((file) => file.name === openAlbum.name)
     ?? files.find((file) => file.name.toLowerCase() === openAlbum.name.toLowerCase()));
-  const relinkedOpen = openAlbum && relinkPlacements(openAlbum.album, moves);
+  const relinkedOpen = openAlbum && relinkPlacements(openAlbum.album, relink);
   const openChanged = relinkedOpen !== null && relinkedOpen !== openAlbum?.album;
   if (openChanged && !openFile) throw new Error(`Could not find the open Album "${openAlbum!.name}" in the Library.`);
   const albums: AlbumRewrite[] = [];
@@ -140,9 +212,8 @@ export async function sendPhotosToFolder(ports: SortingPorts, request: SendPhoto
     } catch (cause) {
       throw new Error(`Could not update the Album "${file.name}": ${String(cause)}`);
     }
-    const relinked = relinkPlacements(album, moves);
+    const relinked = relinkPlacements(album, relink);
     if (relinked !== album) albums.push({ name: file.name, original: file.json, updated: serializeAlbum(relinked) });
   }
-  await ports.movePhotos(root, moves, albums);
-  return { moves, openAlbum: openChanged ? relinkedOpen : null };
+  return { albums, relinkedOpen: openChanged ? relinkedOpen : null };
 }
