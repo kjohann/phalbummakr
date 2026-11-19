@@ -1,8 +1,8 @@
 import { useEffect, useMemo, type ReactNode } from "react";
-import { Group, Rect, Text } from "react-konva";
+import { Group, Image as KonvaImage, Rect, Text } from "react-konva";
 import {
-  moveSlot, pageDimensions, resizeSlot, POINTS_PER_MM, TEXT_LINE_HEIGHT,
-  type Album, type PageFormat, type Rectangle, type TextSlot,
+  fitPhotoRect, moveSlot, pageDimensions, resizeSlot, POINTS_PER_MM, TEXT_LINE_HEIGHT,
+  type Album, type Crop, type PageFormat, type Rectangle, type Slot, type TextSlot,
 } from "../core";
 import { snapSlot, type SnapGuide } from "./slotSnapping";
 import { fitTextSlots, measureTextSlot, textFontStyle } from "./textLayout";
@@ -59,6 +59,43 @@ export function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, t
       return Math.abs(actual[key] - snapped.rect[key]) < 1e-9;
     }),
   };
+}
+
+/** Positions a Slot on the canvas and turns it by its Slot rotation; `children` draw in the Slot's own upright box. */
+export function SlotFrame({ slot, rect, children }: {
+  slot: Slot; rect: Rectangle; children: (local: Rectangle) => ReactNode;
+}) {
+  const sideways = slot.rotation === 90 || slot.rotation === 270;
+  const local = { x: 0, y: 0, width: sideways ? rect.height : rect.width, height: sideways ? rect.width : rect.height };
+  return (
+    <Group x={rect.x + rect.width / 2} y={rect.y + rect.height / 2}
+      offsetX={local.width / 2} offsetY={local.height / 2} rotation={slot.rotation ?? 0}>
+      {children(local)}
+    </Group>
+  );
+}
+
+export type PhotoSource = HTMLImageElement | HTMLCanvasElement;
+
+/** Draws a Placement's image in its Slot's box: the Crop filling the box, or with Fit, the whole image centred on white. */
+export function PhotoImage({ x, y, width, height, image, crop, fit, opacity = 1 }: {
+  x: number; y: number; width: number; height: number; image: PhotoSource; crop: Crop; fit: boolean; opacity?: number;
+}) {
+  const imageWidth = image instanceof HTMLImageElement ? image.naturalWidth : image.width;
+  const imageHeight = image instanceof HTMLImageElement ? image.naturalHeight : image.height;
+  const bounds = fit ? fitPhotoRect(imageWidth / imageHeight, width / height) : { x: 0, y: 0, width: 1, height: 1 };
+  return (
+    <>
+      {fit && <Rect x={x} y={y} width={width} height={height} fill="#ffffff" />}
+      <KonvaImage image={image} x={x + bounds.x * width} y={y + bounds.y * height}
+        width={bounds.width * width} height={bounds.height * height} opacity={opacity} crop={{
+          x: crop.x * imageWidth,
+          y: crop.y * imageHeight,
+          width: crop.width * imageWidth,
+          height: crop.height * imageHeight,
+        }} />
+    </>
+  );
 }
 
 /** Draws a Text Slot's text, or, where `showPlaceholder` is set and the Slot is empty, its placeholder greyed out. */

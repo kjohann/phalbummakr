@@ -54,7 +54,7 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 009 | [Text Slots](009-text-slots.md)                              | 005        | done   |
 | 010 | [Layouts, the Layout Library and Layout mode](010-layouts.md) | 006, 009, 013, 014, 023, 024 | done   |
 | 011 | [Undo and redo](011-undo-redo.md)                            | 006, 018, 019, 023 | done   |
-| 012 | [Page Export](012-page-export.md)                            | 007, 009, 017 | todo   |
+| 012 | [Page Export](012-page-export.md)                            | 007, 009, 017 | done   |
 | 013 | [Slot snapping](013-slot-snapping.md)                         | 006, 009   | done   |
 | 014 | [Slot rotation](014-slot-rotation.md)                         | 006, 009   | done   |
 | 015 | [Drag-to-swap Placements](015-drag-to-swap.md)                | 006, 007   | done   |

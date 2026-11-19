@@ -1,4 +1,5 @@
 mod albums;
+mod exports;
 mod fonts;
 mod layouts;
 mod photos;
@@ -216,6 +217,76 @@ async fn photo_page_thumbnail(
     .map_err(|error| error.to_string())?
 }
 
+#[tauri::command]
+async fn export_photo(
+    root: String,
+    path: String,
+    request: exports::PhotoRequest,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        exports::export_photo(Path::new(&root), &path, request)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map(tauri::ipc::Response::new)
+}
+
+#[tauri::command]
+async fn missing_photos(root: String, paths: Vec<String>) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || exports::missing_photos(Path::new(&root), &paths))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn prepare_export(root: String, name: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || exports::prepare_folder(Path::new(&root), &name))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportPageHeader {
+    root: String,
+    name: String,
+    file_name: String,
+    width: u32,
+    height: u32,
+    dpi: u16,
+}
+
+/// Takes a raw body, so a Page's pixels skip JSON: a little-endian `u32` length,
+/// that many bytes of JSON `ExportPageHeader`, then the Page's RGBA pixels.
+#[tauri::command]
+async fn write_export_page(request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    let tauri::ipc::InvokeBody::Raw(body) = request.body() else {
+        return Err("Expected the Page's pixels as a raw body.".into());
+    };
+    let length = body
+        .get(..4)
+        .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()) as usize)
+        .ok_or("The Page export is incomplete.")?;
+    let header: ExportPageHeader = serde_json::from_slice(
+        body.get(4..4 + length).ok_or("The Page export is incomplete.")?,
+    )
+    .map_err(|error| error.to_string())?;
+    let pixels = body[4 + length..].to_vec();
+    tauri::async_runtime::spawn_blocking(move || {
+        exports::write_page(
+            Path::new(&header.root),
+            &header.name,
+            &header.file_name,
+            &pixels,
+            header.width,
+            header.height,
+            header.dpi,
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -241,6 +312,10 @@ pub fn run() {
             photo_thumbnail,
             photo_page_thumbnail,
             photo_preview,
+            export_photo,
+            missing_photos,
+            prepare_export,
+            write_export_page,
             list_system_fonts,
         ])
         .run(tauri::generate_context!())

@@ -748,7 +748,7 @@ it("offers Undo and Redo in the right-hand group, enabled like their shortcuts, 
   render(<><App ports={openAlbumPorts()} /><input aria-label="Some field" /></>);
   await screen.findByText("Original");
   const right = within(screen.getByRole("toolbar", { name: "Commands" }).querySelector<HTMLElement>(".command-document")!);
-  expect(right.getAllByRole("button").map((button) => button.textContent)).toEqual(["Undo", "Redo", "Album Settings…"]);
+  expect(right.getAllByRole("button").map((button) => button.textContent)).toEqual(["Undo", "Redo", "Album Settings…", "Export Pages…"]);
   expect(barButton("Undo").title).toBe("Undo (Ctrl+Z)");
   expect(barButton("Redo").title).toBe("Redo (Ctrl+Y)");
   expect([barButton("Undo").disabled, barButton("Redo").disabled]).toEqual([true, true]);

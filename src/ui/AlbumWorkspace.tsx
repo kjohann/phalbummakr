@@ -4,14 +4,16 @@ import {
   type Album, type AlbumPorts, type HistoryDirection, type PhotoPreviewPorts, type PlacementRelink, type UndoHistory,
 } from "../core";
 import AlbumView from "./AlbumView";
+import ExportDialog from "./ExportDialog";
 import ModalDialog from "./ModalDialog";
+import { tauriPageExportPorts, type PageExportPorts } from "./pageExport";
 import { tauriAlbumPorts } from "./tauriAlbumPorts";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
 import { tauriFontPorts, type FontPorts } from "./tauriFontPorts";
 import { fitTextSlots } from "./textLayout";
 import type { LayoutLibraryState } from "./useLayoutLibrary";
 
-export type AlbumCommandName = "album-settings" | "add-spread" | "add-photo-slot" | "add-text-slot" | "save-as-layout" | "undo" | "redo";
+export type AlbumCommandName = "album-settings" | "add-spread" | "add-photo-slot" | "add-text-slot" | "save-as-layout" | "undo" | "redo" | "export-pages";
 
 /** What the open document can currently undo and redo. */
 export interface HistoryState {
@@ -70,6 +72,7 @@ interface Props {
   active?: boolean;
   layouts?: AlbumLayouts;
   photoMoves?: PhotoMoveLink;
+  exportPorts?: PageExportPorts;
 }
 
 /** The shared Layout Library, and where Album mode lists it: the Layouts tab of the Side pane. */
@@ -78,7 +81,7 @@ export interface AlbumLayouts {
   paneHost: HTMLElement | null;
 }
 
-export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document, suspended = false, bar = {}, active = true, layouts, photoMoves }: Props) {
+export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document, suspended = false, bar = {}, active = true, layouts, photoMoves, exportPorts = tauriPageExportPorts }: Props) {
   const { command, onEditableChange, onHistoryChange } = bar;
   const [names, setNames] = useState<string[]>([]);
   const [current, setCurrent] = useState<{ filename: string; album: Album } | null>(
@@ -86,6 +89,8 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
   );
   const [creating, setCreating] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // The Album as it was when Export Pages was chosen; later edits don't change the export.
+  const [exporting, setExporting] = useState<{ filename: string; album: Album } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
@@ -119,6 +124,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
     if (!command || handledCommand.current === command.serial) return;
     handledCommand.current = command.serial;
     if (command.name === "album-settings" && currentRef.current && !suspended) setSettingsOpen(true);
+    if (command.name === "export-pages" && currentRef.current && !suspended) setExporting(currentRef.current);
   }, [command, suspended]);
 
   function setCurrentAlbum(next: typeof current) {
@@ -348,7 +354,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
           <button type="button" className="button-quiet" onClick={() => setDuplicateWarning(null)}>Dismiss</button>
         </div>
       )}
-      {notice && (
+      {notice && !layoutSaveFailed && (
         <div className="usage-warning" role="status">
           <span>{notice}</span>
           <button type="button" className="button-quiet" onClick={() => setNotice(null)}>Dismiss</button>
@@ -413,6 +419,10 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
                 </div>
               </form>
             </ModalDialog>
+          )}
+          {exporting && (
+            <ExportDialog album={exporting.album} root={root} ports={exportPorts} onClose={() => setExporting(null)}
+              name={exporting.filename.split(/[\\/]/).pop()!.replace(/\.[^.]+$/, "")} />
           )}
           <AlbumView key={current.filename} album={current.album} onChange={changeAlbum} history={history}
             root={root} photoPorts={photoPorts} fontPorts={fontPorts}

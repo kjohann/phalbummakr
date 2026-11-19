@@ -6,6 +6,7 @@ import { addPhotoSlot, addTextSlot, createAlbum, deserializeAlbum, photoUsage, p
 import Workspace, { type AlbumCommand, type AlbumCommandName, type PhotoMoveLink } from "./AlbumWorkspace";
 import PhotoBrowser from "./PhotoBrowser";
 import { PhotoSlotTools } from "./SlotTools";
+import type { PageExportPorts } from "./pageExport";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
 import { useLayoutLibrary } from "./useLayoutLibrary";
 vi.mock("react-konva", () => ({
@@ -63,7 +64,7 @@ function AlbumWorkspace(props: ComponentProps<typeof Workspace>) {
       <div ref={setToolsHost} />
       <button type="button" onClick={() => send("add-photo-slot")}>Add Photo Slot</button>
       <button type="button" onClick={() => send("add-text-slot")}>Add Text Slot</button>
-      {(["album-settings", "add-spread", "save-as-layout", "undo", "redo"] as const).map((name) => (
+      {(["album-settings", "add-spread", "save-as-layout", "undo", "redo", "export-pages"] as const).map((name) => (
         <button key={name} type="button" onClick={() => send(name)}>Bar {name}</button>
       ))}
     </div>
@@ -2290,5 +2291,90 @@ describe("moving Photos while their Album is open", () => {
     await act(() => expect(photoMoves.current!(async () => { throw new Error("Album locked"); })).rejects.toThrow("Album locked"));
     expect([...photoUsage(latest())]).toEqual([["a.jpg", 1]]);
     await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages).toHaveLength(4));
+  });
+});
+
+describe("Page Export", () => {
+  function exportAlbum() {
+    let album = createAlbum({ name: "Christmas", pageCount: 4 });
+    album = addPhotoSlot(addPhotoSlot(album, "page-1"), "page-1");
+    album = placePhoto(album, "page-1", album.pages[0].slots[0].id, { path: "a.jpg", width: 300, height: 200, orientation: 1 });
+    album = addTextSlot(album, "page-2");
+    album = setSlotText(album, "page-2", album.pages[1].slots[0].id, "Merry Christmas");
+    return album;
+  }
+
+  function exportPorts() {
+    const photo = document.createElement("canvas");
+    return {
+      photo,
+      ports: {
+        prepare: vi.fn<PageExportPorts["prepare"]>(async () => {}),
+        missing: vi.fn<PageExportPorts["missing"]>(async () => []),
+        photo: vi.fn<PageExportPorts["photo"]>(async () => photo),
+        render: vi.fn<PageExportPorts["render"]>(async () => ({ pixels: new Uint8Array(4), width: 1, height: 1 })),
+        write: vi.fn<PageExportPorts["write"]>(async () => {}),
+      },
+    };
+  }
+
+  it("warns about empty Photo Slots and Pages, then writes every Page in order while showing progress", async () => {
+    const album = exportAlbum();
+    const { ports, photo } = exportPorts();
+    let finishSecond!: () => void;
+    ports.write.mockImplementation(async (_root, _name, fileName) => {
+      if (fileName === "002.jpg") await new Promise<void>((resolve) => { finishSecond = resolve; });
+    });
+    render(<AlbumWorkspace root={"D:\\Photos"} ports={disk().ports} photoPorts={previews()} exportPorts={ports}
+      document={{ path: "D:\\Photos\\Christmas 2026.phalbum", album }} />);
+
+    fireEvent.click(bar().getByRole("button", { name: "Bar export-pages" }));
+    const dialog = within(screen.getByRole("dialog", { name: "Export Pages" }));
+    expect(dialog.getByText("4 Pages will be exported to Exports/Christmas 2026.")).toBeTruthy();
+    expect(dialog.getByText("Page 1 has 1 empty Photo Slot.")).toBeTruthy();
+    expect(dialog.getByText("Pages 3 and 4 are empty.")).toBeTruthy();
+    expect(ports.prepare).not.toHaveBeenCalled();
+
+    fireEvent.click(dialog.getByRole("button", { name: "Export" }));
+    const progress = await dialog.findByRole("progressbar", { name: "Export progress" });
+    await waitFor(() => expect(progress.getAttribute("aria-valuenow")).toBe("1"));
+    expect(progress.getAttribute("aria-valuemax")).toBe("4");
+    expect(dialog.getByText("Exporting Page 2 of 4…")).toBeTruthy();
+    // The editor stays responsive underneath while a Page is being written.
+    expect(screen.getByRole("region", { name: "Album Pages" })).toBeTruthy();
+
+    act(() => finishSecond());
+    expect(await dialog.findByText("Exported 4 Pages to Exports/Christmas 2026.")).toBeTruthy();
+    expect(ports.prepare).toHaveBeenCalledWith("D:\\Photos", "Christmas 2026");
+    expect(ports.photo).toHaveBeenCalledWith("D:\\Photos", expect.objectContaining({ photoPath: "a.jpg" }));
+    expect(ports.render.mock.calls.map(([page]) => page)).toEqual(album.pages);
+    expect(ports.render.mock.calls[0][2]).toEqual(new Map([[album.pages[0].slots[0].id, photo]]));
+    expect(ports.write.mock.calls.map((call) => call.slice(0, 3)))
+      .toEqual(["001.jpg", "002.jpg", "003.jpg", "004.jpg"].map((file) => ["D:\\Photos", "Christmas 2026", file]));
+  });
+
+  it("shows why an export failed and which Photo it could not read", async () => {
+    const { ports } = exportPorts();
+    ports.photo.mockRejectedValue("The system cannot find the file specified.");
+    render(<AlbumWorkspace root={"D:\\Photos"} ports={disk().ports} photoPorts={previews()} exportPorts={ports}
+      document={{ path: "D:\\Photos\\Christmas.phalbum", album: exportAlbum() }} />);
+    fireEvent.click(bar().getByRole("button", { name: "Bar export-pages" }));
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    expect((await screen.findByRole("alert")).textContent)
+      .toBe("Could not export Pages: Could not read a.jpg for Page 1: The system cannot find the file specified.");
+    expect(ports.write).not.toHaveBeenCalled();
+  });
+
+  it("leaves an earlier export alone when Photos are missing", async () => {
+    const { ports } = exportPorts();
+    ports.missing.mockResolvedValue(["a.jpg"]);
+    render(<AlbumWorkspace root={"D:\\Photos"} ports={disk().ports} photoPorts={previews()} exportPorts={ports}
+      document={{ path: "D:\\Photos\\Christmas.phalbum", album: exportAlbum() }} />);
+    fireEvent.click(bar().getByRole("button", { name: "Bar export-pages" }));
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    expect((await screen.findByRole("alert")).textContent)
+      .toBe("Could not export Pages: Missing Photos must be relinked or replaced first: a.jpg");
+    expect(ports.missing).toHaveBeenCalledWith("D:\\Photos", ["a.jpg"]);
+    expect(ports.prepare).not.toHaveBeenCalled();
   });
 });

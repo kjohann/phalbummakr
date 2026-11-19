@@ -547,6 +547,7 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
     { id: "undo", label: "Undo", shortcut: "Control+Z", disabled: !undoEnabled, run: () => actions.current.history("undo") },
     { id: "redo", label: "Redo", shortcut: "Control+Y", disabled: !redoEnabled, run: () => actions.current.history("redo") },
     albumCommand("album-settings", "Album Settings…", { overflow: 2 }),
+    albumCommand("export-pages", "Export Pages…", { overflow: 3 }),
   ] : [
     { id: "new-album", label: "New Album…", disabled: !fileEnabled, run: () => actions.current.newAlbum() },
     { id: "open-album", label: "Open Album…", disabled: !fileEnabled, run: () => actions.current.openAlbum() },

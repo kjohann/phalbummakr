@@ -174,7 +174,7 @@ fn read_photo(root: &Path, path: &Path, warnings: &mut Vec<String>) -> Result<Ph
 
 /// Resolves a Photo path relative to the Library root, rejecting paths that
 /// escape the Library or point into folders the scan hides.
-fn resolve_photo(
+pub(crate) fn resolve_photo(
     root: &Path,
     relative: &str,
 ) -> Result<(std::path::PathBuf, std::path::PathBuf), String> {
@@ -255,6 +255,17 @@ fn cached_rendition(
         .persist(cache_file)
         .map_err(|error| error.to_string())?;
     Ok(bytes)
+}
+
+/// Decodes a Photo's original file, not a preview, turned upright by its EXIF orientation.
+pub(crate) fn upright_original(root: &Path, relative: &str) -> Result<image::DynamicImage, String> {
+    let (root, path) = resolve_photo(root, relative)?;
+    let photo = read_photo(&root, &path, &mut Vec::new())?;
+    let decoded = image::ImageReader::open(&path)
+        .map_err(|error| error.to_string())?
+        .decode()
+        .map_err(|error| error.to_string())?;
+    Ok(orient(decoded, photo.orientation))
 }
 
 fn orient(image: image::DynamicImage, orientation: u32) -> image::DynamicImage {
@@ -365,14 +376,15 @@ pub fn preview(root: &Path, cache: &Path, relative: &str) -> Result<Vec<u8>, Str
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn write_photo(path: &std::path::Path) {
         image::RgbImage::new(40, 20).save(path).unwrap();
     }
 
-    fn write_exif_photo(path: &Path, orientation: u16) {
+    /// A 40 x 20 JPEG, red on the left half and green on the top half, with an EXIF orientation.
+    pub(crate) fn write_exif_photo(path: &Path, orientation: u16) {
         let pixels = image::RgbImage::from_fn(40, 20, |x, y| {
             image::Rgb([
                 if x < 20 { 240 } else { 10 },

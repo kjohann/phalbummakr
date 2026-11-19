@@ -1,16 +1,16 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
-import { Group, Image as KonvaImage, Layer, Rect, Stage } from "react-konva";
+import { Layer, Rect, Stage } from "react-konva";
 import {
   addPage, addPhotoSlot, addTextSlot, albumSpreads, applyLayout, deletePage, deleteSlot, duplicatePage, movePage, pageDimensions,
-  fitPhotoRect, panCrop, placePhoto, placePhotoOnPage, placementDisplayCrop, photoUsage, rotateSlot, saveLayoutFromPage, setPlacementCrop,
+  panCrop, placePhoto, placePhotoOnPage, placementDisplayCrop, photoUsage, rotateSlot, saveLayoutFromPage, setPlacementCrop,
   setPlacementFit, setSlotText, setTextStyle, swapPlacements, zoomCrop, POINTS_PER_MM, TEXT_LINE_HEIGHT,
   type Album, type AppliedLayout, type HistoryDirection, type Crop, type Page, type PageFormat, type PhotoPreviewPorts, type Slot, type SlotAddress, type TextStyle,
 } from "../core";
 import { hasLayoutDrag, hasPhotoDrag, readLayoutDrag, readPhotoDrag, writeLayoutDrag } from "./photoDrag";
 import { historyShortcut } from "./historyShortcut";
 import LayoutLibraryPane, { plural } from "./LayoutLibraryPane";
-import { applySlotDrag, LayerPage, SnapGuides, TextContent, type SlotDrag } from "./pageCanvas";
+import { applySlotDrag, LayerPage, PhotoImage, SlotFrame, SnapGuides, TextContent, type SlotDrag } from "./pageCanvas";
 import type { FontPorts } from "./tauriFontPorts";
 import { fitTextSlots } from "./textLayout";
 import TextSlotTools from "./TextSlotTools";
@@ -559,12 +559,9 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
                   {page.slots.map((slot) => {
                     const rect = slotRect(slot, originX + side * (pageWidth + gap) + bleedMm * scale);
                     const slotId = `${page.id}:${slot.id}`;
-                    const sideways = slot.rotation === 90 || slot.rotation === 270;
-                    const localRect = { x: 0, y: 0, width: sideways ? rect.height : rect.width, height: sideways ? rect.width : rect.height };
                     return (
-                      <Group key={slotId} x={rect.x + rect.width / 2} y={rect.y + rect.height / 2}
-                        offsetX={localRect.width / 2} offsetY={localRect.height / 2} rotation={slot.rotation ?? 0}>
-                        {slot.type === "text" ? (
+                      <SlotFrame key={slotId} slot={slot} rect={rect}>
+                        {(localRect) => slot.type === "text" ? (
                           <TextContent slot={slot} id={slotId} rect={localRect} scale={scale} format={album.pageFormat}
                             hidden={editingText === slotId} showPlaceholder onOverflow={reportTextOverflow} />
                         ) : slot.placement ? (
@@ -574,7 +571,7 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
                               ? previewStates[slotId].attempt : 0}
                             slotId={slotId} onStatus={reportPreviewStatus} />
                         ) : <Rect {...localRect} fill="#e8ebe6" stroke="#9aa49c" strokeWidth={1} dash={[4, 3]} />}
-                      </Group>
+                      </SlotFrame>
                     );
                   })}
                 </LayerPage>
@@ -1048,11 +1045,8 @@ function VisiblePagePreview({ page, format, root, photoPorts, width, height, sca
       <Layer clipX={0} clipY={0} clipWidth={width} clipHeight={height}>
         {page.slots.map((slot) => {
           const rect = { x: slot.x * width, y: slot.y * height, width: slot.width * width, height: slot.height * height };
-          const sideways = slot.rotation === 90 || slot.rotation === 270;
-          const local = { x: 0, y: 0, width: sideways ? rect.height : rect.width, height: sideways ? rect.width : rect.height };
-          return <Group key={slot.id} x={rect.x + rect.width / 2} y={rect.y + rect.height / 2}
-            offsetX={local.width / 2} offsetY={local.height / 2} rotation={slot.rotation ?? 0}>
-            {slot.type === "text"
+          return <SlotFrame key={slot.id} slot={slot} rect={rect}>
+            {(local) => slot.type === "text"
               ? <TextContent slot={slot} id={slot.id} rect={local} scale={scale} format={format} hidden={false}
                 showPlaceholder={false} onOverflow={ignoreOverflow} />
               : slot.placement
@@ -1060,7 +1054,7 @@ function VisiblePagePreview({ page, format, root, photoPorts, width, height, sca
                   root={root} path={slot.placement.photoPath} photoPorts={photoPorts} thumbnailRequest={photoPorts.pageThumbnail}
                   attempt={0} slotId={slot.id} onStatus={ignorePreviewStatus} />
                 : <Rect {...local} fill="#e8ebe6" />}
-          </Group>;
+          </SlotFrame>;
         })}
       </Layer>
     </Stage>;
@@ -1125,21 +1119,5 @@ function PlacementImage({ x, y, width, height, crop, fit, root, path, photoPorts
   if (!visibleImage) {
     return <Rect x={x} y={y} width={width} height={height} fill={image === null ? "#efe1da" : "#eef0ec"} />;
   }
-  const fitBounds = fit ? fitPhotoRect(visibleImage.naturalWidth / visibleImage.naturalHeight, width / height) : null;
-  const imageX = fitBounds ? x + fitBounds.x * width : x;
-  const imageY = fitBounds ? y + fitBounds.y * height : y;
-  const imageWidth = fitBounds ? fitBounds.width * width : width;
-  const imageHeight = fitBounds ? fitBounds.height * height : height;
-  return (
-    <>
-      {fit && <Rect x={x} y={y} width={width} height={height} fill="#ffffff" />}
-      <KonvaImage image={visibleImage} x={imageX} y={imageY} width={imageWidth} height={imageHeight}
-        opacity={image ? 1 : 0.45} crop={{
-          x: crop.x * visibleImage.naturalWidth,
-          y: crop.y * visibleImage.naturalHeight,
-          width: crop.width * visibleImage.naturalWidth,
-          height: crop.height * visibleImage.naturalHeight,
-        }} />
-    </>
-  );
+  return <PhotoImage x={x} y={y} width={width} height={height} image={visibleImage} crop={crop} fit={fit} opacity={image ? 1 : 0.45} />;
 }
