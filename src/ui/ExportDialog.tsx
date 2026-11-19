@@ -25,6 +25,16 @@ export default function ExportDialog({ album, root, name, ports, onClose }: {
   const warnings = exportWarnings(album);
   const destination = `Exports/${name}`;
   const running = phase.name === "running";
+  const [openError, setOpenError] = useState<string | null>(null);
+
+  async function openFolder() {
+    setOpenError(null);
+    try {
+      await ports.openFolder(root, name);
+    } catch (cause) {
+      setOpenError(`Could not open the Export folder: ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
+  }
 
   async function run() {
     const abort = new AbortController();
@@ -73,12 +83,14 @@ export default function ExportDialog({ album, root, name, ports, onClose }: {
           </p>
         </>}
         {phase.name === "error" && <p className="error-banner" role="alert">{phase.message}</p>}
+        {openError && <p className="error-banner" role="alert">{openError}</p>}
         <div className="album-toolbar">
           {phase.name === "confirm" && <>
             <button type="button" className="button-primary" onClick={() => void run()}>Export</button>
             <button type="button" className="button-quiet" onClick={onClose}>Cancel</button>
           </>}
           {running && <button type="button" className="button-quiet" onClick={() => controller.current?.abort()}>Cancel</button>}
+          {phase.name === "done" && <button type="button" className="button-primary" onClick={() => void openFolder()}>Open Export folder</button>}
           {!running && phase.name !== "confirm" && <button type="button" className="button-quiet" onClick={onClose}>Close</button>}
         </div>
       </div>

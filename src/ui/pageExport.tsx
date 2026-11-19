@@ -22,6 +22,8 @@ export interface PageExportPorts {
   prepare(root: string, name: string): Promise<void>;
   /** Which of these Photos no longer exist in the Library. */
   missing(root: string, photoPaths: string[]): Promise<string[]>;
+  /** Shows `Exports/<name>` in the system file manager. */
+  openFolder(root: string, name: string): Promise<void>;
   /** The upright original of a Photo, cropped and resampled to the pixel box it fills. */
   photo(root: string, photo: ExportPhoto): Promise<PhotoSource>;
   render(page: Page, format: PageFormat, photos: ReadonlyMap<string, PhotoSource>): Promise<RenderedPage>;
@@ -140,6 +142,7 @@ function photoCanvas(bytes: ArrayBuffer): HTMLCanvasElement {
 export const tauriPageExportPorts: PageExportPorts = {
   prepare: (root, name) => invoke("prepare_export", { root, name }),
   missing: (root, photoPaths) => invoke<string[]>("missing_photos", { root, paths: photoPaths }),
+  openFolder: (root, name) => invoke("open_export_folder", { root, name }),
   async photo(root, { photoPath, crop, fit, width, height }) {
     return photoCanvas(await invoke<ArrayBuffer>("export_photo", { root, path: photoPath, request: { crop, fit, width, height } }));
   },

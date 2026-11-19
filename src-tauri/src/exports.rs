@@ -81,6 +81,15 @@ fn export_folder(root: &Path, name: &str) -> Result<PathBuf, String> {
     }
 }
 
+/// `Exports/<name>` under the Library root, once an export has created it.
+pub fn existing_export_folder(root: &Path, name: &str) -> Result<PathBuf, String> {
+    let folder = export_folder(root, name)?;
+    if !folder.is_dir() {
+        return Err("The Export folder does not exist. Export the Pages again.".into());
+    }
+    Ok(folder)
+}
+
 /// Page files are numbered with at least three digits: `001.jpg`, `002.jpg` and so on.
 fn is_page_file(name: &str) -> bool {
     name.strip_suffix(".jpg")
@@ -227,6 +236,18 @@ mod tests {
             .collect();
         left.sort();
         assert_eq!(left, ["01.jpg", "cover.jpg", "notes.txt"]);
+    }
+
+    #[test]
+    fn only_an_existing_export_folder_of_the_album_can_be_opened() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(existing_export_folder(dir.path(), "Christmas").is_err());
+        prepare_folder(dir.path(), "Christmas").unwrap();
+        assert_eq!(
+            existing_export_folder(dir.path(), "Christmas").unwrap(),
+            dir.path().join("Exports").join("Christmas")
+        );
+        assert!(existing_export_folder(dir.path(), "..").is_err());
     }
 
     #[test]

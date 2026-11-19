@@ -2,6 +2,8 @@
 
 Status: done · Depends on: 007, 009, 017
 
+Addendum: [012 addendum – Open the Export folder](012-addendum.md)
+
 ## What
 
 Export every Page as a print-ready image to upload to a Print Provider as full-page photos.

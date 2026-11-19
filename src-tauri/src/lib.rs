@@ -239,6 +239,16 @@ async fn missing_photos(root: String, paths: Vec<String>) -> Result<Vec<String>,
 }
 
 #[tauri::command]
+async fn open_export_folder(root: String, name: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let folder = exports::existing_export_folder(Path::new(&root), &name)?;
+        tauri_plugin_opener::open_path(folder, None::<&str>).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn prepare_export(root: String, name: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || exports::prepare_folder(Path::new(&root), &name))
         .await
@@ -314,6 +324,7 @@ pub fn run() {
             photo_preview,
             export_photo,
             missing_photos,
+            open_export_folder,
             prepare_export,
             write_export_page,
             list_system_fonts,

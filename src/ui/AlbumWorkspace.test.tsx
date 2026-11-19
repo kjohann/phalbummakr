@@ -2311,6 +2311,7 @@ describe("Page Export", () => {
       ports: {
         prepare: vi.fn<PageExportPorts["prepare"]>(async () => {}),
         missing: vi.fn<PageExportPorts["missing"]>(async () => []),
+        openFolder: vi.fn<PageExportPorts["openFolder"]>(async () => {}),
         photo: vi.fn<PageExportPorts["photo"]>(async () => photo),
         render: vi.fn<PageExportPorts["render"]>(async () => ({ pixels: new Uint8Array(4), width: 1, height: 1 })),
         write: vi.fn<PageExportPorts["write"]>(async () => {}),
@@ -2363,6 +2364,28 @@ describe("Page Export", () => {
     expect((await screen.findByRole("alert")).textContent)
       .toBe("Could not export Pages: Could not read a.jpg for Page 1: The system cannot find the file specified.");
     expect(ports.write).not.toHaveBeenCalled();
+  });
+
+  it("opens the Export folder once the export has finished, and says why when it cannot", async () => {
+    const { ports } = exportPorts();
+    let finish!: () => void;
+    ports.write.mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));
+    render(<AlbumWorkspace root={"D:\\Photos"} ports={disk().ports} photoPorts={previews()} exportPorts={ports}
+      document={{ path: "D:\\Photos\\Christmas.phalbum", album: createAlbum({ name: "Christmas", pageCount: 2 }) }} />);
+    fireEvent.click(bar().getByRole("button", { name: "Bar export-pages" }));
+    const dialog = within(screen.getByRole("dialog", { name: "Export Pages" }));
+    fireEvent.click(dialog.getByRole("button", { name: "Export" }));
+    await waitFor(() => expect(ports.write).toHaveBeenCalledTimes(1));
+    expect(dialog.queryByRole("button", { name: "Open Export folder" })).toBeNull();
+    ports.write.mockResolvedValue(undefined);
+    act(() => finish());
+
+    fireEvent.click(await dialog.findByRole("button", { name: "Open Export folder" }));
+    await waitFor(() => expect(ports.openFolder).toHaveBeenCalledWith("D:\\Photos", "Christmas"));
+    ports.openFolder.mockRejectedValueOnce("Access is denied.");
+    fireEvent.click(dialog.getByRole("button", { name: "Open Export folder" }));
+    expect((await dialog.findByRole("alert")).textContent).toBe("Could not open the Export folder: Access is denied.");
+    expect(dialog.getByText("Exported 2 Pages to Exports/Christmas.")).toBeTruthy();
   });
 
   it("leaves an earlier export alone when Photos are missing", async () => {
