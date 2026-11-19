@@ -7,9 +7,10 @@ import { createAlbum, newLayout, serializeAlbum } from "../core";
 import App, { type DocumentPorts } from "./App";
 import type { LayoutLibraryState } from "./useLayoutLibrary";
 
-type MenuEntry = { id?: string; text: string; enabled?: boolean; checked?: boolean; action?: () => void; items?: MenuEntry[] };
+type MenuEntry = { id?: string; text: string; enabled?: boolean; checked?: boolean; action?: () => void; items?: MenuEntry[]; nativeId?: string };
 const native = vi.hoisted(() => ({
   enabled: false, items: [] as MenuEntry[], menus: [] as MenuEntry[],     installed: vi.fn(), update: vi.fn(), released: vi.fn(), title: vi.fn(), inactiveMounts: 0,
+  handlers: new Map<string, () => void>(), generatedIds: 0,
 }));
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => native.enabled, invoke: vi.fn() }));
 const layoutDisk = vi.hoisted(() => ({ json: null as string | null }));
@@ -28,6 +29,17 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 vi.mock("@tauri-apps/api/menu", () => ({
   Menu: { new: async (menu: { items: MenuEntry[] }) => {
+    // Like Tauri, clicks are routed through handlers keyed by item id, and releasing an item drops its id's handler.
+    const withActions: MenuEntry[] = [];
+    const register = (entries: MenuEntry[]) => entries.forEach((entry) => {
+      if (entry.action) {
+        entry.nativeId = entry.id ?? `generated-${++native.generatedIds}`;
+        native.handlers.set(entry.nativeId, entry.action);
+        withActions.push(entry);
+      }
+      register(entry.items ?? []);
+    });
+    register(menu.items);
     native.menus = menu.items;
     native.items = menu.items[0].items ?? [];
     return {
@@ -46,7 +58,7 @@ vi.mock("@tauri-apps/api/menu", () => ({
           close: async () => { native.released(id); },
         } : null;
       },
-      close: async () => {},
+      close: async () => { withActions.forEach((entry) => native.handlers.delete(entry.nativeId!)); },
     };
   } },
 }));
@@ -138,8 +150,25 @@ afterEach(() => {
   native.released.mockClear();
   native.title.mockClear();
   native.inactiveMounts = 0;
+  native.handlers.clear();
   layoutDisk.json = null;
 });
+
+/** Clicks a native File menu entry by its text path, through the handler Tauri would route the click to. */
+async function chooseMenu(...path: string[]) {
+  let entries = native.items;
+  let entry: MenuEntry | undefined;
+  for (const text of path) {
+    entry = entries.find((candidate) => candidate.text === text);
+    if (!entry) throw new Error(`No File menu entry ${path.join(" > ")}`);
+    entries = entry.items ?? [];
+  }
+  const handler = native.handlers.get(entry!.nativeId!);
+  if (!handler) throw new Error(`File menu entry ${path.join(" > ")} no longer reaches the app`);
+  await act(async () => handler());
+}
+
+const releasedIds = () => native.released.mock.calls.map(([id]) => String(id).replace(/#\d+$/, ""));
 
 it("offers no Preferences in the File menu, as undo replaced the deletion questions", async () => {
   native.enabled = true;
@@ -327,8 +356,8 @@ it("opens every Album in Album mode, whichever mode the previous Album was left 
   await screen.findByText("Original");
   fireEvent.click(modeGroup().getByRole("button", { name: "Sort" }));
   await waitFor(() => expect(native.items.find((entry) => entry.text === "Close Album")?.enabled).toBe(true));
-  await act(async () => native.items.find((entry) => entry.text === "Close Album")!.action!());
-  fireEvent.click(await screen.findByRole("button", { name: "D:\\Photos\\album.phalbum" }));
+  await chooseMenu("Close Album");
+  fireEvent.click(await screen.findByTitle("D:\\Photos\\album.phalbum"));
   await screen.findByText("Original");
   expect(modeGroup().getByRole("button", { name: "Album" }).getAttribute("aria-pressed")).toBe("true");
   expect(native.inactiveMounts).toBe(0);
@@ -373,7 +402,7 @@ it("updates File menu availability without reinstalling the native menu during e
     expect(native.installed).toHaveBeenCalledTimes(installs);
   }
   for (const id of ["file", "new-album", "open-album", "open-recent", "close-album"]) {
-    expect(native.released).toHaveBeenCalledWith(id);
+    expect(releasedIds()).toContain(id);
   }
 });
 
@@ -402,7 +431,7 @@ it("reports native menu update failures and releases the retrieved item and subm
   native.update.mockRejectedValueOnce(new Error("Menu update denied"));
   fireEvent.click(screen.getByRole("button", { name: "Begin mock edit" }));
   expect((await screen.findByRole("alert")).textContent).toContain("Menu update denied");
-  expect(native.released.mock.calls).toEqual([["new-album"], ["file"]]);
+  expect(releasedIds()).toEqual(["new-album", "file"]);
   expect(native.installed).toHaveBeenCalledTimes(installs);
 });
 
@@ -448,7 +477,7 @@ it("reports an odd Page count when opening an Album without replacing the curren
   render(<App ports={ports} />);
   await screen.findByText("Original");
   await waitFor(() => expect(native.items.some((entry) => entry.text === "Open Album…")).toBe(true));
-  await act(async () => native.items.find((entry) => entry.text === "Open Album…")!.action!());
+  await chooseMenu("Open Album…");
   expect((await screen.findByRole("alert")).textContent).toMatch(/even number between 2 and 10000/i);
   expect(screen.getByText("Original")).toBeTruthy();
   expect(ports.write).not.toHaveBeenCalled();
@@ -471,10 +500,10 @@ it("removes a missing recent Album when selected and reports it", async () => {
     chooseOpen: async () => null,
   };
   render(<App ports={ports} />);
-  fireEvent.click(await screen.findByRole("button", { name: missing }));
+  fireEvent.click(await screen.findByTitle(missing));
   expect((await screen.findByRole("alert")).textContent).toContain("no longer exists");
   expect(ports.forget).toHaveBeenCalledWith(missing);
-  expect(screen.queryByRole("button", { name: missing })).toBeNull();
+  expect(screen.queryByTitle(missing)).toBeNull();
   expect(ports.read).not.toHaveBeenCalled();
 });
 
@@ -495,7 +524,7 @@ it("returns to the start screen when the last Album has disappeared", async () =
     chooseOpen: async () => null,
   };
   render(<App ports={ports} />);
-  await screen.findByRole("heading", { name: "Open an Album" });
+  await screen.findByRole("heading", { name: "No Album open" });
   expect(screen.getByRole("alert").textContent).toContain(path);
   expect(ports.forget).toHaveBeenCalledWith(path);
   expect(ports.read).not.toHaveBeenCalled();
@@ -551,7 +580,7 @@ it("preserves the current editor when a new Album is cancelled", async () => {
   await screen.findByText("Original");
   fireEvent.click(screen.getByRole("button", { name: "Edit mock Album" }));
   await waitFor(() => expect(native.items.some((entry) => entry.text === "New Album…")).toBe(true));
-  await act(async () => native.items.find((entry) => entry.text === "New Album…")!.action!());
+  await chooseMenu("New Album…");
   await screen.findByRole("dialog", { name: "Album settings" });
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   expect(screen.getByText("Edited Album")).toBeTruthy();
@@ -577,7 +606,7 @@ it("prevents editing the old Album while another file is opening", async () => {
   render(<App ports={ports} />);
   await screen.findByText("Original");
   await waitFor(() => expect(native.items.some((entry) => entry.text === "Open Album…")).toBe(true));
-  await act(async () => native.items.find((entry) => entry.text === "Open Album…")!.action!());
+  await chooseMenu("Open Album…");
   expect((screen.getByRole("button", { name: "Edit mock Album" }) as HTMLButtonElement).disabled).toBe(true);
   await act(async () => finishRead(serializeAlbum(createAlbum({ name: "Next" }))));
   await screen.findByText("Next");
@@ -602,11 +631,81 @@ it("closes the Album and returns to the start screen without forgetting recents"
   render(<App ports={ports} />);
   await screen.findByText("Original");
   await waitFor(() => expect(native.items.some((entry) => entry.text === "Close Album")).toBe(true));
-  await act(async () => native.items.find((entry) => entry.text === "Close Album")!.action!());
-  await screen.findByRole("heading", { name: "Open an Album" });
-  expect(screen.getByRole("button", { name: path })).toBeTruthy();
+  await chooseMenu("Close Album");
+  await screen.findByRole("heading", { name: "No Album open" });
+  expect(screen.getByTitle(path)).toBeTruthy();
   expect(ports.close).toHaveBeenCalledOnce();
   expect(ports.forget).not.toHaveBeenCalled();
+});
+
+/** Ports over in-memory Album files, remembering recent Albums like the desktop settings do. */
+function diskPorts(files: Record<string, string>, lastAlbum: string | null, choices: { chooseNew?: string; chooseOpen?: string } = {}) {
+  let settings = { lastAlbum, recentAlbums: lastAlbum ? [lastAlbum] : [] as string[] };
+  return {
+    settings: async () => settings,
+    exists: async (path: string) => path in files,
+    read: async (path: string) => files[path],
+    write: vi.fn(async (path: string, json: string) => { files[path] = json; }),
+    remember: vi.fn(async (path: string) => {
+      settings = { lastAlbum: path, recentAlbums: [path, ...settings.recentAlbums.filter((entry) => entry !== path)] };
+    }),
+    forget: vi.fn(),
+    close: vi.fn(async () => { settings = { ...settings, lastAlbum: null }; }),
+    setSidePane: vi.fn(),
+    parent: async () => "D:\\Photos",
+    chooseNew: async () => choices.chooseNew ?? null,
+    chooseOpen: async () => choices.chooseOpen ?? null,
+  } satisfies DocumentPorts;
+}
+
+it("switches Albums from the native File menu after it has been rebuilt for new recent Albums", async () => {
+  native.enabled = true;
+  const first = "D:\\Photos\\first.phalbum";
+  const second = "D:\\Photos\\second.phalbum";
+  const created = "D:\\Photos\\created.phalbum";
+  const ports = diskPorts({
+    [first]: serializeAlbum(createAlbum({ name: "First" })),
+    [second]: serializeAlbum(createAlbum({ name: "Second" })),
+  }, first, { chooseOpen: second, chooseNew: created });
+  render(<App ports={ports} />);
+  await screen.findByText("First");
+  await waitFor(() => expect(native.items.find((entry) => entry.text === "Open Album…")?.enabled).toBe(true));
+
+  await chooseMenu("Open Album…");
+  await screen.findByText("Second");
+  expect(screen.queryByText("First")).toBeNull();
+  await waitFor(() => expect(native.items.find((entry) => entry.text === "Open Recent")?.items?.map((entry) => entry.text))
+    .toEqual([second, first]));
+
+  await chooseMenu("Open Recent", first);
+  await screen.findByText("First");
+  expect(screen.queryByText("Second")).toBeNull();
+
+  await waitFor(() => expect(native.items.find((entry) => entry.text === "New Album…")?.enabled).toBe(true));
+  await chooseMenu("New Album…");
+  fireEvent.change(await screen.findByLabelText("Title"), { target: { value: "Created" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create Album" }));
+  await screen.findByText("Created");
+  expect(screen.queryByText("First")).toBeNull();
+  expect(ports.write).toHaveBeenCalledWith(created, expect.any(String), true);
+
+  await waitFor(() => expect(native.items.find((entry) => entry.text === "Close Album")?.enabled).toBe(true));
+  await chooseMenu("Close Album");
+  await screen.findByRole("heading", { name: "No Album open" });
+  expect(screen.queryByText("Created")).toBeNull();
+  await waitFor(() => expect(native.items.find((entry) => entry.text === "Close Album")?.enabled).toBe(false));
+});
+
+it("lists the five most recent Albums in their own section when no Album is open", async () => {
+  const paths = ["one", "two", "three", "four", "five", "six"].map((name) => `D:\\Photos\\${name}.phalbum`);
+  const files = Object.fromEntries(paths.map((path, index) => [path, serializeAlbum(createAlbum({ name: `Album ${index + 1}` }))]));
+  const ports = { ...diskPorts(files, null), settings: async () => ({ lastAlbum: null, recentAlbums: paths }) };
+  render(<App ports={ports} />);
+  const recent = within(await screen.findByRole("region", { name: "Recent Albums" }));
+  expect(recent.getAllByRole("button").map((button) => button.title)).toEqual(paths.slice(0, 5));
+  expect(recent.getByTitle(paths[1]).textContent).toBe("twoD:\\Photos");
+  fireEvent.click(recent.getByTitle(paths[1]));
+  await screen.findByText("Album 2");
 });
 
 function sidePanePorts(sidePane?: { width: number; collapsed: boolean; compact: boolean }) {
@@ -669,7 +768,7 @@ it("collapses the Side pane to a mode rail and expands it from the selected mode
 it("stops Ctrl+Plus and Ctrl+Minus zooming the page in Album and Layout mode, even with no Album open", async () => {
   const ports = sidePanePorts();
   render(<App ports={{ ...ports, settings: async () => ({ lastAlbum: null, recentAlbums: [] }) }} />);
-  await screen.findByRole("heading", { name: "Open an Album" });
+  await screen.findByRole("heading", { name: "No Album open" });
   for (const init of [{ key: "+" }, { key: "=" }, { key: "-" }, { key: "+", code: "NumpadAdd" }]) {
     const event = new KeyboardEvent("keydown", { ctrlKey: true, bubbles: true, cancelable: true, ...init });
     fireEvent(document.body, event);

@@ -37,6 +37,8 @@ export interface DocumentPorts {
 }
 
 const filters = [{ name: "Album", extensions: ["phalbum"] }];
+const RECENT_MENU_LIMIT = 10;
+const RECENT_WELCOME_LIMIT = 5;
 const desktopPorts: DocumentPorts = {
   settings: () => invoke("album_settings"),
   setSidePane: (pane) => invoke("set_side_pane", { pane }),
@@ -205,6 +207,8 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
   const documentId = useRef(0);
   const menuRef = useRef<Menu | null>(null);
   const menuRecent = useRef<string[] | null>(null);
+  const menuBuild = useRef(0);
+  const menuBuilds = useRef(0);
   const menuQueue = useRef<Promise<void>>(Promise.resolve());
 
   const reportBusy = useCallback((value: boolean) => {
@@ -430,18 +434,21 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
           "close-album": fileEnabled && (document !== null || draft !== null),
         },
       };
+      // Tauri routes menu clicks by item id and drops that id's handler when an old item is released,
+      // so every build gets its own ids, or closing the previous menu would disable the new one.
+      const menuId = (id: string, build = menuBuild.current) => `${id}#${build}`;
       // Replacing a Windows menu briefly resizes the WebView.
       if (menuRef.current && menuRecent.current === recent) {
-        for (const [menuId, enabledById] of Object.entries(enabledByMenu)) {
-          const submenu = await menuRef.current.get(menuId);
-          if (!submenu) throw new Error(`The ${menuId} menu is missing.`);
+        for (const [submenuId, enabledById] of Object.entries(enabledByMenu)) {
+          const submenu = await menuRef.current.get(menuId(submenuId));
+          if (!submenu) throw new Error(`The ${submenuId} menu is missing.`);
           try {
-            if (!("get" in submenu)) throw new Error(`The ${menuId} menu is not a submenu.`);
+            if (!("get" in submenu)) throw new Error(`The ${submenuId} menu is not a submenu.`);
             for (const [id, enabled] of Object.entries(enabledById)) {
-              const item = await submenu.get(id);
-              if (!item) throw new Error(`The ${menuId} menu item ${id} is missing.`);
+              const item = await submenu.get(menuId(id));
+              if (!item) throw new Error(`The ${submenuId} menu item ${id} is missing.`);
               try {
-                if (!("setEnabled" in item)) throw new Error(`The ${menuId} menu item ${id} cannot be enabled.`);
+                if (!("setEnabled" in item)) throw new Error(`The ${submenuId} menu item ${id} cannot be enabled.`);
                 await item.setEnabled(enabled);
               } finally {
                 await item.close();
@@ -454,17 +461,18 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
         return;
       }
       const { file } = enabledByMenu;
+      const build = ++menuBuilds.current;
       // Edit, Album and View commands live in the command bar.
       const menu = await Menu.new({ items: [{
-        id: "file",
+        id: menuId("file", build),
         text: "File",
         items: [
-          { id: "new-album", text: "New Album…", enabled: file["new-album"], action: () => actions.current.newAlbum() },
-          { id: "open-album", text: "Open Album…", enabled: file["open-album"], action: () => actions.current.openAlbum() },
-          { id: "open-recent", text: "Open Recent", enabled: file["open-recent"], items: recent.map((path) => ({
+          { id: menuId("new-album", build), text: "New Album…", enabled: file["new-album"], action: () => actions.current.newAlbum() },
+          { id: menuId("open-album", build), text: "Open Album…", enabled: file["open-album"], action: () => actions.current.openAlbum() },
+          { id: menuId("open-recent", build), text: "Open Recent", enabled: file["open-recent"], items: recent.slice(0, RECENT_MENU_LIMIT).map((path) => ({
             text: path.replaceAll("&", "&&"), action: () => actions.current.openRecent(path),
           })) },
-          { id: "close-album", text: "Close Album", enabled: file["close-album"], action: () => actions.current.closeAlbum() },
+          { id: menuId("close-album", build), text: "Close Album", enabled: file["close-album"], action: () => actions.current.closeAlbum() },
           { text: "Exit", action: () => actions.current.exit() },
         ],
       }] });
@@ -473,6 +481,7 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
         const previous = await menu.setAsAppMenu();
         const previousOwned = menuRef.current;
         menuRef.current = menu;
+        menuBuild.current = build;
         menuRecent.current = recent;
         await previous?.close();
         await previousOwned?.close();
@@ -580,13 +589,22 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
         </form>
       ) : !document && !restoring && (
         <section className="welcome" aria-label="Open an Album">
-          <h1>Open an Album</h1>
-          <button type="button" className="button-primary" onClick={actions.current.newAlbum} disabled={busy}>New Album…</button>
-          <button type="button" className="button-quiet" onClick={actions.current.openAlbum} disabled={busy}>Open Album…</button>
-          {recent.length > 0 && <><h2>Recent Albums</h2><ul>{recent.map((path) => (
-            <li key={path}><button type="button" className="button-quiet" disabled={busy}
-              onClick={() => actions.current.openRecent(path)}>{path}</button></li>
-          ))}</ul></>}
+          <h1>No Album open</h1>
+          <div className="welcome-actions">
+            <button type="button" className="button-primary" onClick={actions.current.newAlbum} disabled={busy}>New Album…</button>
+            <button type="button" className="button-quiet" onClick={actions.current.openAlbum} disabled={busy}>Open Album…</button>
+          </div>
+          {recent.length > 0 && <section className="welcome-recent" aria-labelledby="welcome-recent-heading">
+            <h2 id="welcome-recent-heading">Recent Albums</h2>
+            <ul>{recent.slice(0, RECENT_WELCOME_LIMIT).map((path) => {
+              const separator = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
+              return <li key={path}><button type="button" className="recent-album" disabled={busy} title={path}
+                onClick={() => actions.current.openRecent(path)}>
+                <span className="recent-album-name">{path.slice(separator + 1).replace(/\.phalbum$/i, "")}</span>
+                <span className="recent-album-folder">{path.slice(0, Math.max(separator, 0))}</span>
+              </button></li>;
+            })}</ul>
+          </section>}
         </section>
       )}
       {document && <DocumentWorkspace key={document.id} document={document} onBusyChange={reportBusy}

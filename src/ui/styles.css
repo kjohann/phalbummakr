@@ -1270,6 +1270,73 @@ button.sort-photo--chosen:hover {
   line-height: 1.5;
 }
 
+.welcome-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.welcome-recent {
+  width: min(460px, 100%);
+  margin-top: 32px;
+  text-align: left;
+}
+
+.welcome-recent h2 {
+  margin: 0 0 8px;
+  color: #6f7771;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.welcome-recent ul {
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid #e1e4dd;
+  list-style: none;
+}
+
+.recent-album {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-bottom: 1px solid #e1e4dd;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.recent-album:hover:not(:disabled) {
+  background: #eef0ea;
+}
+
+.recent-album:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.recent-album-name {
+  color: #42644e;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.recent-album-folder {
+  overflow: hidden;
+  color: #6f7771;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 760px) {
   .topbar {
     padding: 0 18px;
