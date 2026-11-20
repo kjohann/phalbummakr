@@ -16,6 +16,17 @@ export function isPageZoomKey(event: KeyboardEvent) {
   return pageZoom(event) !== null;
 }
 
+/** 1 for Ctrl+Plus, -1 for Ctrl+Minus, otherwise null. */
+export function pageZoomStep(event: KeyboardEvent): 1 | -1 | null {
+  const factor = pageZoom(event);
+  return factor === null ? null : factor > 1 ? 1 : -1;
+}
+
+/** Ctrl+0, the webview's reset of page zoom. */
+export function isPageZoomResetKey(event: KeyboardEvent) {
+  return !event.altKey && (event.ctrlKey || event.metaKey) && (event.key === "0" || event.code === "Numpad0");
+}
+
 function slotShortcut(event: KeyboardEvent): SlotShortcut | null {
   if (event.key === "Delete") return { kind: "delete" };
   const factor = pageZoom(event);
@@ -27,7 +38,7 @@ function slotShortcut(event: KeyboardEvent): SlotShortcut | null {
 }
 
 /** Typing in a text field, editing a Text Slot or a dialog, including the New Album form, owns the keyboard. */
-function keyboardTaken(event: KeyboardEvent) {
+export function keyboardTaken(event: KeyboardEvent) {
   const target = event.target;
   if (target instanceof HTMLElement && (target.isContentEditable || target.closest("input, textarea, select"))) return true;
   return document.querySelector("[aria-modal='true']") !== null;

@@ -11,3 +11,4 @@ export * from "./comparison";
 export * from "./folderHistory";
 export * from "./pageExport";
 export * from "./effectiveResolution";
+export * from "./workAreaZoom";

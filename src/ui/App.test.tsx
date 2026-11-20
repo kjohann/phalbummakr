@@ -125,12 +125,16 @@ vi.mock("./PhotoBrowser", () => ({
   default: ({ compact, onCompactChange, sort }: {
     compact?: boolean;
     onCompactChange?: (compact: boolean) => void;
-    sort?: { host: HTMLElement | null; active: boolean; command?: { serial: number }; onChosenChange: (count: number) => void };
+    sort?: { host: HTMLElement | null; active: boolean; command?: { name: string; serial: number };
+      onComparisonChange: (counts: { shown: number; selected: number }) => void; zoom?: number; onZoomChange?: (change: (zoom: number) => number) => void };
   }) => <>
     <p>{compact ? "Compact Photo browser" : "Photo browser"}</p>
     <button type="button" onClick={() => onCompactChange?.(!compact)}>Toggle mock Compact</button>
-    <button type="button" onClick={() => sort?.onChosenChange(2)}>Choose two mock Photos</button>
-    {sort?.command && <p>Send to Folder command {sort.command.serial}</p>}
+    <button type="button" onClick={() => sort?.onComparisonChange({ shown: 3, selected: 2 })}>Select two mock Photos</button>
+    <button type="button" onClick={() => sort?.onComparisonChange({ shown: 1, selected: 1 })}>Show one mock Photo</button>
+    <button type="button" onClick={() => sort?.onZoomChange?.((zoom) => zoom * 1.2)}>Pinch mock work area</button>
+    {sort?.command && <p>Sort command {sort.command.name} {sort.command.serial}</p>}
+    {sort?.zoom !== undefined && <p>Mock work area at {sort.zoom}</p>}
     {sort?.host && createPortal(<p>Mock Sort view {sort.active ? "active" : "inactive"}</p>, sort.host)}
   </>,
 }));
@@ -279,21 +283,101 @@ it("switches between Album, Layouts and Sort modes from the Side pane, keeping t
   expect(barButton("Add Spread")).toBeTruthy();
 });
 
-it("offers Send to Folder… in Sort mode once a Photo is chosen, and sends it to the Photo grid", async () => {
+it("offers Send to Folder… in Sort mode once a Photo is selected, and sends it to the Photo grid", async () => {
   render(<App ports={openAlbumPorts()} />);
   await screen.findByText("Original");
   fireEvent.click(modeGroup().getByRole("button", { name: "Sort" }));
   expect(bar().queryByRole("button", { name: "Add Spread" })).toBeNull();
   expect(barButton("Send to Folder…").disabled).toBe(true);
-  fireEvent.click(screen.getByRole("button", { name: "Choose two mock Photos" }));
+  fireEvent.click(screen.getByRole("button", { name: "Select two mock Photos" }));
   expect(barButton("Send to Folder…").disabled).toBe(false);
   fireEvent.click(barButton("Send to Folder…"));
-  expect(screen.getByText("Send to Folder command 1")).toBeTruthy();
+  expect(screen.getByText("Sort command send-to-folder 1")).toBeTruthy();
   fireEvent.click(modeGroup().getByRole("button", { name: "Album" }));
   expect(bar().queryByRole("button", { name: "Send to Folder…" })).toBeNull();
   expect(screen.getByText("Mock Sort view inactive")).toBeTruthy();
 });
 
+it("clears the Comparison from the command bar or with Escape, unless a menu or dialog is open, and resets the zoom", async () => {
+  render(<App ports={openAlbumPorts()} />);
+  await screen.findByText("Original");
+  fireEvent.click(modeGroup().getByRole("button", { name: "Sort" }));
+  expect(barButton("Clear Comparison").disabled).toBe(true);
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(screen.queryByText(/Sort command clear-comparison/)).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "Show one mock Photo" }));
+  expect(barButton("Clear Comparison").disabled).toBe(false);
+  fireEvent.keyDown(window, { key: "+", ctrlKey: true });
+  expect(screen.getByText("Mock work area at 1.1")).toBeTruthy();
+  fireEvent.click(barButton("Clear Comparison"));
+  expect(screen.getByText("Sort command clear-comparison 1")).toBeTruthy();
+  expect(screen.getByText("Mock work area at 1")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Select two mock Photos" }));
+  fireEvent.keyDown(window, { key: "+", ctrlKey: true });
+  const { unmount } = render(<div role="menu" aria-label="Some menu" />);
+  fireEvent.keyDown(window, { key: "Escape" });
+  unmount();
+  const handled = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+  handled.preventDefault();
+  fireEvent(window, handled);
+  expect(screen.getByText("Sort command clear-comparison 1")).toBeTruthy();
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(screen.getByText("Sort command clear-comparison 2")).toBeTruthy();
+  expect(screen.getByText("Mock work area at 1")).toBeTruthy();
+
+  // Only Sort mode clears the Comparison with Escape.
+  fireEvent.click(screen.getByRole("button", { name: "Select two mock Photos" }));
+  fireEvent.click(modeGroup().getByRole("button", { name: "Album" }));
+  fireEvent.keyDown(window, { key: "Escape" });
+  fireEvent.click(modeGroup().getByRole("button", { name: "Sort" }));
+  expect(screen.getByText("Sort command clear-comparison 2")).toBeTruthy();
+});
+
+it("zooms only Sort mode's work area, from the keyboard, the command bar and the work area, and keeps the zoom between modes", async () => {
+  render(<App ports={openAlbumPorts()} />);
+  await screen.findByText("Original");
+  expect(bar().queryByRole("group", { name: "Zoom" })).toBeNull();
+  fireEvent.click(modeGroup().getByRole("button", { name: "Sort" }));
+  const zoom = within(bar().getByRole("group", { name: "Zoom" }));
+  const reset = () => zoom.getByRole("button", { name: "Reset zoom" });
+  expect(reset().textContent).toBe("100%");
+  const press = (init: KeyboardEventInit) => {
+    const event = new KeyboardEvent("keydown", { ctrlKey: true, bubbles: true, cancelable: true, ...init });
+    fireEvent(document.body, event);
+    return event.defaultPrevented;
+  };
+  expect(press({ key: "=" })).toBe(true);
+  expect(press({ key: "+", code: "NumpadAdd" })).toBe(true);
+  expect(reset().textContent).toBe("125%");
+  expect(screen.getByText("Mock work area at 1.25")).toBeTruthy();
+  expect(press({ key: "-" })).toBe(true);
+  expect(reset().textContent).toBe("110%");
+  expect(press({ key: "0" })).toBe(true);
+  expect(reset().textContent).toBe("100%");
+  fireEvent.click(zoom.getByRole("button", { name: "Zoom out" }));
+  expect(reset().textContent).toBe("90%");
+  fireEvent.click(zoom.getByRole("button", { name: "Zoom in" }));
+  fireEvent.click(zoom.getByRole("button", { name: "Zoom in" }));
+  expect(reset().textContent).toBe("110%");
+  fireEvent.click(reset());
+  expect(reset().textContent).toBe("100%");
+  fireEvent.click(screen.getByRole("button", { name: "Pinch mock work area" }));
+  expect(reset().textContent).toBe("120%");
+  // Ctrl+wheel anywhere else never zooms the app itself.
+  const wheel = new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, bubbles: true, cancelable: true });
+  fireEvent(document.body, wheel);
+  expect(wheel.defaultPrevented).toBe(true);
+  expect(reset().textContent).toBe("120%");
+
+  // In Album mode Ctrl+Plus belongs to the Crop, and the work area's zoom is kept for Sort mode.
+  fireEvent.click(modeGroup().getByRole("button", { name: "Album" }));
+  expect(press({ key: "+" })).toBe(true);
+  expect(press({ key: "0" })).toBe(true);
+  fireEvent.click(modeGroup().getByRole("button", { name: "Sort" }));
+  expect(within(bar().getByRole("group", { name: "Zoom" })).getByRole("button", { name: "Reset zoom" }).textContent).toBe("120%");
+});
 it("routes Layout commands to Layout mode, swapping Add Slot for the Slot tools when a Slot is selected", async () => {
   native.enabled = true;
   render(<App ports={openAlbumPorts()} />);
