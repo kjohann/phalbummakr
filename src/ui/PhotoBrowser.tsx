@@ -8,7 +8,8 @@ import {
 } from "../core";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
 import { folderExists } from "./tauriSortingPorts";
-import { hasPhotoDrag, readPhotoDrag, writePhotoDrag } from "./photoDrag";
+import { hasPhotoDrag, leftElement, readPhotoDrag, writePhotoDrag } from "./photoDrag";
+import { useEdgeScroll } from "./edgeScroll";
 import SortView, { usageLabel } from "./SortView";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
 import SendToFolderDialog from "./SendToFolderDialog";
@@ -64,13 +65,16 @@ type FolderDrop = (folder: string) => {
   onDrop?: (event: DragEvent) => void;
 };
 
+type EdgeScroll = ReturnType<typeof useEdgeScroll>;
+
 function withClass(base: string | undefined, extra: string | undefined) {
   return [base, extra].filter(Boolean).join(" ") || undefined;
 }
 
+/** Folder area rows are shorter than Photo rows, but its columns line up with the grid's. */
 const GRID = {
-  regular: { rowHeight: 160, columnWidth: 140 },
-  compact: { rowHeight: 68, columnWidth: 76 },
+  regular: { rowHeight: 160, folderRowHeight: 96, columnWidth: 140 },
+  compact: { rowHeight: 68, folderRowHeight: 68, columnWidth: 76 },
 };
 const dateFormat = new Intl.DateTimeFormat(undefined, {
   year: "numeric", month: "short", day: "numeric", timeZone: "UTC",
@@ -148,32 +152,59 @@ function FolderTile({ path, compact, onOpen, onContextMenu, drop }: {
         </svg>
         {compact && <span className="photo-name">{name}</span>}
       </span>
-      {!compact && <>
-        <span className="photo-name">{name}</span>
-        <span className="folder-label">Folder</span>
-      </>}
+      {!compact && <span className="photo-name">{name}</span>}
     </button>
   );
 }
 
-function PhotoGrid({ root, photos, generation, folders, usage, compact, onOpenFolder, onDragChange, drop, shown, moving, onPhotoClick, onPhotoContextMenu, onFolderContextMenu, onSpaceContextMenu }: {
+/** Opens the empty-space menu, unless a tile handled the right-click itself. */
+function spaceMenu(onSpaceContextMenu: (event: ReactMouseEvent) => void) {
+  return (event: ReactMouseEvent) => {
+    if (event.defaultPrevented || (event.target instanceof Element && event.target.closest(".photo-cell, .folder-cell"))) return;
+    event.preventDefault();
+    onSpaceContextMenu(event);
+  };
+}
+
+/** The current Folder's subfolders, pinned above the Photo grid: at most two rows, scrolling on their own. */
+function FolderArea({ folders, compact, onOpenFolder, drop, onFolderContextMenu, onSpaceContextMenu, edgeScroll }: {
+  folders: string[];
+  compact: boolean;
+  onOpenFolder: (folder: string) => void;
+  drop: FolderDrop;
+  onFolderContextMenu: PhotoClick;
+  onSpaceContextMenu: (event: ReactMouseEvent) => void;
+  edgeScroll: EdgeScroll;
+}) {
+  const { folderRowHeight: rowHeight, columnWidth } = compact ? GRID.compact : GRID.regular;
+  return (
+    <div className={compact ? "folder-area folder-area-compact" : "folder-area"} role="list" aria-label="Folders"
+      style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${columnWidth}px, 1fr))`, gridAutoRows: rowHeight, maxHeight: 2 * rowHeight }}
+      onContextMenu={spaceMenu(onSpaceContextMenu)} {...edgeScroll}>
+      {folders.map((path) => (
+        <div key={path} className="folder-cell" role="listitem">
+          <FolderTile path={path} compact={compact} onOpen={onOpenFolder} onContextMenu={onFolderContextMenu} drop={drop} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PhotoGrid({ root, photos, generation, usage, compact, onDragChange, shown, moving, onPhotoClick, onPhotoContextMenu, onSpaceContextMenu, edgeScroll }: {
   root: string;
   photos: Photo[];
   /** Counts scans, so a rescan retries failed thumbnails. */
   generation: number;
-  folders: string[];
   usage: Map<string, number>;
   compact: boolean;
-  onOpenFolder: (folder: string) => void;
   onDragChange: (path: string | null) => void;
-  drop: FolderDrop;
   shown: readonly string[];
   /** Photos being moved, shown dimmed and busy. */
   moving: readonly string[];
   onPhotoClick?: PhotoClick;
   onPhotoContextMenu?: PhotoClick;
-  onFolderContextMenu: PhotoClick;
   onSpaceContextMenu: (event: ReactMouseEvent) => void;
+  edgeScroll: EdgeScroll;
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
@@ -188,44 +219,35 @@ function PhotoGrid({ root, photos, generation, folders, usage, compact, onOpenFo
     return () => observer.disconnect();
   }, []);
 
-  const entries = [
-    ...folders.map((path) => ({ kind: "folder" as const, path })),
-    ...photos.map((photo) => ({ kind: "photo" as const, photo })),
-  ];
   const { rowHeight, columnWidth } = compact ? GRID.compact : GRID.regular;
   const columns = Math.max(1, Math.floor(viewport.width / columnWidth));
-  const rows = Math.ceil(entries.length / columns);
+  const rows = Math.ceil(photos.length / columns);
   const start = Math.max(0, Math.min(rows - 1, Math.floor(scrollTop / rowHeight)) - 2);
   const end = Math.min(rows, Math.ceil((scrollTop + viewport.height) / rowHeight) + 2);
-  const visible = viewport.height > 0 ? entries.slice(start * columns, end * columns) : [];
+  const visible = viewport.height > 0 ? photos.slice(start * columns, end * columns) : [];
 
   return (
     <div className={compact ? "photo-grid photo-grid-compact" : "photo-grid"} ref={viewportRef} aria-label="Photo grid" tabIndex={0}
       onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
-      onContextMenu={(event) => {
-        // Tiles have menus of their own, or none; only empty space gets the grid's menu.
-        if (event.defaultPrevented || (event.target instanceof Element && event.target.closest(".photo-cell"))) return;
-        event.preventDefault();
-        onSpaceContextMenu(event);
-      }}>
-      <div className="photo-grid-content" role="list" aria-label="Folders and Photos"
+      // Tiles have menus of their own, or none; only empty space gets the grid's menu.
+      onContextMenu={spaceMenu(onSpaceContextMenu)} {...edgeScroll}>
+      <div className="photo-grid-content" role="list" aria-label="Photos"
         style={{ height: rows * rowHeight }}>
-        {visible.map((entry, offset) => {
+        {visible.map((photo, offset) => {
           const index = start * columns + offset;
           return (
-            <div key={entry.kind === "folder" ? entry.path : `${entry.photo.path}:${entry.photo.revision}`}
+            <div key={`${photo.path}:${photo.revision}`}
               className="photo-cell" role="listitem"
-              aria-posinset={index + 1} aria-setsize={entries.length}
+              aria-posinset={index + 1} aria-setsize={photos.length}
               style={{
                 top: Math.floor(index / columns) * rowHeight,
                 left: `${(index % columns) * 100 / columns}%`,
                 width: `${100 / columns}%`,
                 height: rowHeight,
               }}>
-              {entry.kind === "photo" ? <PhotoThumbnail root={root} photo={entry.photo} generation={generation} usage={usage.get(entry.photo.path) ?? 0}
-                compact={compact} onDragChange={onDragChange} shown={shown.includes(entry.photo.path)} moving={moving.includes(entry.photo.path)}
+              <PhotoThumbnail root={root} photo={photo} generation={generation} usage={usage.get(photo.path) ?? 0}
+                compact={compact} onDragChange={onDragChange} shown={shown.includes(photo.path)} moving={moving.includes(photo.path)}
                 onClick={onPhotoClick} onContextMenu={onPhotoContextMenu} />
-                : <FolderTile path={entry.path} compact={compact} onOpen={onOpenFolder} onContextMenu={onFolderContextMenu} drop={drop} />}
             </div>
           );
         })}
@@ -236,6 +258,19 @@ function PhotoGrid({ root, photos, generation, folders, usage, compact, onOpenFo
 
 function folderName(folder: string) {
   return folder ? folder.split("/").pop()! : "the Library";
+}
+
+/** An on/off switch whose visible label is its name. */
+function Switch({ label, checked, title, disabled, onChange }: {
+  label: string; checked: boolean; title?: string; disabled?: boolean; onChange: (checked: boolean) => void;
+}) {
+  return (
+    <button type="button" role="switch" className="switch" aria-checked={checked} title={title} disabled={disabled}
+      onClick={() => onChange(!checked)}>
+      <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
+      {label}
+    </button>
+  );
 }
 
 function fileName(path: string) {
@@ -277,6 +312,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
   const [unusedOnly, setUnusedOnly] = useState(false);
   const [dragged, setDragged] = useState<string | null>(null);
   const [dropOver, setDropOver] = useState<string | null>(null);
+  const edgeScroll = useEdgeScroll();
   // The Photos being moved; empty when no move is running.
   const [movingPhotos, setMovingPhotos] = useState<readonly string[]>([]);
   const moving = movingPhotos.length > 0;
@@ -482,6 +518,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
   const canRename = (path: string) => onRenameFolder !== undefined && !moving && path !== "" && !isProtectedFolder(path);
   const openFolderMenu = (where: "folder" | "space") => (path: string, event: ReactMouseEvent) =>
     setMenu({ path, where, x: event.clientX, y: event.clientY });
+  const spaceContextMenu = (event: ReactMouseEvent) => openFolderMenu("space")(folder, event);
 
   async function sendFromDialog(paths: string[], target: string, name: string | null) {
     let destination = target;
@@ -547,7 +584,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
         setDropOver(target);
       },
       onDragLeave: (event) => {
-        if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) {
+        if (leftElement(event)) {
           setDropOver((current) => current === target ? null : current);
         }
       },
@@ -584,11 +621,10 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
         <div className="photo-browser-tools">
           {onCreateFolder && <button type="button" className="button-quiet" disabled={!result}
             onClick={() => setNaming({ kind: "create", parent: folder })}>New Folder…</button>}
-          {onCompactChange && <button type="button" className="button-quiet" aria-pressed={compact}
-            onClick={() => onCompactChange(!compact)}>Compact</button>}
           <button type="button" className="button-quiet" disabled={loading} onClick={() => setScan(scan + 1)}>
             Rescan
           </button>
+          {onCompactChange && <Switch label="Compact" checked={compact} onChange={onCompactChange} />}
         </div>
       </header>
       {result && (
@@ -608,13 +644,12 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
               </span>
             ))}
           </nav>
+          <Switch label={unusedOnly ? "Unused" : "All"} checked={unusedOnly} disabled={!album}
+            title="Only Photos not used in this Album" onChange={setUnusedOnly} />
         </div>
       )}
-      <label className="photo-filter">
-        <input type="checkbox" checked={unusedOnly} disabled={!album} onChange={(event) => setUnusedOnly(event.target.checked)} />
-        Unused in this Album
-      </label>
-      <p className="photo-order">Capture date · oldest first</p>
+      {folders.length > 0 && <FolderArea key={`${root}:${folder}`} folders={folders} compact={compact} onOpenFolder={openFolder} drop={drop}
+        onFolderContextMenu={openFolderMenu("folder")} onSpaceContextMenu={spaceContextMenu} edgeScroll={edgeScroll} />}
       {notice && <p className="photo-empty" role="status">{notice}</p>}
       {moveMessage && (moveMessage.failed
         ? <p className="error-banner" role="alert">{moveMessage.text}</p>
@@ -632,10 +667,10 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
           : unusedOnly && album ? "No unused Photos in this folder." : "No Photos in this folder."}</p>
       )}
       {result && <PhotoGrid key={`${root}:${folder}:${unusedOnly}`} root={root} generation={result.generation}
-        photos={photos} folders={folders} usage={usage} compact={compact} onOpenFolder={openFolder}
-        onDragChange={dragChange} drop={drop} shown={sortActive ? comparison.shown : []} moving={movingPhotos}
+        photos={photos} usage={usage} compact={compact}
+        onDragChange={dragChange} shown={sortActive ? comparison.shown : []} moving={movingPhotos}
         onPhotoClick={photoClick} onPhotoContextMenu={sortActive ? openMenu("grid") : undefined}
-        onFolderContextMenu={openFolderMenu("folder")} onSpaceContextMenu={(event) => openFolderMenu("space")(folder, event)} />}
+        onSpaceContextMenu={spaceContextMenu} edgeScroll={edgeScroll} />}
       {sort?.host && createPortal(<SortView root={root} photos={shownPhotos} chosen={comparison.chosen} usage={usage} leaving={movingPhotos}
         onToggleChosen={(path) => setComparison((current) => toggleChosen(current, path))}
         onContextMenu={openMenu("view")} />, sort.host)}

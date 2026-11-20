@@ -61,7 +61,10 @@ it("updates Usage badges and the unused filter as the current Album changes", as
   });
   const { rerender } = render(<PhotoBrowser root="D:\\Photos" />);
   await screen.findByText(first.path);
-  const filter = screen.getByRole("checkbox", { name: "Unused in this Album" }) as HTMLInputElement;
+  expect(screen.queryByText(/Capture date/)).toBeNull();
+  const filter = screen.getByRole("switch", { name: "All" }) as HTMLButtonElement;
+  expect(filter.title).toBe("Only Photos not used in this Album");
+  expect(filter.getAttribute("aria-checked")).toBe("false");
   expect(filter.disabled).toBe(true);
   let album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 2 }), "page-1");
   album = placePhoto(album, "page-1", "slot-1", first);
@@ -71,6 +74,8 @@ it("updates Usage badges and the unused filter as the current Album changes", as
   rerender(<PhotoBrowser root="D:\\Photos" album={album} />);
   expect(screen.getByLabelText("Used 2 times in this Album").textContent).toBe("2");
   fireEvent.click(filter);
+  expect(filter.getAttribute("aria-checked")).toBe("true");
+  expect(screen.getByRole("switch", { name: "Unused" })).toBe(filter);
   expect(screen.queryByText(first.path)).toBeNull();
   expect(screen.getByText(second.path)).toBeTruthy();
   expect(screen.getByRole("button", { name: "Open folder folder" })).toBeTruthy();
@@ -91,12 +96,12 @@ it("shows compact tiles without file names but keeps Usage badges and folder nam
   const onCompactChange = vi.fn();
   const album = placePhoto(addPhotoSlot(createAlbum({ name: "Test", pageCount: 2 }), "page-1"), "page-1", "slot-1", first);
   const { rerender } = render(<PhotoBrowser root="D:\\Photos" album={album} onCompactChange={onCompactChange} />);
-  const toggle = screen.getByRole("button", { name: "Compact" });
-  expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  const toggle = screen.getByRole("switch", { name: "Compact" });
+  expect(toggle.getAttribute("aria-checked")).toBe("false");
   fireEvent.click(toggle);
   expect(onCompactChange).toHaveBeenLastCalledWith(true);
   rerender(<PhotoBrowser root="D:\\Photos" album={album} compact onCompactChange={onCompactChange} />);
-  expect(toggle.getAttribute("aria-pressed")).toBe("true");
+  expect(toggle.getAttribute("aria-checked")).toBe("true");
   fireEvent.click(toggle);
   expect(onCompactChange).toHaveBeenLastCalledWith(false);
   await screen.findByRole("button", { name: "Open folder holiday" });
@@ -104,7 +109,11 @@ it("shows compact tiles without file names but keeps Usage badges and folder nam
   expect(screen.queryByText(first.path)).toBeNull();
   expect(screen.getByLabelText("Used 1 time in this Album").textContent).toBe("1");
   expect(screen.getByText("holiday")).toBeTruthy();
-  expect(screen.getAllByRole("listitem").map((item) => item.style.height)).toEqual(["68px", "68px", "68px"]);
+  expect(within(screen.getByRole("list", { name: "Photos" })).getAllByRole("listitem").map((item) => item.style.height)).toEqual(["68px", "68px"]);
+  // The Folder area is compact too, and at most two rows high.
+  expect(screen.getByRole("list", { name: "Folders" }).style.maxHeight).toBe("136px");
+  rerender(<PhotoBrowser root="D:\\Photos" album={album} onCompactChange={onCompactChange} />);
+  expect(screen.getByRole("list", { name: "Folders" }).style.maxHeight).toBe("192px");
 });
 
 it("browses immediate folders and Photos, including empty folders, with breadcrumbs back to the Library", async () => {
@@ -145,6 +154,27 @@ it("browses immediate folders and Photos, including empty folders, with breadcru
   expect(screen.queryByRole("listitem")).toBeNull();
   fireEvent.click(within(breadcrumbs).getByRole("button", { name: "Library" }));
   await screen.findByText("root.jpg");
+});
+
+it("shows the current Folder's subfolders in a Folder area apart from the Photo grid, only when it has any", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "scan_photos") return {
+      photos: [photo(0), { ...photo(1), path: "trips/kids/a.jpg" }], folders: ["pets", "trips", "trips/kids"], warnings: [],
+    };
+    return "data:image/png;base64,dGVzdA==";
+  });
+  render(<PhotoBrowser root="D:\\Photos" />);
+  const folders = within(await screen.findByRole("list", { name: "Folders" }));
+  expect(folders.getAllByRole("listitem").map((item) => item.textContent)).toEqual(["pets", "trips"]);
+  const grid = within(await screen.findByRole("list", { name: "Photos" }));
+  await grid.findByText(photo(0).path);
+  expect(grid.getAllByRole("listitem")).toHaveLength(1);
+  expect(grid.queryByRole("button", { name: /Open folder/ })).toBeNull();
+
+  fireEvent.click(folders.getByRole("button", { name: "Open folder trips" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open folder kids" }));
+  await screen.findByText("a.jpg");
+  expect(screen.queryByRole("list", { name: "Folders" })).toBeNull();
 });
 
 it("keeps the current folder on rescan and returns to a surviving ancestor with a notice if it disappears", async () => {
@@ -251,13 +281,13 @@ it("keeps the grid and its scroll position on rescan, retrying only failed thumb
   const thumbnails = (path: string) => vi.mocked(invoke).mock.calls.filter(([command, args]) =>
     command === "photo_thumbnail" && (args as { path: string }).path === path).length;
   await waitFor(() => expect(thumbnails(photos[151].path)).toBe(1));
-  const list = screen.getByRole("list", { name: "Folders and Photos" });
+  const list = screen.getByRole("list", { name: "Photos" });
 
   failing.clear();
   fireEvent.click(screen.getByRole("button", { name: "Rescan" }));
   await waitFor(() => expect(thumbnails(photos[150].path)).toBe(2));
   await waitFor(() => expect(screen.queryByText("Thumbnail unavailable. Rescan to retry.")).toBeNull());
-  expect(screen.getByRole("list", { name: "Folders and Photos" })).toBe(list);
+  expect(screen.getByRole("list", { name: "Photos" })).toBe(list);
   expect(screen.getByLabelText("Photo grid").scrollTop).toBe(12_000);
   expect(thumbnails(photos[151].path)).toBe(1);
 });
@@ -453,6 +483,38 @@ describe("sending Photos to a Folder by dragging", () => {
     expect(folder.classList.contains("drop-target")).toBe(false);
     expect(onSendPhotos).not.toHaveBeenCalled();
   });
+  it("scrolls the Folder area and the grid while a Photo is dragged near their top or bottom edge", async () => {
+    // jsdom has no DragEvent, so dragover would lose its pointer position.
+    vi.stubGlobal("DragEvent", MouseEvent);
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "scan_photos") return { photos: Array.from({ length: 40 }, (_, index) => photo(index)), folders: ["a", "b", "c", "d", "e"], warnings: [] };
+      return "data:image/png;base64,dGVzdA==";
+    });
+    render(<PhotoBrowser root="D:\\Photos" onSendPhotos={vi.fn(async () => [])} />);
+    const tile = (await screen.findByText(photo(0).path)).closest("figure")!;
+    const transfer = photoTransfer();
+    fireEvent.dragStart(tile, { dataTransfer: transfer });
+    const placed = (element: HTMLElement, top: number, bottom: number) => {
+      element.getBoundingClientRect = () => new DOMRect(0, top, 340, bottom - top);
+      return element;
+    };
+    const area = placed(screen.getByRole("list", { name: "Folders" }), 100, 260);
+    const grid = placed(screen.getByLabelText("Photo grid"), 270, 870);
+    const hover = (element: HTMLElement, clientY: number) => fireEvent.dragOver(element, { dataTransfer: transfer, clientY });
+
+    hover(area, 180);
+    hover(grid, 570);
+    expect([area.scrollTop, grid.scrollTop]).toEqual([0, 0]);
+    hover(screen.getByRole("button", { name: "Open folder e" }), 258);
+    expect(area.scrollTop).toBeGreaterThan(0);
+    hover(tile, 868);
+    expect(grid.scrollTop).toBeGreaterThan(0);
+    const scrolled = [area.scrollTop, grid.scrollTop];
+    hover(area, 102);
+    hover(grid, 272);
+    expect(area.scrollTop).toBeLessThan(scrolled[0]);
+    expect(grid.scrollTop).toBeLessThan(scrolled[1]);
+  });
 });
 
 it("forgets a grid drag whose tile disappeared before the drag ended, and only takes Photo drags", async () => {
@@ -498,7 +560,7 @@ describe("Sort mode", () => {
     const props = { root: "D:\\Photos", album, onSendPhotos, onCreateFolder };
     const view = render(<PhotoBrowser {...props} sort={{ host, active: true, onChosenChange }} />);
     await screen.findByText(photos[0].path);
-    const tile = (path: string) => within(screen.getByRole("list", { name: "Folders and Photos" })).getByText(path).closest("figure")!;
+    const tile = (path: string) => within(screen.getByRole("list", { name: "Photos" })).getByText(path).closest("figure")!;
     const rerunCommand = (serial: number) => view.rerender(<PhotoBrowser {...props} sort={{ host, active: true, onChosenChange, command: { serial } }} />);
     const leaveSort = () => view.rerender(<PhotoBrowser {...props} sort={{ host, active: false, onChosenChange }} />);
     return { host, work: within(host), tile, onChosenChange, onSendPhotos, onCreateFolder, rerunCommand, leaveSort };
@@ -648,7 +710,7 @@ describe("Sort mode", () => {
     };
     // Wait for each move to finish, when its tiles leave the grid.
     const settled = (...paths: string[]) => waitFor(() => {
-      const grid = within(screen.getByRole("list", { name: "Folders and Photos" }));
+      const grid = within(screen.getByRole("list", { name: "Photos" }));
       for (const path of paths) expect(grid.queryByText(path)).toBeNull();
     });
 
@@ -712,7 +774,7 @@ describe("Sort mode", () => {
     let finish!: (moves: PhotoMove[]) => void;
     const onSendPhotos = vi.fn(() => new Promise<PhotoMove[]>((resolve) => { finish = resolve; }));
     const { work, tile } = await browseSort({ onSendPhotos });
-    const grid = screen.getByRole("list", { name: "Folders and Photos" });
+    const grid = screen.getByRole("list", { name: "Photos" });
     fireEvent.click(tile(photo(0).path));
     fireEvent.contextMenu(await work.findByRole("img", { name: photo(0).path }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Send to Folder" }));
@@ -728,7 +790,7 @@ describe("Sort mode", () => {
     expect(await work.findByRole("img", { name: photo(1).path })).toBeTruthy();
     expect(within(grid).queryByText(photo(0).path)).toBeNull();
     expect(tile(photo(1).path).classList.contains("photo-tile--shown")).toBe(true);
-    expect(screen.getByRole("list", { name: "Folders and Photos" })).toBe(grid);
+    expect(screen.getByRole("list", { name: "Photos" })).toBe(grid);
     expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "scan_photos")).toHaveLength(1);
     expect(invoke).toHaveBeenCalledWith("read_photos", { root: "D:\\Photos", paths: [`kids/${photo(0).path}`] });
 
@@ -781,7 +843,7 @@ describe("Sort mode", () => {
     });
     const onSendPhotos = vi.fn(async (): Promise<PhotoMove[]> => [{ from: photo(0).path, to: moved.path }]);
     render(<PhotoBrowser root="D:\\Photos" onSendPhotos={onSendPhotos} sort={{ host: sortHost(), active: true, onChosenChange: () => undefined }} />);
-    const grid = within(await screen.findByRole("list", { name: "Folders and Photos" }));
+    const grid = within(await screen.findByRole("list", { name: "Photos" }));
     await grid.findByText(photo(0).path);
     fireEvent.click(screen.getByRole("button", { name: "Rescan" }));
     await screen.findByText("Scanning Library...");
@@ -894,7 +956,7 @@ describe("Folder history and Folder interactions", () => {
     expect(onCreateFolder).toHaveBeenCalledWith("trips", "summer");
 
     fireEvent.click(nav().getByRole("button", { name: "Library" }));
-    fireEvent.contextMenu(screen.getByRole("list", { name: "Folders and Photos" }));
+    fireEvent.contextMenu(screen.getByRole("list", { name: "Photos" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "New Folder…" }));
     dialog = within(screen.getByRole("dialog", { name: "New Folder" }));
     fireEvent.change(dialog.getByRole("textbox", { name: "Folder name" }), { target: { value: "winter" } });

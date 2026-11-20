@@ -314,23 +314,66 @@ body {
 }
 
 .photo-count,
-.photo-order,
 .photo-empty {
   color: #6f7771;
   font-size: 12px;
 }
 
-.photo-order {
-  margin: 0;
-  padding: 0 16px 12px;
-}
-
-.photo-filter {
-  display: flex;
+/* An on/off switch: a small track whose thumb slides right when on. */
+.switch {
+  display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 6px;
-  padding: 0 16px 10px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 4px;
+  color: #242a27;
+  background: transparent;
+  font: inherit;
   font-size: 12px;
+  cursor: pointer;
+}
+
+.switch:hover:not(:disabled) {
+  background: #e7ebe4;
+}
+
+.switch:disabled {
+  color: #b5bbb5;
+  cursor: default;
+}
+
+.switch-track {
+  position: relative;
+  width: 24px;
+  height: 14px;
+  border-radius: 7px;
+  background: #c4cac3;
+  transition: background 120ms;
+}
+
+.switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 120ms;
+}
+
+.switch[aria-checked="true"] .switch-track {
+  background: #415d50;
+}
+
+.switch[aria-checked="true"] .switch-thumb {
+  transform: translateX(10px);
+}
+
+.switch:disabled .switch-track {
+  background: #dde1dc;
 }
 
 .photo-folder-bar {
@@ -338,7 +381,11 @@ body {
   flex-shrink: 0;
   align-items: flex-start;
   gap: 2px;
-  padding-left: 12px;
+  padding: 0 12px;
+}
+
+.photo-folder-bar .switch {
+  margin-bottom: 8px;
 }
 
 .photo-history-button {
@@ -368,7 +415,7 @@ body {
   min-width: 0;
   max-height: 100px;
   overflow: auto;
-  padding: 4px 16px 12px 4px;
+  padding: 4px 8px 12px 4px;
   color: #6f7771;
   font-size: 12px;
   overflow-wrap: anywhere;
@@ -409,8 +456,13 @@ body {
   color: #242a27;
 }
 
-.folder-label {
-  color: #6f7771;
+.folder-tile .photo-preview {
+  height: 64px;
+}
+
+.folder-tile svg {
+  width: 38px;
+  height: 32px;
 }
 
 .folder-tile:hover .photo-preview {
@@ -554,18 +606,39 @@ body {
   height: 60px;
 }
 
-.photo-grid-compact .folder-tile .photo-preview {
+/* The current Folder's subfolders, pinned above the Photo grid. */
+.folder-area {
+  display: grid;
+  flex-shrink: 0;
+  align-content: start;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  /* A shadow, not a border, so two rows fit the two-row max height exactly. */
+  box-shadow: 0 1px 0 #e1e4de;
+  margin-bottom: 10px;
+}
+
+.folder-cell {
+  padding: 0 6px 10px;
+}
+
+.folder-area-compact .folder-cell {
+  padding: 0 3px 8px;
+}
+
+.folder-area-compact .folder-tile .photo-preview {
+  height: 60px;
   flex-direction: column;
   gap: 2px;
   padding: 0 4px;
 }
 
-.photo-grid-compact .folder-tile .photo-name {
+.folder-area-compact .folder-tile .photo-name {
   max-width: 100%;
   padding-top: 0;
 }
 
-.photo-grid-compact .folder-tile svg {
+.folder-area-compact .folder-tile svg {
   width: 29px;
   height: 24px;
   flex-shrink: 0;

@@ -1626,7 +1626,7 @@ it("keeps the sibling Photo browser in sync with edits and Album switches", asyn
   fireEvent.click(screen.getByRole("button", { name: "Add Photo Slot" }));
   fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }), photoDrop(photo));
   expect(screen.getByLabelText("Used 1 time in this Album")).toBeTruthy();
-  fireEvent.click(screen.getByRole("checkbox", { name: "Unused in this Album" }));
+  fireEvent.click(screen.getByRole("switch", { name: "All" }));
   expect(screen.queryByText("tree.jpg")).toBeNull();
   await waitForAutosave();
   fireEvent.click(screen.getByRole("button", { name: "Open Album Other" }));

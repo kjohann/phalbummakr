@@ -38,6 +38,11 @@ export function readPhotoDrag(dataTransfer: DataTransfer): (PlaceablePhoto & { t
   }
 }
 
+/** Whether a dragleave left the element itself, not just moved onto one of its children. */
+export function leftElement(event: { currentTarget: Element; relatedTarget: EventTarget | null }): boolean {
+  return !(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget));
+}
+
 const LAYOUT_TYPE = "application/x-phalbummakr-layout";
 
 /** A Layout dragged from the Layout Library onto a Page. Only its id travels: the Layout is read from the shared Library on drop. */
