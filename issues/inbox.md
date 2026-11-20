@@ -24,6 +24,8 @@ note once it has been sorted. An empty inbox means everything has been sorted.
     - And overview of though of phases might also be handy - maybe have that as a new section in the issues/readme.
     - The backlog remains as a place to track things not directly connected to any phase. Whenever I promote something, they go into a phase.
     - I think there should be support for multiple active phases at any given time. Either that, or I'd always have two: one named something like fixes and tweaks so I have a location for bugs that are discovered without the need to reopen a phase. Closed phases should remain closed.
+- Dragging multiple photos
+    - This feature got weird after #034 and addendum. For some reason, the selection for dragging photos in both left and right pane is attached to what are selected for comparison. I think these two should be separeate states. Selecting to the left makes images show up in the comparison, but that also gives them a "selected" state to the left. When dragging to a folder, ALL these photos follow. The user may chose to select a subset in the right window and then drag from there as well, choosing then only the subset.
 - Rescan
     - Might need some more visual loading feedback
     - Unless: can it run (sliently) whenever the user has tabbed out of the app and tabs back?
