@@ -937,6 +937,43 @@ button.sort-photo--chosen:hover {
   outline: 3px solid #d1783e;
 }
 
+/* A Photo being moved: dimmed with a spinner until the move is done. */
+.photo-tile--busy {
+  cursor: progress;
+}
+
+.photo-tile--busy .photo-preview img,
+.photo-tile--busy figcaption {
+  opacity: 0.4;
+}
+
+.photo-busy {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border: 2px solid rgb(255 255 255 / 75%);
+  border-top-color: #287b66;
+  border-radius: 50%;
+  animation: preview-spin 700ms linear infinite;
+}
+
+/* A shown Photo being moved fades out straight away; it is removed once the move is done. */
+.sort-photo--leaving {
+  pointer-events: none;
+  animation: sort-photo-leave 150ms ease-out forwards;
+}
+
+@keyframes sort-photo-leave {
+  to { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sort-photo--leaving {
+    animation: none;
+    opacity: 0;
+  }
+}
+
 .context-menu-entry {
   position: relative;
   display: grid;

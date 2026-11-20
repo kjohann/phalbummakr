@@ -27,12 +27,14 @@ function SortPhoto({ root, photo, usage }: { root: string; photo: Photo; usage: 
 }
 
 /** Sort mode's work area: one Photo shown large, or a Comparison of up to four side by side. */
-export default function SortView({ root, photos, chosen, usage, onToggleChosen, onContextMenu }: {
+export default function SortView({ root, photos, chosen, usage, leaving = [], onToggleChosen, onContextMenu }: {
   root: string;
   photos: Photo[];
   /** Paths of the chosen Photos; ignored for a single Photo, which always counts as chosen. */
   chosen: readonly string[];
   usage: Map<string, number>;
+  /** Photos being moved away, which fade out until the move is done. */
+  leaving?: readonly string[];
   onToggleChosen: (path: string) => void;
   onContextMenu: (path: string, event: MouseEvent) => void;
 }) {
@@ -54,11 +56,13 @@ export default function SortView({ root, photos, chosen, usage, onToggleChosen, 
         </span>
       </>;
       const menu = (event: MouseEvent) => { event.preventDefault(); onContextMenu(photo.path, event); };
+      const className = ["sort-photo", isChosen && "sort-photo--chosen", leaving.includes(photo.path) && "sort-photo--leaving"]
+        .filter(Boolean).join(" ");
       return comparing
-        ? <button key={photo.path} type="button" className={isChosen ? "sort-photo sort-photo--chosen" : "sort-photo"}
+        ? <button key={photo.path} type="button" className={className}
           aria-pressed={isChosen} aria-label={`${isChosen ? "Unchoose" : "Choose"} ${name}`} title={photo.path}
           onClick={() => onToggleChosen(photo.path)} onContextMenu={menu}>{content}</button>
-        : <figure key={photo.path} className="sort-photo" title={photo.path} onContextMenu={menu}>{content}</figure>;
+        : <figure key={photo.path} className={className} title={photo.path} onContextMenu={menu}>{content}</figure>;
     })}
   </div>;
 }

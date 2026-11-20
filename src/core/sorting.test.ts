@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addPhotoSlot, createAlbum, placePhoto, serializeAlbum, setPlacementFit, type Album } from ".";
-import { folderNameProblem, planPhotoMove, relinkPlacements, renameFolder, sendPhotosToFolder, type AlbumRewrite, type FolderRename, type PhotoMove, type SortingPorts } from "./sorting";
+import { folderNameProblem, planPhotoMove, relinkPlacements, renameFolder, scanAfterMove, sendPhotosToFolder, type AlbumRewrite, type FolderRename, type PhotoMove, type SortingPorts } from "./sorting";
 
 function photo(path: string) {
   return { path, width: 4000, height: 3000, orientation: 1 };
@@ -197,5 +197,41 @@ describe("renaming a Folder", () => {
     const library = fakeLibrary({}, ["trips", "pets"]);
     await expect(renameFolder(library.ports, { root: "D:\\Photos", folder, name, openAlbum: null })).rejects.toThrow(problem);
     expect(library.renamed).toEqual([]);
+  });
+});
+
+describe("scanAfterMove", () => {
+  const scanned = (path: string, captureDate: number) => ({ ...photo(path), captureDate, revision: `old:${path}` });
+
+  it("swaps moved Photos for their new records, in capture-date then path order, keeping the rest as they were", () => {
+    const early = scanned("trips/early.jpg", 1000);
+    const later = scanned("later.jpg", 3000);
+    const scan = {
+      photos: [early, scanned("trips/a.jpg", 2000), scanned("trips/b.jpg", 2000), later],
+      folders: ["kids", "trips"],
+      warnings: ["bad.jpg: invalid JPEG"],
+    };
+    const moves = [{ from: "trips/a.jpg", to: "kids/a.jpg" }, { from: "trips/b.jpg", to: "kids/b (2).jpg" }];
+    const moved = [{ ...scanned("kids/b (2).jpg", 2000), revision: "new:b" }, { ...scanned("kids/a.jpg", 2000), revision: "new:a" }];
+
+    const next = scanAfterMove(scan, moves, moved);
+
+    expect(next.photos.map(({ path, revision }) => `${path} ${revision}`)).toEqual([
+      "trips/early.jpg old:trips/early.jpg",
+      "kids/a.jpg new:a",
+      "kids/b (2).jpg new:b",
+      "later.jpg old:later.jpg",
+    ]);
+    expect(next.photos[0]).toBe(early);
+    expect(next.photos[3]).toBe(later);
+    expect(next.folders).toEqual(["kids", "trips"]);
+    expect(next.warnings).toEqual(["bad.jpg: invalid JPEG"]);
+    expect(scan.photos.map(({ path }) => path)).toEqual(["trips/early.jpg", "trips/a.jpg", "trips/b.jpg", "later.jpg"]);
+  });
+
+  it("orders paths with the same capture date by code point, as the Rust scan does", () => {
+    const scan = { photos: [scanned("\u{1F600}.jpg", 1000)], folders: [], warnings: [] };
+    const next = scanAfterMove(scan, [{ from: "a/\uFF5E.jpg", to: "\uFF5E.jpg" }], [scanned("\uFF5E.jpg", 1000)]);
+    expect(next.photos.map(({ path }) => path)).toEqual(["\uFF5E.jpg", "\u{1F600}.jpg"]);
   });
 });

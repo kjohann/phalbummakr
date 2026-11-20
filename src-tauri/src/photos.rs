@@ -172,6 +172,17 @@ fn read_photo(root: &Path, path: &Path, warnings: &mut Vec<String>) -> Result<Ph
     Ok(photo)
 }
 
+/// Reads the given Photos as a scan would, such as after a move, without scanning the whole Library.
+pub fn read_photos(root: &Path, paths: &[String]) -> Result<Vec<Photo>, String> {
+    paths
+        .iter()
+        .map(|relative| {
+            let (root, path) = resolve_photo(root, relative)?;
+            read_photo(&root, &path, &mut Vec::new())
+        })
+        .collect()
+}
+
 /// Resolves a Photo path relative to the Library root, rejecting paths that
 /// escape the Library or point into folders the scan hides.
 pub(crate) fn resolve_photo(
@@ -657,6 +668,27 @@ pub(crate) mod tests {
             pair[0].capture_date < pair[1].capture_date
                 || (pair[0].capture_date == pair[1].capture_date && pair[0].path < pair[1].path)
         }));
+    }
+
+    #[test]
+    fn reads_moved_photos_as_a_full_scan_would_and_refuses_paths_outside_the_library() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("trips/kids")).unwrap();
+        write_exif_photo(&dir.path().join("trips/a.jpg"), 6);
+        fs::rename(
+            dir.path().join("trips/a.jpg"),
+            dir.path().join("trips/kids/a (2).jpg"),
+        )
+        .unwrap();
+
+        let read = read_photos(dir.path(), &["trips/kids/a (2).jpg".into()]).unwrap();
+        let scanned = scan_library(dir.path()).unwrap();
+        assert_eq!(
+            serde_json::to_value(&read).unwrap(),
+            serde_json::to_value(&scanned.photos).unwrap()
+        );
+        assert!(read_photos(dir.path(), &["trips/a.jpg".into()]).is_err());
+        assert!(read_photos(dir.path(), &["../outside.jpg".into()]).is_err());
     }
 
     #[test]

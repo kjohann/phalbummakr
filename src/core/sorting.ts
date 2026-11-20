@@ -1,4 +1,5 @@
 import { deserializeAlbum, serializeAlbum, type Album } from "./album";
+import type { Photo, PhotoScan } from "./photos";
 /** A Photo file moved from one Library-relative path to another. */
 export interface PhotoMove {
   from: string;
@@ -42,6 +43,27 @@ export function relinkPlacements(album: Album, relink: PlacementRelink): Album {
     return { ...page, slots };
   });
   return changed ? { ...album, pages } : album;
+}
+
+/** Code-point order, which is the byte order the Rust scan sorts paths in. */
+function comparePaths(a: string, b: string): number {
+  for (let index = 0; ; index++) {
+    if (index === a.length || index === b.length) return a.length - b.length;
+    // At the first difference, a surrogate pair is read as one code point.
+    if (a[index] !== b[index]) return a.codePointAt(index)! - b.codePointAt(index)!;
+  }
+}
+
+/**
+ * The scan after `moves`, without scanning the Library again: moved Photos are replaced by
+ * `moved`, their records read at the new paths. Photos are kept in the scan's order, oldest
+ * first and then by path.
+ */
+export function scanAfterMove(scan: PhotoScan, moves: readonly PhotoMove[], moved: readonly Photo[]): PhotoScan {
+  const from = new Set(moves.map((move) => move.from));
+  const photos = [...scan.photos.filter((photo) => !from.has(photo.path)), ...moved]
+    .sort((a, b) => a.captureDate - b.captureDate || comparePaths(a.path, b.path));
+  return { ...scan, photos };
 }
 
 function fileName(path: string): string {

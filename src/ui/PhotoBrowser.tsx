@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type DragEvent, type MouseEvent as ReactMo
 import { createPortal } from "react-dom";
 import {
   afterMove, canAddToComparison, canStepFolder, chosenPhotos, currentFolder, EMPTY_COMPARISON, folderNameProblem, folderRenameProblem,
-  historyAfterRename, historyAfterRescan, isProtectedFolder, photoUsage, renamedPath, showPhoto, START_FOLDER_HISTORY, stepFolder, stepPhoto,
+  historyAfterRename, historyAfterRescan, isProtectedFolder, photoUsage, renamedPath, scanAfterMove, showPhoto, START_FOLDER_HISTORY, stepFolder, stepPhoto,
   toggleChosen, toggleComparison, visitFolder, withoutPhotos,
   type Album, type Comparison, type FolderHistory, type FolderRename, type Photo, type PhotoMove, type PhotoScan,
 } from "../core";
@@ -81,32 +81,39 @@ function parentFolder(path: string) {
   return separator < 0 ? "" : path.slice(0, separator);
 }
 
-function PhotoThumbnail({ root, photo, usage, compact, onDragChange, shown, onClick, onContextMenu }: {
-  root: string; photo: Photo; usage: number; compact: boolean; onDragChange: (path: string | null) => void;
-  shown: boolean; onClick?: PhotoClick; onContextMenu?: PhotoClick;
+function PhotoThumbnail({ root, photo, generation, usage, compact, onDragChange, shown, moving, onClick, onContextMenu }: {
+  root: string; photo: Photo; generation: number; usage: number; compact: boolean; onDragChange: (path: string | null) => void;
+  shown: boolean; moving: boolean; onClick?: PhotoClick; onContextMenu?: PhotoClick;
 }) {
   const [source, setSource] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const loaded = useRef<string | null>(null);
   useEffect(() => {
+    // A rescan only retries failed thumbnails; one already shown stays as it is.
+    const key = `${root}\0${photo.path}\0${photo.revision}`;
+    if (loaded.current === key) return;
     const controller = new AbortController();
     setSource(null);
     setError(null);
     tauriPhotoPorts.thumbnail(root, photo, controller.signal)
       .then((source) => {
-        if (!controller.signal.aborted) setSource(source);
+        if (controller.signal.aborted) return;
+        loaded.current = key;
+        setSource(source);
       })
       .catch((cause: unknown) => {
         if (!controller.signal.aborted) setError(String(cause));
       });
     return () => controller.abort();
-  }, [root, photo]);
+  }, [root, photo, generation]);
 
   const name = photo.path.split("/").pop()!;
+  const className = ["photo-tile", shown && "photo-tile--shown", moving && "photo-tile--busy"].filter(Boolean).join(" ");
   return (
-    <figure className={shown ? "photo-tile photo-tile--shown" : "photo-tile"} title={`${photo.path}\n${photo.width} x ${photo.height} pixels`}
-      onClick={onClick && ((event) => onClick(photo.path, event))}
-      onContextMenu={onContextMenu && ((event) => { event.preventDefault(); onContextMenu(photo.path, event); })}
-      draggable onDragStart={(event) => {
+    <figure className={className} title={`${photo.path}\n${photo.width} x ${photo.height} pixels`} aria-busy={moving || undefined}
+      onClick={onClick && !moving ? (event) => onClick(photo.path, event) : undefined}
+      onContextMenu={onContextMenu && ((event) => { event.preventDefault(); if (!moving) onContextMenu(photo.path, event); })}
+      draggable={!moving} onDragStart={(event) => {
         writePhotoDrag(event.dataTransfer, photo, source ?? undefined);
         onDragChange(photo.path);
         void tauriPhotoPorts.prewarmPreview(root, photo).catch(() => undefined);
@@ -116,6 +123,7 @@ function PhotoThumbnail({ root, photo, usage, compact, onDragChange, shown, onCl
         {!source && !error && <span className="photo-placeholder">{compact ? "…" : "Loading..."}</span>}
         {error && <span className="photo-failure" role="alert" title={error}>{compact ? "!" : "Thumbnail unavailable. Rescan to retry."}</span>}
         {usage > 0 && <span className="photo-usage" aria-label={usageLabel(usage)}>{usage}</span>}
+        {moving && <span className="photo-busy" aria-hidden="true" />}
       </div>
       {!compact && <figcaption>
         <span className="photo-name">{name}</span>
@@ -148,9 +156,11 @@ function FolderTile({ path, compact, onOpen, onContextMenu, drop }: {
   );
 }
 
-function PhotoGrid({ root, photos, folders, usage, compact, onOpenFolder, onDragChange, drop, shown, onPhotoClick, onPhotoContextMenu, onFolderContextMenu, onSpaceContextMenu }: {
+function PhotoGrid({ root, photos, generation, folders, usage, compact, onOpenFolder, onDragChange, drop, shown, moving, onPhotoClick, onPhotoContextMenu, onFolderContextMenu, onSpaceContextMenu }: {
   root: string;
   photos: Photo[];
+  /** Counts scans, so a rescan retries failed thumbnails. */
+  generation: number;
   folders: string[];
   usage: Map<string, number>;
   compact: boolean;
@@ -158,6 +168,8 @@ function PhotoGrid({ root, photos, folders, usage, compact, onOpenFolder, onDrag
   onDragChange: (path: string | null) => void;
   drop: FolderDrop;
   shown: readonly string[];
+  /** Photos being moved, shown dimmed and busy. */
+  moving: readonly string[];
   onPhotoClick?: PhotoClick;
   onPhotoContextMenu?: PhotoClick;
   onFolderContextMenu: PhotoClick;
@@ -210,8 +222,8 @@ function PhotoGrid({ root, photos, folders, usage, compact, onOpenFolder, onDrag
                 width: `${100 / columns}%`,
                 height: rowHeight,
               }}>
-              {entry.kind === "photo" ? <PhotoThumbnail root={root} photo={entry.photo} usage={usage.get(entry.photo.path) ?? 0}
-                compact={compact} onDragChange={onDragChange} shown={shown.includes(entry.photo.path)}
+              {entry.kind === "photo" ? <PhotoThumbnail root={root} photo={entry.photo} generation={generation} usage={usage.get(entry.photo.path) ?? 0}
+                compact={compact} onDragChange={onDragChange} shown={shown.includes(entry.photo.path)} moving={moving.includes(entry.photo.path)}
                 onClick={onPhotoClick} onContextMenu={onPhotoContextMenu} />
                 : <FolderTile path={entry.path} compact={compact} onOpen={onOpenFolder} onContextMenu={onFolderContextMenu} drop={drop} />}
             </div>
@@ -265,7 +277,9 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
   const [unusedOnly, setUnusedOnly] = useState(false);
   const [dragged, setDragged] = useState<string | null>(null);
   const [dropOver, setDropOver] = useState<string | null>(null);
-  const [moving, setMoving] = useState(false);
+  // The Photos being moved; empty when no move is running.
+  const [movingPhotos, setMovingPhotos] = useState<readonly string[]>([]);
+  const moving = movingPhotos.length > 0;
   const [moveMessage, setMoveMessage] = useState<{ text: string; failed: boolean } | null>(null);
   const [result, setResult] = useState<(PhotoScan & { generation: number }) | null>(null);
   // Each mode keeps its own place, in memory only; a new Library starts both at its root.
@@ -276,6 +290,8 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
     setPlaces(START_PLACES);
   }
   const [loading, setLoading] = useState(true);
+  const loadingRef = useRef(loading);
+  loadingRef.current = loading;
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
@@ -396,26 +412,34 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
   function dragChange(path: string | null) {
     setDragged(path);
     setDropOver(null);
-    if (path) setMoveMessage(null);
   }
 
   async function send(paths: string[], target: string) {
     const gridBefore = gridRef.current;
-    setMoving(true);
-    setMoveMessage(null);
+    // The last message stays until this move replaces it, so the grid below it doesn't jump.
+    setMovingPhotos(paths);
     try {
       const moves = await onSendPhotos!(paths, target);
       if (moves.length > 0) {
+        // Moved Photos get new revisions, so only they are read again, not the whole Library.
+        const moved = await tauriPhotoPorts.read(root, moves.map(({ to }) => to)).catch(() => null);
+        setResult((current) => current && { ...scanAfterMove(current, moves, moved ?? []), generation: current.generation });
+        // A scan still running may have read the Library before the move, so it is replaced by a new one.
+        if (!moved || loadingRef.current) setScan((value) => value + 1);
         setMoveMessage({ text: movedMessage(moves, target), failed: false });
         setComparison((current) => afterMove(current, moves.map(({ from }) => from), gridBefore));
-        setScan((value) => value + 1);
       }
     } catch (cause) {
       const what = paths.length === 1 ? `"${fileName(paths[0])}"` : `${paths.length} Photos`;
       setMoveMessage({ text: `Could not move ${what}: ${cause instanceof Error ? cause.message : String(cause)}`, failed: true });
     } finally {
-      setMoving(false);
+      setMovingPhotos([]);
     }
+  }
+
+  function addFolder(path: string) {
+    setResult((current) => current && !current.folders.includes(path)
+      ? { ...current, folders: [...current.folders, path].sort() } : current);
   }
 
   /** The Folders `paths` can be sent to, nested as in the Library, each with "New Folder…" inside it. */
@@ -441,9 +465,8 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
   }
 
   async function createFolder(parent: string, name: string) {
-    await onCreateFolder!(parent, name);
+    addFolder(await onCreateFolder!(parent, name));
     setNaming(null);
-    setScan((value) => value + 1);
   }
 
   async function renameFolder(folder: string, name: string) {
@@ -465,7 +488,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
     if (name !== null) {
       if (!onCreateFolder) throw new Error("Folders can't be created here.");
       destination = await onCreateFolder(target, name);
-      setScan((value) => value + 1);
+      addFolder(destination);
     }
     setFolderDialog(null);
     await send(paths, destination);
@@ -608,12 +631,12 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
           ? "No Photos yet. Add JPEG or PNG files to this Library, then rescan."
           : unusedOnly && album ? "No unused Photos in this folder." : "No Photos in this folder."}</p>
       )}
-      {result && <PhotoGrid key={`${root}:${result.generation}:${folder}:${unusedOnly}`} root={root}
+      {result && <PhotoGrid key={`${root}:${folder}:${unusedOnly}`} root={root} generation={result.generation}
         photos={photos} folders={folders} usage={usage} compact={compact} onOpenFolder={openFolder}
-        onDragChange={dragChange} drop={drop} shown={sortActive ? comparison.shown : []}
+        onDragChange={dragChange} drop={drop} shown={sortActive ? comparison.shown : []} moving={movingPhotos}
         onPhotoClick={photoClick} onPhotoContextMenu={sortActive ? openMenu("grid") : undefined}
         onFolderContextMenu={openFolderMenu("folder")} onSpaceContextMenu={(event) => openFolderMenu("space")(folder, event)} />}
-      {sort?.host && createPortal(<SortView root={root} photos={shownPhotos} chosen={comparison.chosen} usage={usage}
+      {sort?.host && createPortal(<SortView root={root} photos={shownPhotos} chosen={comparison.chosen} usage={usage} leaving={movingPhotos}
         onToggleChosen={(path) => setComparison((current) => toggleChosen(current, path))}
         onContextMenu={openMenu("view")} />, sort.host)}
       {menu && <ContextMenu label="Photo actions" x={menu.x} y={menu.y} items={menuItems(menu)} onClose={() => setMenu(null)} />}

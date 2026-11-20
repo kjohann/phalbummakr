@@ -75,6 +75,8 @@ function queuedThumbnail(root: string, path: string, signal: AbortSignal, revisi
 
 export const tauriPhotoPorts = {
   scan: (root: string) => invoke<PhotoScan>("scan_photos", { root }),
+  /** Reads the Photos at `paths` as a scan would, such as after they were moved. */
+  read: (root: string, paths: string[]) => invoke<Photo[]>("read_photos", { root, paths }),
   preview: (root: string, path: string) => previewRequest(root, path),
   prewarmPreview: (root: string, photo: Photo) => previewRequest(root, photo.path, photo.revision),
   pageThumbnail: (root: string, path: string, signal: AbortSignal) => queuedThumbnail(root, path, signal),

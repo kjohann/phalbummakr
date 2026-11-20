@@ -95,6 +95,13 @@ async fn scan_photos(root: String) -> Result<photos::ScanResult, String> {
 }
 
 #[tauri::command]
+async fn read_photos(root: String, paths: Vec<String>) -> Result<Vec<photos::Photo>, String> {
+    tauri::async_runtime::spawn_blocking(move || photos::read_photos(Path::new(&root), &paths))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn folder_names(root: String, folder: String) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || sorting::folder_names(Path::new(&root), &folder))
         .await
@@ -313,6 +320,7 @@ pub fn run() {
             read_layout_library,
             write_layout_library,
             scan_photos,
+            read_photos,
             folder_names,
             root_albums,
             create_folder,

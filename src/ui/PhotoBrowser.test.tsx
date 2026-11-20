@@ -46,6 +46,12 @@ function photo(index: number) {
   };
 }
 
+/** What `read_photos` returns for Photos moved to `paths`: the same Photos, found by file name, at their new paths. */
+function movedRecords(photos: ReturnType<typeof photo>[], paths: string[]) {
+  const name = (path: string) => path.split("/").pop();
+  return paths.map((path) => ({ ...photos.find((scanned) => name(scanned.path) === name(path))!, path, revision: `moved:${path}` }));
+}
+
 it("updates Usage badges and the unused filter as the current Album changes", async () => {
   const first = photo(0);
   const second = photo(1);
@@ -230,6 +236,32 @@ it("rescans added and removed Photos, reports warnings, and keeps the grid when 
   expect(within(screen.getByRole("navigation")).getByText("holiday").getAttribute("aria-current")).toBe("page");
 });
 
+it("keeps the grid and its scroll position on rescan, retrying only failed thumbnails", async () => {
+  const photos = Array.from({ length: 200 }, (_, index) => photo(index));
+  const failing = new Set([photos[150].path]);
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "scan_photos") return { photos: photos.map((scanned) => ({ ...scanned })), folders: [], warnings: [] };
+    if (failing.has((args as { path: string }).path)) throw new Error("Photo is locked");
+    return "data:image/png;base64,dGVzdA==";
+  });
+  render(<PhotoBrowser root="D:\\Photos" />);
+  const grid = await screen.findByLabelText("Photo grid");
+  fireEvent.scroll(grid, { target: { scrollTop: 12_000 } });
+  await screen.findByText("Thumbnail unavailable. Rescan to retry.");
+  const thumbnails = (path: string) => vi.mocked(invoke).mock.calls.filter(([command, args]) =>
+    command === "photo_thumbnail" && (args as { path: string }).path === path).length;
+  await waitFor(() => expect(thumbnails(photos[151].path)).toBe(1));
+  const list = screen.getByRole("list", { name: "Folders and Photos" });
+
+  failing.clear();
+  fireEvent.click(screen.getByRole("button", { name: "Rescan" }));
+  await waitFor(() => expect(thumbnails(photos[150].path)).toBe(2));
+  await waitFor(() => expect(screen.queryByText("Thumbnail unavailable. Rescan to retry.")).toBeNull());
+  expect(screen.getByRole("list", { name: "Folders and Photos" })).toBe(list);
+  expect(screen.getByLabelText("Photo grid").scrollTop).toBe(12_000);
+  expect(thumbnails(photos[151].path)).toBe(1);
+});
+
 it("cancels queued thumbnails when leaving a folder", async () => {
   const photos = Array.from({ length: 100 }, (_, index) => ({
     ...photo(index), path: `holiday/photo-${index}.jpg`,
@@ -352,13 +384,12 @@ describe("sending Photos to a Folder by dragging", () => {
 
   async function browseTrips(onSendPhotos: (photos: string[], target: string) => Promise<PhotoMove[]>) {
     let scans = 0;
-    vi.mocked(invoke).mockImplementation(async (command) => {
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
       if (command === "scan_photos") {
         scans++;
-        return scans === 1
-          ? { photos: [{ ...photo(0), path: "trips/a.jpg" }], folders: ["trips", "trips/kids"], warnings: [] }
-          : { photos: [{ ...photo(0), path: "trips/kids/a (2).jpg" }], folders: ["trips", "trips/kids"], warnings: [] };
+        return { photos: [{ ...photo(0), path: "trips/a.jpg" }], folders: ["trips", "trips/kids"], warnings: [] };
       }
+      if (command === "read_photos") return (args as { paths: string[] }).paths.map((path) => ({ ...photo(0), path, revision: `moved:${path}` }));
       return "data:image/png;base64,dGVzdA==";
     });
     render(<PhotoBrowser root="D:\\Photos" onSendPhotos={onSendPhotos} />);
@@ -394,8 +425,10 @@ describe("sending Photos to a Folder by dragging", () => {
     expect(folder.classList.contains("drop-target")).toBe(false);
     finish([{ from: "trips/a.jpg", to: "trips/kids/a (2).jpg" }]);
     expect(await screen.findByText('Moved "a.jpg" to kids as "a (2).jpg".')).toBeTruthy();
-    await waitFor(() => expect(scans()).toBe(2));
     await screen.findByText("No Photos in this folder.");
+    expect(scans()).toBe(1);
+    fireEvent.click(screen.getByRole("button", { name: "Open folder kids" }));
+    expect(await screen.findByText("a (2).jpg")).toBeTruthy();
   });
 
   it("sends a Photo to the Library root from a breadcrumb and reports a failed move", async () => {
@@ -455,8 +488,9 @@ describe("Sort mode", () => {
 
   async function browseSort({ photos = [0, 1, 2].map(photo), folders = ["kids", "kids/small", ".hidden"], album = null as Album | null,
     onSendPhotos = vi.fn(async (): Promise<PhotoMove[]> => []), onCreateFolder = vi.fn(async (parent: string, name: string) => parent ? `${parent}/${name}` : name) } = {}) {
-    vi.mocked(invoke).mockImplementation(async (command) => {
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
       if (command === "scan_photos") return { photos, folders, warnings: [] };
+      if (command === "read_photos") return movedRecords(photos, (args as { paths: string[] }).paths);
       return `data:image/png;base64,${String(command)}`;
     });
     const host = sortHost();
@@ -612,14 +646,12 @@ describe("Sort mode", () => {
       fireEvent.click(screen.getByRole("menuitem", { name: "Send to Folder" }));
       fireEvent.click(within(screen.getByRole("menu", { name: "Send to Folder" })).getByRole("menuitem", { name: folder }));
     };
-    // Each move rescans, which replaces the grid; wait for the new one before using its tiles.
-    const grid = () => screen.getByRole("list", { name: "Folders and Photos" });
-    const rescanned = (before: HTMLElement) => waitFor(() => {
-      expect(grid()).not.toBe(before);
-      expect(tile(photo(3).path)).toBeTruthy();
+    // Wait for each move to finish, when its tiles leave the grid.
+    const settled = (...paths: string[]) => waitFor(() => {
+      const grid = within(screen.getByRole("list", { name: "Folders and Photos" }));
+      for (const path of paths) expect(grid.queryByText(path)).toBeNull();
     });
 
-    let before = grid();
     sendVia(work.getByRole("button", { name: `Unchoose ${photo(1).path}` }), "New Folder…");
     const dialog = within(screen.getByRole("dialog", { name: "New Folder" }));
     expect(dialog.getByText(/moves 2 Photos/)).toBeTruthy();
@@ -628,21 +660,23 @@ describe("Sort mode", () => {
     await waitFor(() => expect(onSendPhotos).toHaveBeenCalledWith([photo(0).path, photo(1).path], "best"));
     expect(onCreateFolder).toHaveBeenCalledWith("", "best");
     await waitFor(() => expect(work.queryByRole("button", { name: /photo-[01]\.jpg/ })).toBeNull());
-    await rescanned(before);
+    await settled(photo(0).path, photo(1).path);
+    expect(screen.getByRole("button", { name: "Open folder best" })).toBeTruthy();
 
     // An unchosen Photo goes on its own, from the grid as from the Comparison.
     fireEvent.click(tile(photo(3).path), { ctrlKey: true });
     fireEvent.click(work.getByRole("button", { name: `Choose ${photo(2).path}` }));
-    before = grid();
     sendVia(tile(photo(3).path), "kids");
     await waitFor(() => expect(onSendPhotos).toHaveBeenLastCalledWith([photo(3).path], "kids"));
-    await rescanned(before);
+    await settled(photo(3).path);
     // A chosen Photo right-clicked in the grid takes the other chosen Photos with it.
+    fireEvent.click(screen.getByRole("button", { name: "Open folder best" }));
+    await screen.findByText(photo(0).path);
     fireEvent.click(tile(photo(0).path), { ctrlKey: true });
     fireEvent.click(work.getByRole("button", { name: `Choose ${photo(0).path}` }));
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
-    sendVia(tile(photo(2).path), "kids");
-    await waitFor(() => expect(onSendPhotos).toHaveBeenLastCalledWith([photo(2).path, photo(0).path], "kids"));
+    sendVia(tile(photo(0).path), "kids");
+    await waitFor(() => expect(onSendPhotos).toHaveBeenLastCalledWith([photo(2).path, `best/${photo(0).path}`], "kids"));
   });
 
   it("sends the chosen Photos from the command bar's Send to Folder dialog, into an existing or a new Folder", async () => {
@@ -672,6 +706,94 @@ describe("Sort mode", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(onCreateFolder).toHaveBeenCalledWith("", "trip");
     expect(onSendPhotos).toHaveBeenLastCalledWith([photo(3).path], "trip");
+  });
+
+  it("updates the grid in place after a move: tiles are busy until it finishes, and the next Photo comes with the settled grid", async () => {
+    let finish!: (moves: PhotoMove[]) => void;
+    const onSendPhotos = vi.fn(() => new Promise<PhotoMove[]>((resolve) => { finish = resolve; }));
+    const { work, tile } = await browseSort({ onSendPhotos });
+    const grid = screen.getByRole("list", { name: "Folders and Photos" });
+    fireEvent.click(tile(photo(0).path));
+    fireEvent.contextMenu(await work.findByRole("img", { name: photo(0).path }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Send to Folder" }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "Send to Folder" })).getByRole("menuitem", { name: "kids" }));
+
+    expect(tile(photo(0).path).classList.contains("photo-tile--busy")).toBe(true);
+    expect(tile(photo(0).path).getAttribute("aria-busy")).toBe("true");
+    expect(tile(photo(1).path).classList.contains("photo-tile--busy")).toBe(false);
+    expect(work.getByRole("img", { name: photo(0).path }).closest(".sort-photo")!.classList.contains("sort-photo--leaving")).toBe(true);
+    expect(work.queryByRole("img", { name: photo(1).path })).toBeNull();
+
+    finish([{ from: photo(0).path, to: `kids/${photo(0).path}` }]);
+    expect(await work.findByRole("img", { name: photo(1).path })).toBeTruthy();
+    expect(within(grid).queryByText(photo(0).path)).toBeNull();
+    expect(tile(photo(1).path).classList.contains("photo-tile--shown")).toBe(true);
+    expect(screen.getByRole("list", { name: "Folders and Photos" })).toBe(grid);
+    expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "scan_photos")).toHaveLength(1);
+    expect(invoke).toHaveBeenCalledWith("read_photos", { root: "D:\\Photos", paths: [`kids/${photo(0).path}`] });
+
+    // The next move keeps the last message until it is done, so the grid below it doesn't jump.
+    fireEvent.dragStart(tile(photo(1).path), { dataTransfer: { effectAllowed: "none", setData: () => {} } });
+    fireEvent.contextMenu(tile(photo(1).path));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Send to Folder" }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "Send to Folder" })).getByRole("menuitem", { name: "kids" }));
+    expect(tile(photo(1).path).classList.contains("photo-tile--busy")).toBe(true);
+    expect(screen.getByText(`Moved "${photo(0).path}" to kids.`)).toBeTruthy();
+    finish([{ from: photo(1).path, to: `kids/${photo(1).path}` }]);
+    expect(await screen.findByText(`Moved "${photo(1).path}" to kids.`)).toBeTruthy();
+
+    // The moved Photo is in its new Folder, under its new revision.
+    fireEvent.click(screen.getByRole("button", { name: "Open folder kids" }));
+    expect(await screen.findByText(photo(0).path)).toBeTruthy();
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("photo_thumbnail", expect.objectContaining({ revision: `moved:kids/${photo(0).path}` })));
+  });
+
+  it("puts the tiles and the work area back to normal and shows the error when a move fails", async () => {
+    let fail!: (error: Error) => void;
+    const onSendPhotos = vi.fn(() => new Promise<PhotoMove[]>((_, reject) => { fail = reject; }));
+    const { work, tile } = await browseSort({ onSendPhotos });
+    fireEvent.click(tile(photo(0).path));
+    fireEvent.contextMenu(await work.findByRole("img", { name: photo(0).path }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Send to Folder" }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "Send to Folder" })).getByRole("menuitem", { name: "kids" }));
+    expect(tile(photo(0).path).classList.contains("photo-tile--busy")).toBe(true);
+
+    fail(new Error("Album locked"));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/Could not move.*Album locked/);
+    expect(tile(photo(0).path).classList.contains("photo-tile--busy")).toBe(false);
+    expect(tile(photo(0).path).hasAttribute("aria-busy")).toBe(false);
+    expect(work.getByRole("img", { name: photo(0).path }).closest(".sort-photo")!.classList.contains("sort-photo--leaving")).toBe(false);
+  });
+
+  it("doesn't let a scan that was running during a move bring the moved Photo back", async () => {
+    const photos = [0, 1, 2].map(photo);
+    const moved = { ...photo(0), path: `kids/${photo(0).path}`, revision: "moved" };
+    let releaseStale!: () => void;
+    let scans = 0;
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "scan_photos") {
+        scans++;
+        if (scans === 2) await new Promise<void>((resolve) => { releaseStale = resolve; });
+        return { photos: scans === 3 ? [moved, ...photos.slice(1)] : photos, folders: ["kids"], warnings: [] };
+      }
+      if (command === "read_photos") return [moved];
+      return "data:image/png;base64,dGVzdA==";
+    });
+    const onSendPhotos = vi.fn(async (): Promise<PhotoMove[]> => [{ from: photo(0).path, to: moved.path }]);
+    render(<PhotoBrowser root="D:\\Photos" onSendPhotos={onSendPhotos} sort={{ host: sortHost(), active: true, onChosenChange: () => undefined }} />);
+    const grid = within(await screen.findByRole("list", { name: "Folders and Photos" }));
+    await grid.findByText(photo(0).path);
+    fireEvent.click(screen.getByRole("button", { name: "Rescan" }));
+    await screen.findByText("Scanning Library...");
+
+    fireEvent.contextMenu(grid.getByText(photo(0).path));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Send to Folder" }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "Send to Folder" })).getByRole("menuitem", { name: "kids" }));
+    await screen.findByText(`Moved "${photo(0).path}" to kids.`);
+    releaseStale();
+    await waitFor(() => expect(scans).toBe(3));
+    await waitFor(() => expect(screen.queryByText("Scanning Library...")).toBeNull());
+    expect(grid.queryByText(photo(0).path)).toBeNull();
   });
 });
 
