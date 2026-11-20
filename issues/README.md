@@ -74,10 +74,18 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 029 | [Applying Layouts in Album mode](029-apply-layouts.md)         | 010, 023   | done   |
 | 030 | [Slot shortcuts and inline text formatting](030-slot-shortcuts-and-inline-format.md) | 024 | done   |
 | 031 | [Native File menu does not switch Albums (bug)](031-file-menu-album-switching.md) | 016 | doing  |
+| 032 | [Smooth moves in Sort mode (bug)](032-smooth-moves-in-sort-mode.md) | 028 | todo   |
+| 033 | [Folder area and a tidier Photo pane header](033-folder-area.md) | 027 | todo   |
+| 034 | [Drag Selected Photos to a Folder](034-drag-selected-photos.md) | 028, 033 | todo   |
+| 035 | [Unlimited Comparison, Clear Comparison and work-area zoom](035-unlimited-comparison-and-zoom.md) | 028 | todo   |
+| 036 | [Delete Folders](036-delete-folders.md)                        | 027        | todo   |
+| 037 | [Reviewed Photos and remembered position](037-reviewed-photos.md) | 028     | todo   |
 
 Work order for the layout rework: 016, 017, 018, 019, 020, then 011.
 
 Work order for modes: 023, then 024, the 016 addendum and 011; 026 → 027/028; 010 → 029.
+
+Work order for Sort mode feedback: 032 → 033 → 034, then 035, 036 and 037 in any order.
 
 ## Addenda
 

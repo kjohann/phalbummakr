@@ -23,8 +23,16 @@ Moving Photos between Folders in the Library. Moving a placed Photo keeps every 
 _Avoid_: Culling, filing, importing
 
 **Comparison**:
-Up to four Photos shown side by side while Sorting. Photos in a Comparison are chosen one by one to be sent to a Folder together; a single Photo shown on its own counts as chosen.
-_Avoid_: Selection, lightbox, stack
+Any number of Photos shown side by side while Sorting. Photos in a Comparison are selected one by one to be sent to a Folder together; a single Photo shown on its own counts as selected.
+_Avoid_: Lightbox, stack
+
+**Selected Photos**:
+The Photos in a Comparison that sending to a Folder acts on. They are always part of the Comparison, and clearing the Comparison clears them too.
+_Avoid_: Chosen Photos
+
+**Reviewed Photo**:
+A Photo the user has looked at while Sorting, either shown in a Comparison or marked by hand. It stays reviewed until it is unmarked, wherever it is moved in the Library.
+_Avoid_: Seen, checked, bookmark
 
 **Usage**:
 The number of times a Photo has been placed in an Album.

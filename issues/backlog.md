@@ -7,7 +7,6 @@ Decided in the design session but deliberately left out of the MVP. Promote an i
 - **Albums in subfolders**: an Album file in a subfolder has its own nested Library. Sorting and Folder renames only update Albums directly in the Library root, so such Albums can break.
 - **Repair after outside changes**: Folders or Photos renamed or moved outside the app break Placements. Offer a repair or relink function that finds them again.
 - **Missing Photos**: mark Placements whose file is gone and relink them by hand, with a match suggested from file name and capture date.
-- **Drag several Photos to a Folder**: dragging moves only the dragged Photo (026). Moving several at once is done with "Send to Folder ▸" in Sort mode (028).
 - **Usage in other Albums**, shown in the Photo's details (nice to have).
 - **Redesign the "already in the Album" warning**: the warning that pops up when a Photo already used in the Album is placed again is annoying, and it makes the whole Spread jitter. Find a less intrusive design.
 - **Locate where a Photo is used**: the usage badge shows that a Photo is used but not where. Explore highlighting the Slots that use it and/or a tooltip listing the Pages it's used on.

@@ -53,6 +53,9 @@ current changes: address points that now fit the scope, and leave unrelated work
 deferred. Record resolved points and the reason for any relevant deferrals in the
 issue being completed so later agents can distinguish open work from history.
 
+Check the [inbox](issues/inbox.md) for notes the change happens to resolve.
+Remove them, and mention them in the issue being completed.
+
 After code review, record remaining non-blocking review points under a
 "Future considerations (low priority)" section in that issue.
 
