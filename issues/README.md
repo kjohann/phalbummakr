@@ -79,7 +79,7 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 034 | [Drag Selected Photos to a Folder](034-drag-selected-photos.md) | 028, 033 | done   |
 | 035 | [Unlimited Comparison, Clear Comparison and work-area zoom](035-unlimited-comparison-and-zoom.md) | 028 | todo   |
 | 036 | [Delete Folders](036-delete-folders.md)                        | 027        | todo   |
-| 037 | [Reviewed Photos and remembered position](037-reviewed-photos.md) | 028     | todo   |
+| 037 | [Reviewed Photos and remembered position](037-reviewed-photos.md) | 028     | done   |
 
 Work order for the layout rework: 016, 017, 018, 019, 020, then 011.
 

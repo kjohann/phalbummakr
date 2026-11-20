@@ -1,13 +1,15 @@
-import { useEffect, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
 import {
   afterMove, canAddToComparison, canStepFolder, chosenPhotos, currentFolder, EMPTY_COMPARISON, folderNameProblem, folderRenameProblem,
-  historyAfterRename, historyAfterRescan, isProtectedFolder, photoUsage, renamedPath, scanAfterMove, showPhoto, START_FOLDER_HISTORY, stepFolder, stepPhoto,
+  historyAfterRename, historyAfterRescan, isProtectedFolder, photosUpTo, photoUsage, progressAfterMove, progressAfterRename, progressAfterRescan,
+  rememberScroll, renamedPath, scanAfterMove, setReviewed, showInProgress, showPhoto, START_FOLDER_HISTORY, stepFolder, stepPhoto,
   toggleChosen, toggleComparison, visitFolder, withoutPhotos,
   type Album, type Comparison, type FolderHistory, type FolderRename, type Photo, type PhotoMove, type PhotoScan,
 } from "../core";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
 import { folderExists } from "./tauriSortingPorts";
+import { useSortProgress } from "./useSortProgress";
 import { hasPhotoDrag, leftElement, readPhotoDrag, writeCountDragImage, writePhotoDrag, type PhotoDragStart } from "./photoDrag";
 import { useEdgeScroll } from "./edgeScroll";
 import SortView, { usageLabel } from "./SortView";
@@ -85,9 +87,11 @@ function parentFolder(path: string) {
   return separator < 0 ? "" : path.slice(0, separator);
 }
 
-function PhotoThumbnail({ root, photo, generation, usage, compact, onDragStart, onDragEnd, shown, moving, onClick, onContextMenu }: {
+const NO_PHOTOS: ReadonlySet<string> = new Set();
+
+function PhotoThumbnail({ root, photo, generation, usage, compact, onDragStart, onDragEnd, shown, reviewed, moving, onClick, onContextMenu }: {
   root: string; photo: Photo; generation: number; usage: number; compact: boolean; onDragStart: PhotoDragStart; onDragEnd: () => void;
-  shown: boolean; moving: boolean; onClick?: PhotoClick; onContextMenu?: PhotoClick;
+  shown: boolean; reviewed: boolean; moving: boolean; onClick?: PhotoClick; onContextMenu?: PhotoClick;
 }) {
   const [source, setSource] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -127,6 +131,7 @@ function PhotoThumbnail({ root, photo, generation, usage, compact, onDragStart, 
         {!source && !error && <span className="photo-placeholder">{compact ? "…" : "Loading..."}</span>}
         {error && <span className="photo-failure" role="alert" title={error}>{compact ? "!" : "Thumbnail unavailable. Rescan to retry."}</span>}
         {usage > 0 && <span className="photo-usage" aria-label={usageLabel(usage)}>{usage}</span>}
+        {reviewed && <span className="photo-reviewed" aria-label="Reviewed" title="Reviewed">✓</span>}
         {moving && <span className="photo-busy" aria-hidden="true" />}
       </div>
       {!compact && <figcaption>
@@ -190,7 +195,8 @@ function FolderArea({ folders, compact, onOpenFolder, drop, onFolderContextMenu,
   );
 }
 
-function PhotoGrid({ root, photos, generation, usage, compact, onDragStart, onDragEnd, shown, moving, onPhotoClick, onPhotoContextMenu, onSpaceContextMenu, edgeScroll }: {
+function PhotoGrid({ root, photos, generation, usage, compact, onDragStart, onDragEnd, shown, reviewed, moving, initialScrollTop, onScrollChange,
+  onPhotoClick, onPhotoContextMenu, onSpaceContextMenu, edgeScroll }: {
   root: string;
   photos: Photo[];
   /** Counts scans, so a rescan retries failed thumbnails. */
@@ -200,8 +206,14 @@ function PhotoGrid({ root, photos, generation, usage, compact, onDragStart, onDr
   onDragStart: PhotoDragStart;
   onDragEnd: () => void;
   shown: readonly string[];
+  /** Reviewed Photos to mark; empty outside Sort mode. */
+  reviewed: ReadonlySet<string>;
   /** Photos being moved, shown dimmed and busy. */
   moving: readonly string[];
+  /** Where to scroll to once, when it is first known; undefined until then. */
+  initialScrollTop?: number;
+  /** Reports where the grid was scrolled to, shortly after scrolling stops and when the grid goes away. */
+  onScrollChange?: (scrollTop: number) => void;
   onPhotoClick?: PhotoClick;
   onPhotoContextMenu?: PhotoClick;
   onSpaceContextMenu: (event: ReactMouseEvent) => void;
@@ -220,6 +232,33 @@ function PhotoGrid({ root, photos, generation, usage, compact, onDragStart, onDr
     return () => observer.disconnect();
   }, []);
 
+  const restored = useRef(false);
+  useEffect(() => {
+    const element = viewportRef.current;
+    if (restored.current || initialScrollTop === undefined || viewport.height === 0 || !element) return;
+    restored.current = true;
+    element.scrollTop = initialScrollTop;
+    setScrollTop(element.scrollTop);
+  }, [initialScrollTop, viewport.height]);
+
+  const reportScroll = useRef(onScrollChange);
+  reportScroll.current = onScrollChange;
+  const pendingScroll = useRef<{ timer: number; scrollTop: number } | null>(null);
+  const flushScroll = useCallback(() => {
+    const pending = pendingScroll.current;
+    if (!pending) return;
+    window.clearTimeout(pending.timer);
+    pendingScroll.current = null;
+    reportScroll.current?.(pending.scrollTop);
+  }, []);
+  useEffect(() => flushScroll, [flushScroll]);
+  function scrolled(top: number) {
+    setScrollTop(top);
+    if (!reportScroll.current) return;
+    if (pendingScroll.current) window.clearTimeout(pendingScroll.current.timer);
+    pendingScroll.current = { timer: window.setTimeout(flushScroll, 250), scrollTop: top };
+  }
+
   const { rowHeight, columnWidth } = compact ? GRID.compact : GRID.regular;
   const columns = Math.max(1, Math.floor(viewport.width / columnWidth));
   const rows = Math.ceil(photos.length / columns);
@@ -229,7 +268,7 @@ function PhotoGrid({ root, photos, generation, usage, compact, onDragStart, onDr
 
   return (
     <div className={compact ? "photo-grid photo-grid-compact" : "photo-grid"} ref={viewportRef} aria-label="Photo grid" tabIndex={0}
-      onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+      onScroll={(event) => scrolled(event.currentTarget.scrollTop)}
       // Tiles have menus of their own, or none; only empty space gets the grid's menu.
       onContextMenu={spaceMenu(onSpaceContextMenu)} {...edgeScroll}>
       <div className="photo-grid-content" role="list" aria-label="Photos"
@@ -247,7 +286,8 @@ function PhotoGrid({ root, photos, generation, usage, compact, onDragStart, onDr
                 height: rowHeight,
               }}>
               <PhotoThumbnail root={root} photo={photo} generation={generation} usage={usage.get(photo.path) ?? 0}
-                compact={compact} onDragStart={onDragStart} onDragEnd={onDragEnd} shown={shown.includes(photo.path)} moving={moving.includes(photo.path)}
+                compact={compact} onDragStart={onDragStart} onDragEnd={onDragEnd} shown={shown.includes(photo.path)}
+                reviewed={reviewed.has(photo.path)} moving={moving.includes(photo.path)}
                 onClick={onPhotoClick} onContextMenu={onPhotoContextMenu} />
             </div>
           );
@@ -320,12 +360,15 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
   const moving = movingPhotos.length > 0;
   const [moveMessage, setMoveMessage] = useState<{ text: string; failed: boolean } | null>(null);
   const [result, setResult] = useState<(PhotoScan & { generation: number }) | null>(null);
+  const { progress, error: progressError, update: updateProgress } = useSortProgress(root, sort?.active ?? false);
   // Each mode keeps its own place, in memory only; a new Library starts both at its root.
   const [places, setPlaces] = useState<FolderPlaces>(START_PLACES);
   const [placesRoot, setPlacesRoot] = useState(root);
   if (placesRoot !== root) {
     setPlacesRoot(root);
     setPlaces(START_PLACES);
+    // The old Library's Photos would otherwise be taken for the new one's until its scan is done.
+    setResult(null);
   }
   const [loading, setLoading] = useState(true);
   const loadingRef = useRef(loading);
@@ -342,6 +385,8 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
         const scanned = new Set(result.photos.map((photo) => photo.path));
         setComparison((current) => withoutPhotos(current, current.shown.filter((path) => !scanned.has(path))));
         setResult({ ...result, generation: scan });
+        // Only a whole scan forgets marks on Photos gone from the Library, not a grid patched after a move.
+        updateProgress((current) => progressAfterRescan(current, [...scanned], result.folders), { ifLoaded: true });
         const fit = ({ history }: FolderPlaces[PhotoPaneMode]) => {
           const { history: next, fellBackFrom } = historyAfterRescan(history, result.folders);
           return {
@@ -359,10 +404,14 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
         if (active) setLoading(false);
       });
     return () => { active = false; };
-  }, [root, scan]);
+  }, [root, scan, updateProgress]);
   useEffect(() => {
     if (result) onPhotosChange?.(result.photos);
   }, [result, onPhotosChange]);
+  const progressLoaded = progress !== null;
+  useEffect(() => {
+    if (progressLoaded) updateProgress((current) => showInProgress(current, comparison.shown));
+  }, [comparison.shown, progressLoaded, updateProgress]);
 
   const { history, notice } = places[mode];
   const folder = result ? currentFolder(history) : "";
@@ -420,6 +469,20 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
   const grid = photos.map((photo) => photo.path);
   const gridRef = useRef(grid);
   gridRef.current = grid;
+
+  // Opening a Folder in Sort mode brings back its last shown Photo, unless a Comparison is being built.
+  const restoredFolder = useRef<string | null>(null);
+  const hasResult = result !== null;
+  useEffect(() => {
+    if (!sortActive || !progress || !hasResult) return;
+    const key = `${root}\0${folder}`;
+    if (restoredFolder.current === key) return;
+    restoredFolder.current = key;
+    const shown = progress.positions.get(folder)?.shown;
+    if (shown && gridRef.current.includes(shown)) {
+      setComparison((current) => current.shown.length > 1 ? current : showPhoto(shown));
+    }
+  }, [sortActive, progress, hasResult, root, folder]);
   const chosenCount = chosenPhotos(comparison).length;
   const onChosenChange = sort?.onChosenChange;
   useEffect(() => onChosenChange?.(chosenCount), [chosenCount, onChosenChange]);
@@ -471,6 +534,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
     try {
       const moves = await onSendPhotos!(paths, target);
       if (moves.length > 0) {
+        updateProgress((current) => progressAfterMove(current, moves));
         // Moved Photos get new revisions, so only they are read again, not the whole Library.
         const moved = await tauriPhotoPorts.read(root, moves.map(({ to }) => to)).catch(() => null);
         setResult((current) => current && { ...scanAfterMove(current, moves, moved ?? []), generation: current.generation });
@@ -521,6 +585,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
 
   async function renameFolder(folder: string, name: string) {
     const rename: FolderRename = { from: folder, to: await onRenameFolder!(folder, name) };
+    updateProgress((current) => progressAfterRename(current, rename));
     setNaming(null);
     const follow = (path: string) => renamedPath(path, rename) ?? path;
     setComparison((current) => ({ shown: current.shown.map(follow), chosen: current.chosen.map(follow) }));
@@ -566,7 +631,14 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
     const inComparison = comparison.shown.includes(path);
     // Like a file manager's selection: a chosen Photo takes the other chosen Photos with it.
     const chosen = chosenPhotos(comparison);
-    const sendItem = { label: "Send to Folder", items: sendToFolderItems(chosen.includes(path) ? chosen : [path]) };
+    const targets = chosen.includes(path) ? chosen : [path];
+    const sendItem = { label: "Send to Folder", items: sendToFolderItems(targets) };
+    const allReviewed = progress !== null && targets.every((target) => progress.reviewed.has(target));
+    const reviewItem: MenuItem = {
+      label: allReviewed ? "Mark as unreviewed" : "Mark as reviewed",
+      onSelect: () => updateProgress((current) => setReviewed(current, targets, !allReviewed)),
+      disabled: !progress,
+    };
     if (where === "grid") {
       return [
         { label: "Show", onSelect: () => setComparison(showPhoto(path)) },
@@ -575,6 +647,9 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
           : { label: "Add to Comparison", onSelect: () => setComparison((current) => toggleComparison(current, path)),
             disabled: !canAddToComparison(comparison) },
         sendItem,
+        reviewItem,
+        { label: "Mark all up to here as reviewed", disabled: !progress,
+          onSelect: () => updateProgress((current) => setReviewed(current, photosUpTo(gridRef.current, path), true)) },
       ];
     }
     const isChosen = comparison.chosen.includes(path);
@@ -582,6 +657,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
       ...comparison.shown.length > 1 ? [{ label: isChosen ? "Unchoose" : "Choose", onSelect: () => setComparison((current) => toggleChosen(current, path)) }] : [],
       { label: "Remove from Comparison", onSelect: () => setComparison((current) => toggleComparison(current, path)) },
       sendItem,
+      reviewItem,
     ];
   }
 
@@ -669,6 +745,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
         ? <p className="error-banner" role="alert">{moveMessage.text}</p>
         : <p className="photo-empty" role="status">{moveMessage.text}</p>)}
       {error && <p className="error-banner" role="alert">{error}</p>}
+      {progressError && <p className="error-banner" role="alert">{progressError}</p>}
       {result && result.warnings.length > 0 && (
         <details className="photo-warnings">
           <summary>{result.warnings.length} scan warning(s)</summary>
@@ -683,6 +760,9 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
       {result && <PhotoGrid key={`${root}:${folder}:${unusedOnly}`} root={root} generation={result.generation}
         photos={photos} usage={usage} compact={compact}
         onDragStart={startDrag} onDragEnd={endDrag} shown={sortActive ? comparison.shown : []} moving={movingPhotos}
+        reviewed={sortActive && progress ? progress.reviewed : NO_PHOTOS}
+        initialScrollTop={sortActive && progress ? progress.positions.get(folder)?.scrollTop ?? 0 : undefined}
+        onScrollChange={sortActive ? (scrollTop) => updateProgress((current) => rememberScroll(current, folder, scrollTop)) : undefined}
         onPhotoClick={photoClick} onPhotoContextMenu={sortActive ? openMenu("grid") : undefined}
         onSpaceContextMenu={spaceContextMenu} edgeScroll={edgeScroll} />}
       {sort?.host && createPortal(<SortView root={root} photos={shownPhotos} chosen={comparison.chosen} usage={usage} leaving={movingPhotos}

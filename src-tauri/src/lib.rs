@@ -1,7 +1,7 @@
 mod albums;
 mod exports;
 mod fonts;
-mod layouts;
+mod library_data;
 mod photos;
 mod settings;
 mod sorting;
@@ -71,20 +71,38 @@ async fn write_album_file(path: String, json: String, create: bool) -> Result<()
     .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-async fn read_layout_library(root: String) -> Result<Option<String>, String> {
-    tauri::async_runtime::spawn_blocking(move || layouts::read_library(Path::new(&root)))
+async fn read_library_data(root: String, file: &'static str) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || library_data::read(Path::new(&root), file))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+async fn write_library_data(root: String, file: &'static str, json: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || library_data::write(Path::new(&root), file, &json))
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
+async fn read_layout_library(root: String) -> Result<Option<String>, String> {
+    read_library_data(root, library_data::LAYOUTS).await
+}
+
+#[tauri::command]
 async fn write_layout_library(root: String, json: String) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || layouts::write_library(Path::new(&root), &json))
-        .await
-        .map_err(|error| error.to_string())?
-        .map_err(|error| error.to_string())
+    write_library_data(root, library_data::LAYOUTS, json).await
+}
+
+#[tauri::command]
+async fn read_sort_progress(root: String) -> Result<Option<String>, String> {
+    read_library_data(root, library_data::SORTING).await
+}
+
+#[tauri::command]
+async fn write_sort_progress(root: String, json: String) -> Result<(), String> {
+    write_library_data(root, library_data::SORTING, json).await
 }
 
 #[tauri::command]
@@ -319,6 +337,8 @@ pub fn run() {
             write_album_file,
             read_layout_library,
             write_layout_library,
+            read_sort_progress,
+            write_sort_progress,
             scan_photos,
             read_photos,
             folder_names,
