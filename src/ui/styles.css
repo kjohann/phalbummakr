@@ -544,6 +544,38 @@ body {
   text-align: center;
 }
 
+/* Built off screen for a drag of several Photos; the browser snapshots it as the drag image. */
+.photo-drag-image {
+  position: fixed;
+  top: -1000px;
+  left: -1000px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 3px 3px 0 #c9cfca, 6px 6px 0 #aab3ac;
+}
+
+.photo-drag-image img {
+  display: block;
+  max-width: 96px;
+  max-height: 72px;
+  object-fit: contain;
+}
+
+.photo-drag-count {
+  padding: 2px 8px;
+  border-radius: 3px;
+  color: #fff;
+  background: #344c3e;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .usage-warning {
   display: flex;
   align-items: center;

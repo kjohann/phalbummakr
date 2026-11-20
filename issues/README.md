@@ -76,7 +76,7 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 031 | [Native File menu does not switch Albums (bug)](031-file-menu-album-switching.md) | 016 | doing  |
 | 032 | [Smooth moves in Sort mode (bug)](032-smooth-moves-in-sort-mode.md) | 028 | done   |
 | 033 | [Folder area and a tidier Photo pane header](033-folder-area.md) | 027 | done   |
-| 034 | [Drag Selected Photos to a Folder](034-drag-selected-photos.md) | 028, 033 | todo   |
+| 034 | [Drag Selected Photos to a Folder](034-drag-selected-photos.md) | 028, 033 | done   |
 | 035 | [Unlimited Comparison, Clear Comparison and work-area zoom](035-unlimited-comparison-and-zoom.md) | 028 | todo   |
 | 036 | [Delete Folders](036-delete-folders.md)                        | 027        | todo   |
 | 037 | [Reviewed Photos and remembered position](037-reviewed-photos.md) | 028     | todo   |

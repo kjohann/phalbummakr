@@ -8,7 +8,7 @@ import {
 } from "../core";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
 import { folderExists } from "./tauriSortingPorts";
-import { hasPhotoDrag, leftElement, readPhotoDrag, writePhotoDrag } from "./photoDrag";
+import { hasPhotoDrag, leftElement, readPhotoDrag, writeCountDragImage, writePhotoDrag, type PhotoDragStart } from "./photoDrag";
 import { useEdgeScroll } from "./edgeScroll";
 import SortView, { usageLabel } from "./SortView";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
@@ -85,8 +85,8 @@ function parentFolder(path: string) {
   return separator < 0 ? "" : path.slice(0, separator);
 }
 
-function PhotoThumbnail({ root, photo, generation, usage, compact, onDragChange, shown, moving, onClick, onContextMenu }: {
-  root: string; photo: Photo; generation: number; usage: number; compact: boolean; onDragChange: (path: string | null) => void;
+function PhotoThumbnail({ root, photo, generation, usage, compact, onDragStart, onDragEnd, shown, moving, onClick, onContextMenu }: {
+  root: string; photo: Photo; generation: number; usage: number; compact: boolean; onDragStart: PhotoDragStart; onDragEnd: () => void;
   shown: boolean; moving: boolean; onClick?: PhotoClick; onContextMenu?: PhotoClick;
 }) {
   const [source, setSource] = useState<string | null>(null);
@@ -119,9 +119,9 @@ function PhotoThumbnail({ root, photo, generation, usage, compact, onDragChange,
       onContextMenu={onContextMenu && ((event) => { event.preventDefault(); if (!moving) onContextMenu(photo.path, event); })}
       draggable={!moving} onDragStart={(event) => {
         writePhotoDrag(event.dataTransfer, photo, source ?? undefined);
-        onDragChange(photo.path);
+        onDragStart(photo.path, event);
         void tauriPhotoPorts.prewarmPreview(root, photo).catch(() => undefined);
-      }} onDragEnd={() => onDragChange(null)}>
+      }} onDragEnd={onDragEnd}>
       <div className="photo-preview">
         {source && <img src={source} alt={name} loading="lazy" decoding="async" draggable={false} />}
         {!source && !error && <span className="photo-placeholder">{compact ? "…" : "Loading..."}</span>}
@@ -190,14 +190,15 @@ function FolderArea({ folders, compact, onOpenFolder, drop, onFolderContextMenu,
   );
 }
 
-function PhotoGrid({ root, photos, generation, usage, compact, onDragChange, shown, moving, onPhotoClick, onPhotoContextMenu, onSpaceContextMenu, edgeScroll }: {
+function PhotoGrid({ root, photos, generation, usage, compact, onDragStart, onDragEnd, shown, moving, onPhotoClick, onPhotoContextMenu, onSpaceContextMenu, edgeScroll }: {
   root: string;
   photos: Photo[];
   /** Counts scans, so a rescan retries failed thumbnails. */
   generation: number;
   usage: Map<string, number>;
   compact: boolean;
-  onDragChange: (path: string | null) => void;
+  onDragStart: PhotoDragStart;
+  onDragEnd: () => void;
   shown: readonly string[];
   /** Photos being moved, shown dimmed and busy. */
   moving: readonly string[];
@@ -246,7 +247,7 @@ function PhotoGrid({ root, photos, generation, usage, compact, onDragChange, sho
                 height: rowHeight,
               }}>
               <PhotoThumbnail root={root} photo={photo} generation={generation} usage={usage.get(photo.path) ?? 0}
-                compact={compact} onDragChange={onDragChange} shown={shown.includes(photo.path)} moving={moving.includes(photo.path)}
+                compact={compact} onDragStart={onDragStart} onDragEnd={onDragEnd} shown={shown.includes(photo.path)} moving={moving.includes(photo.path)}
                 onClick={onPhotoClick} onContextMenu={onPhotoContextMenu} />
             </div>
           );
@@ -310,7 +311,8 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
   const [naming, setNaming] = useState<FolderNaming | null>(null);
   const [scan, setScan] = useState(0);
   const [unusedOnly, setUnusedOnly] = useState(false);
-  const [dragged, setDragged] = useState<string | null>(null);
+  // The Photos a drag from the grid or the work area moves; null when no such drag is running.
+  const [dragged, setDragged] = useState<readonly string[] | null>(null);
   const [dropOver, setDropOver] = useState<string | null>(null);
   const edgeScroll = useEdgeScroll();
   // The Photos being moved; empty when no move is running.
@@ -445,10 +447,22 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
   const byPath = new Map(result?.photos.map((photo) => [photo.path, photo]));
   const shownPhotos = comparison.shown.flatMap((path) => byPath.get(path) ?? []);
 
-  function dragChange(path: string | null) {
-    setDragged(path);
+  function dragChange(paths: readonly string[] | null) {
+    setDragged(paths);
     setDropOver(null);
   }
+
+  /** Like right-click, a chosen Photo takes the other chosen Photos with it, but only in Sort mode, where they are shown. */
+  const startDrag: PhotoDragStart = (path, event) => {
+    const chosen = sortActive ? chosenPhotos(comparison) : [];
+    const paths = chosen.includes(path) ? chosen : [path];
+    if (paths.length > 1) {
+      const picture = event.currentTarget instanceof Element ? event.currentTarget.querySelector("img") : null;
+      writeCountDragImage(event.dataTransfer, paths.length, picture);
+    }
+    dragChange(paths);
+  };
+  const endDrag = () => dragChange(null);
 
   async function send(paths: string[], target: string) {
     const gridBefore = gridRef.current;
@@ -480,7 +494,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
 
   /** The Folders `paths` can be sent to, nested as in the Library, each with "New Folder…" inside it. */
   const sendTargets = result?.folders.filter((path) => !isProtectedFolder(path)) ?? [];
-  const isAllIn = (paths: string[]) => (target: string) => paths.every((path) => parentFolder(path) === target);
+  const isAllIn = (paths: readonly string[]) => (target: string) => paths.every((path) => parentFolder(path) === target);
   function sendToFolderItems(paths: string[]): MenuItem[] {
     const unavailable = !onSendPhotos || moving;
     const alreadyIn = isAllIn(paths);
@@ -571,9 +585,9 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
     ];
   }
 
-  // The current Folder and the Photo's own Folder are never targets; from the grid, these are usually the same.
+  // A Folder already holding every dragged Photo is no target, such as the current Folder for a drag from the grid.
   const drop: FolderDrop = (target) => {
-    if (!onSendPhotos || !dragged || moving || target === folder || target === parentFolder(dragged)
+    if (!onSendPhotos || !dragged || moving || isAllIn(dragged)(target)
       || isProtectedFolder(target)) return {};
     return {
       className: dropOver === target ? "drop-target drop-target-over" : "drop-target",
@@ -594,7 +608,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
         event.preventDefault();
         // The tile being dragged may be gone after the move, so dragend can't be relied on.
         dragChange(null);
-        if (photo.path === dragged) void send([photo.path], target);
+        if (dragged.includes(photo.path)) void send([...dragged], target);
       },
     };
   };
@@ -668,12 +682,12 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
       )}
       {result && <PhotoGrid key={`${root}:${folder}:${unusedOnly}`} root={root} generation={result.generation}
         photos={photos} usage={usage} compact={compact}
-        onDragChange={dragChange} shown={sortActive ? comparison.shown : []} moving={movingPhotos}
+        onDragStart={startDrag} onDragEnd={endDrag} shown={sortActive ? comparison.shown : []} moving={movingPhotos}
         onPhotoClick={photoClick} onPhotoContextMenu={sortActive ? openMenu("grid") : undefined}
         onSpaceContextMenu={spaceContextMenu} edgeScroll={edgeScroll} />}
       {sort?.host && createPortal(<SortView root={root} photos={shownPhotos} chosen={comparison.chosen} usage={usage} leaving={movingPhotos}
         onToggleChosen={(path) => setComparison((current) => toggleChosen(current, path))}
-        onContextMenu={openMenu("view")} />, sort.host)}
+        onContextMenu={openMenu("view")} onDragStart={startDrag} onDragEnd={endDrag} />, sort.host)}
       {menu && <ContextMenu label="Photo actions" x={menu.x} y={menu.y} items={menuItems(menu)} onClose={() => setMenu(null)} />}
       {folderDialog && <SendToFolderDialog count={folderDialog.paths.length} folders={sendTargets} parent={folderDialog.parent}
         siblings={siblingNames} alreadyIn={isAllIn(folderDialog.paths)}

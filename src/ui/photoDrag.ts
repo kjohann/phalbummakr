@@ -1,3 +1,4 @@
+import type { DragEvent } from "react";
 import type { PlaceablePhoto } from "../core";
 
 const PHOTO_TYPE = "application/x-phalbummakr-photo";
@@ -36,6 +37,30 @@ export function readPhotoDrag(dataTransfer: DataTransfer): (PlaceablePhoto & { t
   } catch {
     return null;
   }
+}
+
+/** A Photo starts being dragged from the element it is shown in. */
+export type PhotoDragStart = (photo: string, event: DragEvent) => void;
+
+/** Shows the dragged Photo's `picture`, if loaded, labelled with how many Photos the drag moves. */
+export function writeCountDragImage(dataTransfer: DataTransfer, count: number, picture: HTMLImageElement | null) {
+  if (typeof dataTransfer.setDragImage !== "function") return;
+  const image = document.createElement("div");
+  image.className = "photo-drag-image";
+  if (picture?.complete && picture.naturalWidth > 0) {
+    const copy = picture.cloneNode() as HTMLImageElement;
+    copy.alt = "";
+    copy.removeAttribute("loading");
+    image.append(copy);
+  }
+  const label = document.createElement("span");
+  label.className = "photo-drag-count";
+  label.textContent = `${count} Photos`;
+  image.append(label);
+  document.body.append(image);
+  dataTransfer.setDragImage(image, 20, 20);
+  // The browser takes its snapshot of the drag image right away.
+  setTimeout(() => image.remove());
 }
 
 /** Whether a dragleave left the element itself, not just moved onto one of its children. */
