@@ -19,9 +19,9 @@ Decided in the design session but deliberately left out of the MVP. Promote an i
 - **Mouse-wheel and pinch zoom** of a Photo's Crop, removed in 019 in favour of the Zoom buttons.
 - **Photo rotation within a fixed Slot** in 90° steps. Free rotation is something to explore later.
 - **Resize Slots from every corner**: today a Slot can only be resized from its bottom-right handle.
-- **Alt-drag to duplicate a Slot**, as in Miro and FigJam: holding Alt while dragging leaves the original in place and drops a copy. Alt currently turns snapping off during a drag (013), so the two need a different split of modifiers.
+- **Alt-drag to duplicate a Slot**, as in Miro and FigJam: holding Alt while dragging leaves the original in place and drops a copy. Alt currently turns snapping off during a drag (013), so the two need a different split of modifiers. Suggest another modifier for turning snap off.
 - **Move a Slot between Pages in a Spread**: drag a Slot across the gutter to the facing Page. Scoped in closed [021](021-move-slot-between-pages.md); a new issue should follow it and can reuse its acceptance criteria.
-- **Move several Slots together**: select several Slots on a Page and move them as a group. Mixed selections of Photo Slots and Text Slots need thought: which Slot tools still apply, and how snapping and rotation behave for a group.
+- **Move several Slots together**: select several Slots on a Page and move them as a group. Mixed selections of Photo Slots and Text Slots need thought: which Slot tools still apply, and how snapping and rotation behave for a group. Most probable solution: no slot tools when selecting several
 - **Clear a Photo Slot**: pressing Delete with a Photo Slot selected removes the whole Slot. Add a way to remove just the Photo and keep the empty Slot.
 - **Snap to matching distances**: beyond the Equal gap guides from 013, help place Slots at the same distance from the Page's edges as other Slots, for example mirrored at opposite sides of a Page, and help build evenly spaced grids.
 

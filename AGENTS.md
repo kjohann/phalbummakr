@@ -33,9 +33,17 @@ numbered issue using the [issue template](issues/README.md#new-issues) before
 implementing the change.
 
 The [inbox](issues/inbox.md) holds raw feedback from real use. Its notes are not
-work items: don't implement them directly. When asked to sort the inbox, turn
-each note into an issue, addendum or backlog item, or discard it, and then
-delete the note.
+work items: don't implement them directly. Notes are grouped under top-level
+points, each with sub-points. Sort the inbox one top-level point at a time:
+
+1. If the user hasn't named a point, list the top-level points and ask which one
+   to tackle.
+2. Check the other points for overlapping sub-points, such as the same area of
+   the app or a shared fix, and suggest handling them together. Let the user
+   decide.
+3. Go through the chosen sub-points with the user. Turn each one into an issue,
+   addendum or backlog item, or discard it, and then delete it from the inbox.
+   Remove a top-level point once it has no sub-points left.
 
 # Finishing an issue
 
