@@ -1,45 +1,45 @@
-/** The Photos shown large in Sort mode: one Photo, or a Comparison of up to four. */
+/** The Photos shown large in Sort mode: one Photo, or a Comparison of any number. */
 export interface Comparison {
   /** Library-relative paths, in the order they were added. */
   shown: readonly string[];
-  /** The shown Photos chosen for sending to a Folder. A single shown Photo counts as chosen regardless. */
-  chosen: readonly string[];
+  /** The Selected Photos among the shown ones. A single shown Photo counts as selected regardless. */
+  selected: readonly string[];
 }
 
-export const EMPTY_COMPARISON: Comparison = { shown: [], chosen: [] };
-export const MAX_COMPARED = 4;
+export const EMPTY_COMPARISON: Comparison = { shown: [], selected: [] };
 
 /** Shows one Photo on its own, replacing any Comparison. */
 export function showPhoto(photo: string): Comparison {
-  return { shown: [photo], chosen: [] };
+  return { shown: [photo], selected: [] };
 }
 
-export function canAddToComparison({ shown }: Comparison): boolean {
-  return shown.length < MAX_COMPARED;
+/** The near-square grid the work area lays `count` shown Photos out in, such as 3 columns by 2 rows for five or six. */
+export function comparisonGrid(count: number): { columns: number; rows: number } {
+  const columns = Math.max(1, Math.ceil(Math.sqrt(count)));
+  return { columns, rows: Math.max(1, Math.ceil(count / columns)) };
 }
 
 /** Removes Photos from what is shown, such as ones no longer in the Library. */
 export function withoutPhotos(comparison: Comparison, removed: readonly string[]): Comparison {
-  const { shown, chosen } = comparison;
+  const { shown, selected } = comparison;
   if (!shown.some((photo) => removed.includes(photo))) return comparison;
-  return { shown: shown.filter((photo) => !removed.includes(photo)), chosen: chosen.filter((photo) => !removed.includes(photo)) };
+  return { shown: shown.filter((photo) => !removed.includes(photo)), selected: selected.filter((photo) => !removed.includes(photo)) };
 }
 
 /**
- * Adds a Photo to the shown ones, chosen, or removes it if it is shown. Adding to a full Comparison does nothing.
- * A Photo shown on its own counts as chosen, so it stays chosen when another is added.
+ * Adds a Photo to the shown ones, selected, or removes it if it is shown.
+ * A Photo shown on its own counts as selected, so it stays selected when another is added.
  */
 export function toggleComparison(comparison: Comparison, photo: string): Comparison {
   if (comparison.shown.includes(photo)) return withoutPhotos(comparison, [photo]);
-  if (!canAddToComparison(comparison)) return comparison;
-  return { shown: [...comparison.shown, photo], chosen: [...chosenPhotos(comparison), photo] };
+  return { shown: [...comparison.shown, photo], selected: [...selectedPhotos(comparison), photo] };
 }
 
-/** Chooses or unchooses a compared Photo. A Photo shown on its own is always chosen. */
-export function toggleChosen(comparison: Comparison, photo: string): Comparison {
-  const { shown, chosen } = comparison;
+/** Selects or unselects a compared Photo. A Photo shown on its own is always selected. */
+export function toggleSelected(comparison: Comparison, photo: string): Comparison {
+  const { shown, selected } = comparison;
   if (shown.length < 2 || !shown.includes(photo)) return comparison;
-  return { shown, chosen: chosen.includes(photo) ? chosen.filter((path) => path !== photo) : [...chosen, photo] };
+  return { shown, selected: selected.includes(photo) ? selected.filter((path) => path !== photo) : [...selected, photo] };
 }
 
 /** Shows the next (1) or previous (-1) Photo in `grid` instead of a Photo shown on its own. */
@@ -68,6 +68,6 @@ export function afterMove(comparison: Comparison, moved: readonly string[], grid
 }
 
 /** The Photos "Send to Folder" moves. */
-export function chosenPhotos({ shown, chosen }: Comparison): string[] {
-  return shown.length === 1 ? [...shown] : shown.filter((photo) => chosen.includes(photo));
+export function selectedPhotos({ shown, selected }: Comparison): string[] {
+  return shown.length === 1 ? [...shown] : shown.filter((photo) => selected.includes(photo));
 }

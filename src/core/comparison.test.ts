@@ -1,41 +1,48 @@
 import { describe, expect, it } from "vitest";
-import { afterMove, canAddToComparison, chosenPhotos, EMPTY_COMPARISON, showPhoto, stepPhoto, toggleChosen, toggleComparison } from "./comparison";
+import { afterMove, comparisonGrid, EMPTY_COMPARISON, selectedPhotos, showPhoto, stepPhoto, toggleComparison, toggleSelected } from "./comparison";
 
 describe("Comparison", () => {
-  it("shows a single Photo, which counts as chosen", () => {
+  it("shows a single Photo, which counts as selected", () => {
     const shown = showPhoto("a.jpg");
     expect(shown.shown).toEqual(["a.jpg"]);
-    expect(chosenPhotos(shown)).toEqual(["a.jpg"]);
-    expect(chosenPhotos(EMPTY_COMPARISON)).toEqual([]);
+    expect(selectedPhotos(shown)).toEqual(["a.jpg"]);
+    expect(selectedPhotos(EMPTY_COMPARISON)).toEqual([]);
   });
 
-  it("adds Photos to the shown one, chosen along with it, until four are compared, and removes them again", () => {
+  it("adds any number of Photos to the shown one, selected along with it, and removes them again", () => {
     let comparison = toggleComparison(showPhoto("a.jpg"), "b.jpg");
     expect(comparison.shown).toEqual(["a.jpg", "b.jpg"]);
-    expect(chosenPhotos(comparison)).toEqual(["a.jpg", "b.jpg"]);
-    // An unchosen Photo stays unchosen when another is added.
-    comparison = toggleComparison(toggleChosen(comparison, "a.jpg"), "c.jpg");
-    expect(chosenPhotos(comparison)).toEqual(["b.jpg", "c.jpg"]);
-    comparison = toggleComparison(comparison, "d.jpg");
-    expect(canAddToComparison(comparison)).toBe(false);
-    expect(toggleComparison(comparison, "e.jpg")).toBe(comparison);
+    expect(selectedPhotos(comparison)).toEqual(["a.jpg", "b.jpg"]);
+    // An unselected Photo stays unselected when another is added.
+    comparison = toggleSelected(comparison, "a.jpg");
+    for (const photo of ["c.jpg", "d.jpg", "e.jpg", "f.jpg"]) comparison = toggleComparison(comparison, photo);
+    expect(comparison.shown).toEqual(["a.jpg", "b.jpg", "c.jpg", "d.jpg", "e.jpg", "f.jpg"]);
+    expect(selectedPhotos(comparison)).toEqual(["b.jpg", "c.jpg", "d.jpg", "e.jpg", "f.jpg"]);
     comparison = toggleComparison(comparison, "b.jpg");
-    expect(comparison.shown).toEqual(["a.jpg", "c.jpg", "d.jpg"]);
-    expect(chosenPhotos(comparison)).toEqual(["c.jpg", "d.jpg"]);
+    expect(comparison.shown).toEqual(["a.jpg", "c.jpg", "d.jpg", "e.jpg", "f.jpg"]);
+    expect(selectedPhotos(comparison)).toEqual(["c.jpg", "d.jpg", "e.jpg", "f.jpg"]);
     expect(toggleComparison(EMPTY_COMPARISON, "a.jpg").shown).toEqual(["a.jpg"]);
   });
 
-  it("chooses and unchooses compared Photos, but never a Photo shown on its own", () => {
+  it("selects and unselects compared Photos, but never a Photo shown on its own", () => {
     let comparison = toggleComparison(showPhoto("a.jpg"), "b.jpg");
-    comparison = toggleChosen(comparison, "a.jpg");
-    expect(chosenPhotos(comparison)).toEqual(["b.jpg"]);
-    expect(chosenPhotos(toggleChosen(comparison, "b.jpg"))).toEqual([]);
-    expect(chosenPhotos(toggleChosen(comparison, "a.jpg"))).toEqual(["a.jpg", "b.jpg"]);
-    expect(toggleChosen(comparison, "z.jpg")).toBe(comparison);
+    comparison = toggleSelected(comparison, "a.jpg");
+    expect(selectedPhotos(comparison)).toEqual(["b.jpg"]);
+    expect(selectedPhotos(toggleSelected(comparison, "b.jpg"))).toEqual([]);
+    expect(selectedPhotos(toggleSelected(comparison, "a.jpg"))).toEqual(["a.jpg", "b.jpg"]);
+    expect(toggleSelected(comparison, "z.jpg")).toBe(comparison);
     const single = showPhoto("a.jpg");
-    expect(toggleChosen(single, "a.jpg")).toBe(single);
-    // Down to one Photo, it counts as chosen again.
-    expect(chosenPhotos(toggleComparison(comparison, "b.jpg"))).toEqual(["a.jpg"]);
+    expect(toggleSelected(single, "a.jpg")).toBe(single);
+    // Down to one Photo, it counts as selected again.
+    expect(selectedPhotos(toggleComparison(comparison, "b.jpg"))).toEqual(["a.jpg"]);
+  });
+
+  it("lays the shown Photos out in the smallest near-square grid that fits them", () => {
+    expect([1, 2, 3, 4, 5, 6, 7, 9, 10, 13].map((count) => comparisonGrid(count))).toEqual([
+      { columns: 1, rows: 1 }, { columns: 2, rows: 1 }, { columns: 2, rows: 2 }, { columns: 2, rows: 2 },
+      { columns: 3, rows: 2 }, { columns: 3, rows: 2 }, { columns: 3, rows: 3 }, { columns: 3, rows: 3 },
+      { columns: 4, rows: 3 }, { columns: 4, rows: 4 },
+    ]);
   });
 
   it("steps a Photo shown on its own through the grid, stopping at either end", () => {
@@ -52,10 +59,10 @@ describe("Comparison", () => {
 
   it("drops moved Photos from the Comparison and keeps the rest", () => {
     let comparison = toggleComparison(toggleComparison(showPhoto("a.jpg"), "b.jpg"), "c.jpg");
-    comparison = toggleChosen(comparison, "b.jpg");
+    comparison = toggleSelected(comparison, "b.jpg");
     const after = afterMove(comparison, ["a.jpg", "x.jpg"], ["a.jpg", "b.jpg", "c.jpg"]);
     expect(after.shown).toEqual(["b.jpg", "c.jpg"]);
-    expect(chosenPhotos(after)).toEqual(["c.jpg"]);
+    expect(selectedPhotos(after)).toEqual(["c.jpg"]);
     expect(afterMove(comparison, ["x.jpg"], [])).toBe(comparison);
   });
 

@@ -4,15 +4,17 @@ import { dirname } from "@tauri-apps/api/path";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { createAlbum, deserializeAlbum, renameFolder, sendPhotosToFolder, serializeAlbum, type Album, type HistoryDirection, type LayoutPorts, type Photo, type PhotoSize, type PlacementRelink } from "../core";
+import { createPortal } from "react-dom";
+import { createAlbum, deserializeAlbum, clampZoom, renameFolder, sendPhotosToFolder, serializeAlbum, stepZoom, type Album, type ZoomChange, type HistoryDirection, type LayoutPorts, type Photo, type PhotoSize, type PlacementRelink } from "../core";
 import AlbumWorkspace, { type AlbumCommand, type AlbumCommandName, type CommandBarLink, type HistoryState, type PhotoMoveRunner } from "./AlbumWorkspace";
 import CommandBar, { type BarCommand } from "./CommandBar";
 import LayoutWorkspace, { type LayoutBarLink, type LayoutBarState, type LayoutCommand, type LayoutCommandName } from "./LayoutWorkspace";
 import type { Mode } from "./modes";
-import PhotoBrowser, { type SortLink } from "./PhotoBrowser";
+import PhotoBrowser, { type SortCommandName, type SortLink } from "./PhotoBrowser";
 import SidePane, { clampPaneWidth, DEFAULT_SIDE_PANE, type PaneModes, type SidePaneSettings } from "./SidePane";
+import { SortZoomTools } from "./SortView";
 import { historyShortcut } from "./historyShortcut";
-import { isPageZoomKey } from "./slotShortcuts";
+import { isPageZoomKey, isPageZoomResetKey, keyboardTaken, pageZoomStep } from "./slotShortcuts";
 import { createFolder, tauriSortingPorts } from "./tauriSortingPorts";
 import { useLayoutLibrary } from "./useLayoutLibrary";
 
@@ -93,7 +95,7 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
   modes: PaneModes;
   bar: CommandBarLink;
   layoutBar: LayoutBarLink;
-  sortBar: Pick<SortLink, "command" | "onChosenChange">;
+  sortBar: Pick<SortLink, "command" | "onComparisonChange" | "zoom" | "onZoomChange">;
   layoutPorts?: LayoutPorts;
   sidePane: SidePaneSettings;
   onSidePaneChange: (change: Partial<SidePaneSettings>) => void;
@@ -198,8 +200,10 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
   const [layoutLibraryReady, setLayoutLibraryReady] = useState(false);
   const [layoutCommand, setLayoutCommand] = useState<LayoutCommand | undefined>();
   const [layoutState, setLayoutState] = useState<LayoutBarState>({ editable: false, layoutSelected: false, slotSelected: false, canUndo: false, canRedo: false });
-  const [sortCommand, setSortCommand] = useState<{ serial: number } | undefined>();
-  const [sortChosen, setSortChosen] = useState(0);
+  const [sortCommand, setSortCommand] = useState<{ name: SortCommandName; serial: number } | undefined>();
+  const [sortCounts, setSortCounts] = useState({ shown: 0, selected: 0 });
+  // Keyed by document like the mode, so every Album's work area starts at 100%.
+  const [sortZoomState, setSortZoomState] = useState<{ documentId: number | undefined; zoom: number }>({ documentId: undefined, zoom: 1 });
   const [modeState, setModeState] = useState<{ documentId: number | undefined; mode: Mode }>({ documentId: undefined, mode: "album" });
   const commandSerial = useRef(0);
   const busyRef = useRef(false);
@@ -317,15 +321,31 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
     return () => { active = false; };
   }, [ports]);
 
-  const actions = useRef<{ newAlbum: () => void; openAlbum: () => void; openRecent: (path: string) => void; closeAlbum: () => void; exit: () => void; albumCommand: (name: AlbumCommandName) => void; layoutCommand: (name: LayoutCommandName) => void; togglePhotos: () => void; history: (direction: HistoryDirection) => void }>(
-      { newAlbum: () => {}, openAlbum: () => {}, openRecent: () => {}, closeAlbum: () => {}, exit: () => {}, albumCommand: () => {}, layoutCommand: () => {}, togglePhotos: () => {}, history: () => {} },
+  const actions = useRef<{ newAlbum: () => void; openAlbum: () => void; openRecent: (path: string) => void; closeAlbum: () => void; exit: () => void; albumCommand: (name: AlbumCommandName) => void; layoutCommand: (name: LayoutCommandName) => void; togglePhotos: () => void; history: (direction: HistoryDirection) => void; clearComparison: () => void; zoomSort: (change: ZoomChange) => void }>(
+      { newAlbum: () => {}, openAlbum: () => {}, openRecent: () => {}, closeAlbum: () => {}, exit: () => {}, albumCommand: () => {}, layoutCommand: () => {}, togglePhotos: () => {}, history: () => {}, clearComparison: () => {}, zoomSort: () => {} },
   );
   const sidePaneAvailable = document !== null && draft === null;
   const fileEnabled = !busy && !restoring;
   // Keyed by document, so every newly opened Album starts in Album mode.
   const mode = modeState.documentId === document?.id ? modeState.mode : "album";
   const setMode = (next: Mode) => setModeState({ documentId: document?.id, mode: next });
+  const documentKey = document?.id;
+  const sortZoom = sortZoomState.documentId === documentKey ? sortZoomState.zoom : 1;
+  const changeSortZoom = (change: ZoomChange) => setSortZoomState((current) =>
+    ({ documentId: documentKey, zoom: clampZoom(change(current.documentId === documentKey ? current.zoom : 1)) }));
+  // Like the command bar's commands, which also stay enabled while an autosave is pending.
+  const sortAvailable = mode === "sort" && document !== null && draft === null && !transitioning && !restoring;
+  const canClearComparison = sortAvailable && sortCounts.shown > 0;
+  const zoomSortFromView = useCallback((change: ZoomChange) => actions.current.zoomSort(change), []);
   actions.current = {
+    clearComparison: () => {
+      if (!canClearComparison) return;
+      setSortCommand({ name: "clear-comparison", serial: ++commandSerial.current });
+      changeSortZoom(() => 1);
+    },
+    zoomSort: (change) => {
+      if (sortAvailable) changeSortZoom(change);
+    },
     togglePhotos: () => {
       if (sidePaneAvailable) changeSidePane({ collapsed: !sidePaneRef.current.collapsed });
     },
@@ -392,10 +412,35 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
   useEffect(() => {
     if (mode !== "album" && mode !== "layouts") return;
     // Ctrl+Plus/Minus zoom a Photo's Crop in these modes, so they never zoom the whole page.
-    const blockPageZoom = (event: KeyboardEvent) => { if (isPageZoomKey(event)) event.preventDefault(); };
+    const blockPageZoom = (event: KeyboardEvent) => { if (isPageZoomKey(event) || isPageZoomResetKey(event)) event.preventDefault(); };
     window.addEventListener("keydown", blockPageZoom);
     return () => window.removeEventListener("keydown", blockPageZoom);
   }, [mode]);
+
+  useEffect(() => {
+    if (mode !== "sort") return;
+    // Sort mode zooms its work area instead of the page, and Escape clears the Comparison.
+    const key = (event: KeyboardEvent) => {
+      const step = pageZoomStep(event);
+      if (step !== null || isPageZoomResetKey(event)) {
+        event.preventDefault();
+        if (!keyboardTaken(event)) actions.current.zoomSort((zoom) => step === null ? 1 : stepZoom(zoom, step));
+        return;
+      }
+      if (event.key !== "Escape" || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (keyboardTaken(event) || window.document.querySelector("[role='menu']")) return;
+      actions.current.clearComparison();
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [mode]);
+
+  // Ctrl+wheel, which is also how a touchpad pinch arrives, never zooms the app itself.
+  useEffect(() => {
+    const block = (event: WheelEvent) => { if (event.ctrlKey) event.preventDefault(); };
+    window.addEventListener("wheel", block, { passive: false });
+    return () => window.removeEventListener("wheel", block);
+  }, []);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -551,8 +596,12 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
     albumCommand("add-spread", "Add Spread", { overflow: 1 }),
     albumCommand("save-as-layout", "Save as Layout", { overflow: 2, disabled: !(albumCommandsEnabled && layoutLibraryReady) }),
   ] : albumOpen && mode === "layouts" ? layoutCommands()
-    : albumOpen && mode === "sort" ? [{ id: "send-to-folder", label: "Send to Folder…", disabled: !commandsAvailable || sortChosen === 0,
-      run: () => setSortCommand({ serial: ++commandSerial.current }) }] : [];
+    : albumOpen && mode === "sort" ? [
+      { id: "send-to-folder", label: "Send to Folder…", disabled: !commandsAvailable || sortCounts.selected === 0,
+        run: () => setSortCommand({ name: "send-to-folder", serial: ++commandSerial.current }) },
+      { id: "clear-comparison", label: "Clear Comparison", shortcut: "Escape", disabled: !canClearComparison,
+        run: () => actions.current.clearComparison() },
+    ] : [];
   const history = mode === "album" ? { enabled: albumCommandsEnabled, ...albumHistory }
     : mode === "layouts" ? { enabled: commandsAvailable && layoutState.editable, canUndo: layoutState.canUndo, canRedo: layoutState.canRedo }
       : { enabled: false, canUndo: false, canRedo: false };
@@ -571,6 +620,8 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
   return (
     <main className="app-shell">
       <CommandBar context={contextCommands} document={documentCommands} toolsRef={setToolsHost} />
+      {albumOpen && mode === "sort" && toolsHost && createPortal(<SortZoomTools zoom={sortZoom} disabled={!sortAvailable}
+        onZoom={(change) => actions.current.zoomSort(change)} />, toolsHost)}
       {error && <p className="error-banner" role="alert">{error}</p>}
       {draft ? (
         <form className="album-form new-album-form" role="dialog" aria-modal="true" onSubmit={(event) => void create(event)} aria-label="Album settings">
@@ -612,7 +663,7 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
         modes={{ current: mode, onChange: setMode }}
         bar={{ command, toolsHost, onSlotSelectedChange: setSlotSelected, onEditableChange: setAlbumEditable, onHistoryChange: setAlbumHistory }}
         layoutBar={{ command: layoutCommand, toolsHost, onStateChange: setLayoutState }}
-        sortBar={{ command: sortCommand, onChosenChange: setSortChosen }} layoutPorts={layoutPorts}
+        sortBar={{ command: sortCommand, onComparisonChange: setSortCounts, zoom: sortZoom, onZoomChange: zoomSortFromView }} layoutPorts={layoutPorts}
         sidePane={sidePane} onSidePaneChange={changeSidePane} onLayoutLibraryReadyChange={setLayoutLibraryReady} />}
     </main>
   );

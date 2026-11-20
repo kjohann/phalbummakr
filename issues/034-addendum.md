@@ -51,4 +51,6 @@ to Folder…" all act on the Selected Photos, so they follow along.
   unchosen. It went in an addendum to 034 because it's immediate feedback on
   034's drag, and the user chose the rule.
 - [035](035-unlimited-comparison-and-zoom.md) renames "chosen" to "selected".
-  The `compareKeepingChosen` test helper should be renamed then.
+  The `compareKeepingChosen` test helper should be renamed then. *Resolved
+  when 035 was merged:* it is now `compareKeepingSelected`, and the
+  Comparison keeps this rule with no limit on how many Photos it shows.
