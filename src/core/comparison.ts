@@ -25,10 +25,14 @@ export function withoutPhotos(comparison: Comparison, removed: readonly string[]
   return { shown: shown.filter((photo) => !removed.includes(photo)), chosen: chosen.filter((photo) => !removed.includes(photo)) };
 }
 
-/** Adds a Photo to the shown ones, or removes it if it is shown. Adding to a full Comparison does nothing. */
+/**
+ * Adds a Photo to the shown ones, chosen, or removes it if it is shown. Adding to a full Comparison does nothing.
+ * A Photo shown on its own counts as chosen, so it stays chosen when another is added.
+ */
 export function toggleComparison(comparison: Comparison, photo: string): Comparison {
   if (comparison.shown.includes(photo)) return withoutPhotos(comparison, [photo]);
-  return canAddToComparison(comparison) ? { ...comparison, shown: [...comparison.shown, photo] } : comparison;
+  if (!canAddToComparison(comparison)) return comparison;
+  return { shown: [...comparison.shown, photo], chosen: [...chosenPhotos(comparison), photo] };
 }
 
 /** Chooses or unchooses a compared Photo. A Photo shown on its own is always chosen. */

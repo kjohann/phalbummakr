@@ -1,6 +1,6 @@
 # 034 – Drag Selected Photos to a Folder
 
-Status: done · Type: feature · Depends on: 028, 033
+Status: done · Type: feature · Depends on: 028, 033 · Addendum: [034 addendum](034-addendum.md)
 
 ## What
 
