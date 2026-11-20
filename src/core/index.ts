@@ -8,6 +8,7 @@ export * from "./usage";
 export * from "./history";
 export * from "./sorting";
 export * from "./comparison";
+export * from "./sortProgress";
 export * from "./folderHistory";
 export * from "./pageExport";
 export * from "./effectiveResolution";

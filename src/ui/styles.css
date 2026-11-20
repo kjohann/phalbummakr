@@ -1066,6 +1066,32 @@ button.sort-photo--selected:hover {
   outline: 3px solid #d1783e;
 }
 
+/* A Reviewed Photo in Sort mode: a small, quiet tick in the corner opposite the Usage badge. */
+.photo-reviewed {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: #fff;
+  background: rgb(52 76 62 / 70%);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.photo-grid-compact .photo-reviewed {
+  top: 3px;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  font-size: 8px;
+}
+
 /* A Photo being moved: dimmed with a spinner until the move is done. */
 .photo-tile--busy {
   cursor: progress;
