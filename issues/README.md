@@ -85,7 +85,7 @@ Work order for the layout rework: 016, 017, 018, 019, 020, then 011.
 
 Work order for modes: 023, then 024, the 016 addendum and 011; 026 → 027/028; 010 → 029.
 
-Work order for Sort mode feedback: 032 → 033 → 034, then 035, 036 and 037 in any order.
+Work order for Sort mode feedback: 032 → 033 → 034, then 035, 036 and 037 in any order; 037 → 034 addendum section 2.
 
 ## Addenda
 
@@ -109,6 +109,7 @@ Work order for Sort mode feedback: 032 → 033 → 034, then 035, 036 and 037 in
 | [023 addendum - Mode bar on the left pane](023-addendum.md#section-2---mode-bar-on-the-left-pane) | 023 | done |
 | [028 addendum - Right-click sends the chosen Photos](028-addendum.md) | 028 | done |
 | [034 addendum - Ctrl-click in the grid selects](034-addendum.md) | 034 | done |
+| [034 addendum - Separate the Comparison from the Selected Photos](034-addendum.md#section-2---separate-the-comparison-from-the-selected-photos) | 034 | todo |
 
 ## After the MVP
 

@@ -54,3 +54,44 @@ to Folder…" all act on the Selected Photos, so they follow along.
   The `compareKeepingChosen` test helper should be renamed then. *Resolved
   when 035 was merged:* it is now `compareKeepingSelected`, and the
   Comparison keeps this rule with no limit on how many Photos it shows.
+## Section 2 - Separate the Comparison from the Selected Photos
+
+Status: todo · Type: tweak · Depends on: [037](037-reviewed-photos.md)
+
+### What
+
+Comes from real use (inbox, "Dragging multiple photos"). Since the first
+section, Photos Ctrl-clicked in the grid also become Selected Photos, so a drag
+from either pane moves all of them. The grid and the Comparison should act on
+different sets:
+
+- In the grid, a Photo in the Comparison takes the whole Comparison with it.
+- In the Comparison, the Selected Photos are a subset picked there, and only
+  they go together.
+
+Photos start out unselected in the Comparison, which reverses the first
+section's rule. The command bar's "Send to Folder…" button is dropped, since
+dragging and right-click are the main interactions. See **Comparison** and
+**Selected Photos** in [GLOSSARY.md](../GLOSSARY.md).
+
+Done after [037](037-reviewed-photos.md), which is being implemented in
+parallel and also changes `PhotoBrowser`. 037 itself is left unchanged.
+
+### Additional acceptance criteria
+
+- [ ] A Photo added to the Comparison from the grid (Ctrl-click or "Add to
+  Comparison") starts out unselected. Photos already selected stay selected.
+- [ ] A Photo shown on its own still counts as selected, but it doesn't stay
+  selected once a second Photo is added.
+- [ ] Dragging a Photo in the Comparison from the grid to a Folder moves every
+  Photo in the Comparison. Dragging any other grid Photo moves only that Photo.
+- [ ] Dragging a Selected Photo from the Comparison moves every Selected Photo.
+  Dragging an unselected Photo from the Comparison moves only that Photo.
+- [ ] Right-click "Send to Folder ▸", including "New Folder…", follows the same
+  rule as dragging in each pane.
+- [ ] Right-click "Mark as reviewed" / "Mark as unreviewed" from 037 follow the
+  same rule as Send to Folder in each pane.
+- [ ] The grid only marks which Photos are in the Comparison, not which of them
+  are selected.
+- [ ] The command bar no longer has "Send to Folder…" in Sort mode.
+- [ ] Album mode still moves only the dragged Photo.

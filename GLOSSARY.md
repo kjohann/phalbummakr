@@ -23,11 +23,11 @@ Moving Photos between Folders in the Library. Moving a placed Photo keeps every 
 _Avoid_: Culling, filing, importing
 
 **Comparison**:
-Any number of Photos shown side by side while Sorting. Photos added to a Comparison from the Photo grid, such as by Ctrl-click, start out selected and can be unselected one by one; the selected ones are sent to a Folder together. A single Photo shown on its own counts as selected, and stays selected when a second Photo is added.
+Any number of Photos shown side by side while Sorting. Photos are added to it from the Photo grid, such as by Ctrl-click, and are marked there as part of it. Sending one of them from the grid to a Folder sends the whole Comparison. Photos start out unselected in the Comparison. A single Photo shown on its own counts as selected.
 _Avoid_: Lightbox, stack
 
 **Selected Photos**:
-The Photos in a Comparison that sending to a Folder acts on. They are always part of the Comparison, and clearing the Comparison clears them too.
+A subset of a Comparison picked in the Comparison itself, so that only those Photos are sent to a Folder. They are always part of the Comparison, and clearing the Comparison clears them too.
 _Avoid_: Chosen Photos
 
 **Reviewed Photo**:
