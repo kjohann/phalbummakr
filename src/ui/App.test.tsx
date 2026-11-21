@@ -122,14 +122,18 @@ vi.mock("./LayoutWorkspace", () => ({
   },
 }));
 vi.mock("./PhotoBrowser", () => ({
-  default: ({ compact, onCompactChange, sort }: {
+  default: ({ compact, onCompactChange, copyByDefault, onCopyByDefaultChange, sort }: {
     compact?: boolean;
     onCompactChange?: (compact: boolean) => void;
+    copyByDefault?: boolean;
+    onCopyByDefaultChange?: (copy: boolean) => void;
     sort?: { host: HTMLElement | null; active: boolean; command?: { name: string; serial: number };
       onComparisonChange: (counts: { shown: number }) => void; zoom?: number; onZoomChange?: (change: (zoom: number) => number) => void };
   }) => <>
     <p>{compact ? "Compact Photo browser" : "Photo browser"}</p>
     <button type="button" onClick={() => onCompactChange?.(!compact)}>Toggle mock Compact</button>
+    <button type="button" aria-pressed={copyByDefault ?? false}
+      onClick={() => onCopyByDefaultChange?.(!copyByDefault)}>Copy mock default</button>
     <button type="button" onClick={() => sort?.onComparisonChange({ shown: 3 })}>Compare mock Photos</button>
     <button type="button" onClick={() => sort?.onComparisonChange({ shown: 1 })}>Show one mock Photo</button>
     <button type="button" onClick={() => sort?.onZoomChange?.((zoom) => zoom * 1.2)}>Pinch mock work area</button>
@@ -195,6 +199,38 @@ function openAlbumPorts(): DocumentPorts {
 
 const bar = () => within(screen.getByRole("toolbar", { name: "Commands" }));
 const barButton = (name: string) => bar().getByRole("button", { name }) as HTMLButtonElement;
+
+it("keeps the Photo drag default across modes and Libraries without persisting it across app sessions", async () => {
+  native.enabled = true;
+  const first = "D:\\Photos\\first.phalbum";
+  const second = "D:\\Other\\second.phalbum";
+  const ports = {
+    ...diskPorts({
+      [first]: serializeAlbum(createAlbum({ name: "First" })),
+      [second]: serializeAlbum(createAlbum({ name: "Second" })),
+    }, first, { chooseOpen: second }),
+    parent: async (path: string) => path === first ? "D:\\Photos" : "D:\\Other",
+  };
+  const view = render(<App ports={ports} />);
+  await screen.findByText("First");
+  const copy = () => screen.getByRole("button", { name: "Copy mock default" });
+  expect(copy().getAttribute("aria-pressed")).toBe("false");
+  fireEvent.click(copy());
+  expect(copy().getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(modeGroup().getByRole("button", { name: "Sort" }));
+  expect(copy().getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(modeGroup().getByRole("button", { name: "Album" }));
+  await waitFor(() => expect(native.installed).toHaveBeenCalled());
+  await chooseMenu("Open Album…");
+  await screen.findByText("Second");
+  expect(copy().getAttribute("aria-pressed")).toBe("true");
+  expect(ports.write).not.toHaveBeenCalled();
+  expect(ports.setSidePane).not.toHaveBeenCalled();
+  view.unmount();
+  render(<App ports={ports} />);
+  await screen.findByText("Second");
+  expect(copy().getAttribute("aria-pressed")).toBe("false");
+});
 
 it("shows only New Album and Open Album in the command bar while no Album is open", async () => {
   const chooseNew = vi.fn(async () => null);

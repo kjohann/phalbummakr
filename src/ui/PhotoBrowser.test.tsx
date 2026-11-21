@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { addPhotoSlot, createAlbum, duplicatePage, placePhoto, type Album, type ContentIndexBatch, type PhotoMove } from "../core";
@@ -227,6 +228,60 @@ it("switches Folder copy feedback live but chooses the operation from Alt at dro
   fireEvent.drop(target, { dataTransfer: transfer, altKey: false });
   await waitFor(() => expect(onSendPhotos).toHaveBeenCalledWith([original.path], "kids"));
   expect(onCopyPhotos).toHaveBeenCalledTimes(1);
+});
+
+it("uses the chosen drag default with live temporary Alt inversion and leaves explicit menu actions unchanged", async () => {
+  const original = photo(0);
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "scan_photos") return { photos: [original], folders: ["kids"], warnings: [] };
+    if (command === "read_sort_progress") return null;
+    return "data:image/png;base64,dGVzdA==";
+  });
+  const onCopyPhotos = vi.fn(async () => []);
+  const onSendPhotos = vi.fn(async () => []);
+  function Browser() {
+    const [copyByDefault, setCopyByDefault] = useState(false);
+    return <PhotoBrowser root="D:\\Photos" copyByDefault={copyByDefault} onCopyByDefaultChange={setCopyByDefault}
+      onCopyPhotos={onCopyPhotos} onSendPhotos={onSendPhotos} />;
+  }
+  render(<Browser />);
+  const tile = (await screen.findByText(original.path)).closest("figure")!;
+  const toggle = within(screen.getByRole("group", { name: "Photo drag action" }));
+  expect(toggle.getByRole("button", { name: "Move" }).getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(toggle.getByRole("button", { name: "Copy" }));
+  const target = screen.getByRole("button", { name: "Open folder kids" });
+  const transfer = photoTransfer();
+  fireEvent.dragStart(tile, { dataTransfer: transfer });
+  fireEvent.dragOver(target, { dataTransfer: transfer });
+  expect(screen.getByText("Copy 1 Photo")).toBeTruthy();
+  expect(transfer.dropEffect).toBe("copy");
+  expect(target.classList.contains("drop-target-copy")).toBe(true);
+  fireEvent.keyDown(window, { key: "Alt", altKey: true });
+  expect(screen.getByText("Move 1 Photo")).toBeTruthy();
+  expect(target.classList.contains("drop-target-copy")).toBe(false);
+  expect(toggle.getByRole("button", { name: "Copy" }).getAttribute("aria-pressed")).toBe("true");
+  fireEvent.dragOver(target, { dataTransfer: transfer, altKey: true });
+  expect(transfer.dropEffect).toBe("move");
+  fireEvent.keyUp(window, { key: "Alt", altKey: false });
+  expect(screen.getByText("Copy 1 Photo")).toBeTruthy();
+  // The drop's modifier state overrides the preceding feedback.
+  fireEvent.drop(target, { dataTransfer: transfer, altKey: true });
+  await waitFor(() => expect(onSendPhotos).toHaveBeenCalledWith([original.path], "kids"));
+  expect(onCopyPhotos).not.toHaveBeenCalled();
+  fireEvent.dragStart(tile, { dataTransfer: transfer, altKey: true });
+  fireEvent.dragOver(target, { dataTransfer: transfer, altKey: true });
+  fireEvent.drop(target, { dataTransfer: transfer, altKey: false });
+  await waitFor(() => expect(onCopyPhotos).toHaveBeenCalledWith([original.path], "kids"));
+  expect(screen.queryByText("Copy 1 Photo")).toBeNull();
+  fireEvent.contextMenu(tile);
+  fireEvent.click(screen.getByRole("menuitem", { name: "Move to Folder..." }));
+  fireEvent.click(within(screen.getByRole("menu", { name: "Move to Folder..." })).getByRole("menuitem", { name: "kids" }));
+  await waitFor(() => expect(onSendPhotos).toHaveBeenCalledTimes(2));
+  fireEvent.click(toggle.getByRole("button", { name: "Move" }));
+  fireEvent.contextMenu(tile);
+  fireEvent.click(screen.getByRole("menuitem", { name: "Copy to Folder..." }));
+  fireEvent.click(within(screen.getByRole("menu", { name: "Copy to Folder..." })).getByRole("menuitem", { name: "kids" }));
+  await waitFor(() => expect(onCopyPhotos).toHaveBeenCalledTimes(2));
 });
 
 it.each(["operation", "refresh"] as const)("reports copy %s failures without removing the original Photo", async (failure) => {
@@ -779,7 +834,7 @@ describe("Sort mode", () => {
 
   async function browseSort({ photos = [0, 1, 2].map(photo), folders = ["kids", "kids/small", ".hidden"], album = null as Album | null,
     saved = null as string | null,
-    onSendPhotos = vi.fn(async (): Promise<PhotoMove[]> => []), onCopyPhotos = vi.fn(async (): Promise<PhotoMove[]> => []),
+    onSendPhotos = vi.fn(async (): Promise<PhotoMove[]> => []), onCopyPhotos = vi.fn(async (): Promise<PhotoMove[]> => []), copyByDefault = false,
     onCreateFolder = vi.fn(async (parent: string, name: string) => parent ? `${parent}/${name}` : name),
     zoom = 1, onZoomChange = vi.fn() as (change: (zoom: number) => number) => void } = {}) {
     const writes: Array<{ reviewed: string[]; folders: Record<string, { scrollTop: number; shown: string | null }> }> = [];
@@ -795,7 +850,7 @@ describe("Sort mode", () => {
     });
     const host = sortHost();
     const onComparisonChange = vi.fn();
-    const props = { root: "D:\\Photos", album, onSendPhotos, onCopyPhotos, onCreateFolder };
+    const props = { root: "D:\\Photos", album, onSendPhotos, onCopyPhotos, onCreateFolder, copyByDefault };
     const view = render(<PhotoBrowser {...props} sort={{ host, active: true, onComparisonChange, zoom, onZoomChange }} />);
     // A remembered scroll position may open the grid away from the first Photo.
     await within(await screen.findByRole("list", { name: "Photos" })).findAllByRole("listitem");
@@ -983,15 +1038,16 @@ describe("Sort mode", () => {
     expect(within(tile(photo(1).path)).queryByLabelText("Reviewed")).toBeNull();
   });
 
-  it.each([
+  it.each(([
     ["grid member", [0, 1, 2]],
     ["grid outsider", [3]],
     ["selected Comparison member", [0, 1]],
     ["unselected Comparison member", [2]],
-  ] as const)("Alt-copies the same batch as moves for a %s while retaining the Comparison", async (source, indexes) => {
+  ] as const).flatMap(([source, indexes]) => [false, true].map((copyByDefault) => ({ source, indexes, copyByDefault }))))(
+    "copies the same batch as moves for a $source (Copy default: $copyByDefault) while retaining the Comparison", async ({ source, indexes, copyByDefault }) => {
     vi.stubGlobal("DragEvent", MouseEvent);
     const onCopyPhotos = vi.fn(async (paths: string[], target: string) => paths.map((from) => ({ from, to: `${target}/${from}` })));
-    const { work, tile, onSendPhotos } = await browseSort({ photos: [0, 1, 2, 3].map(photo), onCopyPhotos });
+    const { work, tile, onSendPhotos } = await browseSort({ photos: [0, 1, 2, 3].map(photo), onCopyPhotos, copyByDefault });
     fireEvent.click(tile(photo(0).path));
     for (const index of [1, 2]) fireEvent.click(tile(photo(index).path), { ctrlKey: true });
     for (const index of [0, 1]) fireEvent.click(work.getByRole("button", { name: `Select ${photo(index).path}` }));
@@ -1001,14 +1057,34 @@ describe("Sort mode", () => {
     const transfer = photoTransfer();
     const target = screen.getByRole("button", { name: "Open folder kids" });
     fireEvent.dragStart(element, { dataTransfer: transfer });
-    fireEvent.dragOver(target, { dataTransfer: transfer, altKey: true });
-    fireEvent.drop(target, { dataTransfer: transfer, altKey: true });
+    fireEvent.dragOver(target, { dataTransfer: transfer, altKey: !copyByDefault });
+    expect(screen.getByText(`Copy ${indexes.length} ${indexes.length === 1 ? "Photo" : "Photos"}`)).toBeTruthy();
+    fireEvent.drop(target, { dataTransfer: transfer, altKey: !copyByDefault });
     await screen.findByText(/^Copied /);
     expect(onCopyPhotos).toHaveBeenCalledWith(indexes.map((index) => photo(index).path), "kids");
     expect(onSendPhotos).not.toHaveBeenCalled();
     expect(work.getByRole("button", { name: `Unselect ${photo(0).path}` })).toBeTruthy();
     expect(work.getByRole("button", { name: `Unselect ${photo(1).path}` })).toBeTruthy();
     expect(work.getByRole("button", { name: `Select ${photo(2).path}` })).toBeTruthy();
+  });
+
+  it("Alt-moves a Comparison Photo to a breadcrumb while Copy is the default", async () => {
+    const nested = { ...photo(0), path: `kids/${photo(0).path}` };
+    const onCopyPhotos = vi.fn(async () => []);
+    const { work, tile, onSendPhotos } = await browseSort({ photos: [nested, photo(1)], copyByDefault: true, onCopyPhotos });
+    fireEvent.click(screen.getByRole("button", { name: "Open folder kids" }));
+    await screen.findByText(photo(0).path);
+    fireEvent.click(tile(photo(0).path));
+    const source = (await work.findByRole("img", { name: nested.path })).closest("figure")!;
+    const target = screen.getByRole("button", { name: "Library" });
+    const transfer = photoTransfer();
+    fireEvent.dragStart(source, { dataTransfer: transfer });
+    fireEvent.dragOver(target, { dataTransfer: transfer, altKey: true });
+    expect(transfer.dropEffect).toBe("move");
+    expect(screen.getByText("Move 1 Photo")).toBeTruthy();
+    fireEvent.drop(target, { dataTransfer: transfer, altKey: true });
+    await waitFor(() => expect(onSendPhotos).toHaveBeenCalledWith([nested.path], ""));
+    expect(onCopyPhotos).not.toHaveBeenCalled();
   });
 
   it("copies a mixed-source Comparison, reports same-Folder skips and retains skipped Photos", async () => {

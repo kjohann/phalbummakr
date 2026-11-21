@@ -308,7 +308,22 @@ body {
 
 .photo-browser-tools {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
+}
+
+.photo-drag-action {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid #d9dcd5;
+  border-radius: 6px;
+  background: #eef0ea;
+}
+
+.photo-drag-action .button-quiet {
+  border-color: transparent;
 }
 
 .photo-browser-tools .button-quiet {

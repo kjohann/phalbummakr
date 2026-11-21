@@ -38,15 +38,18 @@ where they live on disk; browsing never moves or copies originals.
 
 ## Sorting and copying Photos
 
-Drag a Photo to a Folder tile or breadcrumb to move its file. **Hold Alt at
-drop to copy instead**; pressing or releasing Alt during the drag switches the
-live drag badge (including single Photos) and Folder highlight. The badge adds
-Move/Copy while over a valid Folder target. Unlike Slot duplication, this choice
-is not latched at drag start. Drops on Pages and Photo Slots still place normally,
-even with Alt.
+Choose **Move** or **Copy** in the Photo pane to set the default for dragging
+Photos to Folder tiles or breadcrumbs. The app starts with Move and keeps your
+choice across modes, Albums and Libraries for this session only.
+**Hold Alt at drop to use the opposite action**; releasing Alt restores the
+default without changing the toggle. Modifier changes update the live drag badge
+(including single Photos) and Folder highlight. The badge adds Move/Copy while
+over a valid Folder target. Unlike Slot duplication, this choice is not latched
+at drag start. Drops on Pages and Photo Slots still place normally, even with Alt.
 
 Right-click a Photo for **Move to Folder...** or **Copy to Folder...**, including
-**New Folder…**. In Sort mode, a grid Comparison member acts on the whole
+**New Folder…**. These explicit menu actions ignore the drag default.
+In Sort mode, a grid Comparison member acts on the whole
 Comparison; a Selected member in the Comparison acts on the Selected Photos.
 Otherwise, the Photo acts alone. Copies keep originals, Comparison selection and
 Placement paths unchanged, and share Usage once their content is indexed.

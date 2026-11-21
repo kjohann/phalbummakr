@@ -340,11 +340,13 @@ function movedMessage(moves: PhotoMove[], target: string, copy: boolean) {
     : `${verb} "${fileName(from)}" to ${folderName(target)} as "${fileName(to)}".`;
 }
 
-export default function PhotoBrowser({ root, album = null, compact = false, onCompactChange, onSendPhotos, onCopyPhotos, onCreateFolder, onRenameFolder, onPhotosChange, onIdentitiesChange, onContentIndexStatsChange, sort, mode = "album", visible = true }: {
+export default function PhotoBrowser({ root, album = null, compact = false, onCompactChange, copyByDefault = false, onCopyByDefaultChange, onSendPhotos, onCopyPhotos, onCreateFolder, onRenameFolder, onPhotosChange, onIdentitiesChange, onContentIndexStatsChange, sort, mode = "album", visible = true }: {
   root: string;
   album?: Album | null;
   compact?: boolean;
   onCompactChange?: (compact: boolean) => void;
+  copyByDefault?: boolean;
+  onCopyByDefaultChange?: (copy: boolean) => void;
   /** Moves Photos to a Folder ("" is the Library root), returning the moves made. Without it, Folders aren't drop targets. */
   onSendPhotos?: (photos: string[], target: string) => Promise<PhotoMove[]>;
   /** Copies Photos without changing originals, Placements or Comparison selection. */
@@ -373,7 +375,8 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
   // The Photos a drag from the grid or the work area moves; null when no such drag is running.
   const [dragged, setDragged] = useState<readonly string[] | null>(null);
   const [dropOver, setDropOver] = useState<string | null>(null);
-  const [copyDrag, setCopyDrag] = useState(false);
+  const [altDrag, setAltDrag] = useState(false);
+  const copyDrag = copyByDefault !== altDrag;
   const [dragPoint, setDragPoint] = useState({ x: 0, y: 0 });
   const edgeScroll = useEdgeScroll();
   // The Photos being moved; empty when no move is running.
@@ -542,7 +545,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
   function dragChange(paths: readonly string[] | null) {
     setDragged(paths);
     setDropOver(null);
-    if (!paths) setCopyDrag(false);
+    if (!paths) setAltDrag(false);
   }
 
   /**
@@ -554,7 +557,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
     const picture = event.currentTarget instanceof Element ? event.currentTarget.querySelector("img") : null;
     writePhotoDragImage(event.dataTransfer, picture);
     dragChange(paths);
-    setCopyDrag(event.altKey);
+    setAltDrag(event.altKey);
     setDragPoint({ x: event.clientX, y: event.clientY });
   };
   const endDrag = () => dragChange(null);
@@ -706,8 +709,8 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
       onDragOver: (event) => {
         if (!hasPhotoDrag(event.dataTransfer)) return;
         event.preventDefault();
-        event.dataTransfer.dropEffect = event.altKey ? "copy" : "move";
-        setCopyDrag(event.altKey);
+        event.dataTransfer.dropEffect = copyByDefault !== event.altKey ? "copy" : "move";
+        setAltDrag(event.altKey);
         setDropOver(target);
       },
       onDragLeave: (event) => {
@@ -721,7 +724,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
         event.preventDefault();
         // The tile being dragged may be gone after the move, so dragend can't be relied on.
         dragChange(null);
-        if (dragged.includes(photo.path)) void send([...dragged], target, event.altKey);
+        if (dragged.includes(photo.path)) void send([...dragged], target, copyByDefault !== event.altKey);
       },
     };
   };
@@ -732,7 +735,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
     if (!dragged) return;
     const forget = () => dragChange(null);
     const modifier = (event: KeyboardEvent | globalThis.DragEvent) => {
-      setCopyDrag(event.altKey);
+      setAltDrag(event.altKey);
       if ("clientX" in event) setDragPoint({ x: event.clientX, y: event.clientY });
     };
     window.addEventListener("mousemove", forget);
@@ -765,6 +768,13 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
           {loading ? "Scanning Library..." : result ? `${photos.length.toLocaleString()} Photos` : "Scan failed"}
         </span>
         <div className="photo-browser-tools">
+          {onCopyByDefaultChange && <div className="photo-drag-action" role="group" aria-label="Photo drag action"
+            title="Default Photo-to-Folder drag action. Hold Alt to temporarily reverse it.">
+            <button type="button" className="button-quiet" aria-pressed={!copyByDefault}
+              onClick={() => onCopyByDefaultChange(false)}>Move</button>
+            <button type="button" className="button-quiet" aria-pressed={copyByDefault}
+              onClick={() => onCopyByDefaultChange(true)}>Copy</button>
+          </div>}
           {onCreateFolder && <button type="button" className="button-quiet" disabled={!result}
             onClick={() => setNaming({ kind: "create", parent: folder })}>New Folder…</button>}
           <button type="button" className="button-quiet" disabled={loading} onClick={() => setScan(scan + 1)}>

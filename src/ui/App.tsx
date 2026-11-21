@@ -86,7 +86,7 @@ function PaneTabs({ current, onChange }: { current: PaneTab; onChange: (tab: Pan
   );
 }
 
-function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, suspended, modes, bar, layoutBar, sortBar, layoutPorts, sidePane, onSidePaneChange, onLayoutLibraryReadyChange }: {
+function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, suspended, modes, bar, layoutBar, sortBar, layoutPorts, sidePane, onSidePaneChange, copyByDefault, onCopyByDefaultChange, onLayoutLibraryReadyChange }: {
   document: OpenDocument;
   onBusyChange: (busy: boolean) => void;
   onTitleChange: (album: Album | null) => void;
@@ -99,6 +99,8 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
   layoutPorts?: LayoutPorts;
   sidePane: SidePaneSettings;
   onSidePaneChange: (change: Partial<SidePaneSettings>) => void;
+  copyByDefault: boolean;
+  onCopyByDefaultChange: (copy: boolean) => void;
   /** Whether the shared Layout Library can take a new Layout, for Save as Layout. */
   onLayoutLibraryReadyChange: (ready: boolean) => void;
 }) {
@@ -172,6 +174,7 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
               onCompactChange={(compact) => onSidePaneChange({ compact })} onSendPhotos={sendPhotos} onCopyPhotos={copyPhotos} onCreateFolder={createPhotoFolder}
               onRenameFolder={renamePhotoFolder} onPhotosChange={reportPhotos} onIdentitiesChange={setPhotoIdentities}
               onContentIndexStatsChange={setContentIndexStats}
+              copyByDefault={copyByDefault} onCopyByDefaultChange={onCopyByDefaultChange}
               mode={mode === "sort" ? "sort" : "album"} visible={photoPaneVisible}
               sort={{ ...sortBar, host: sortHost, active: mode === "sort" && !hidden && !suspended }} />
           </div>
@@ -206,6 +209,7 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
   const [transitioning, setTransitioning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sidePane, setSidePaneState] = useState(DEFAULT_SIDE_PANE);
+  const [copyByDefault, setCopyByDefault] = useState(false);
   const sidePaneRef = useRef(DEFAULT_SIDE_PANE);
   const [command, setCommand] = useState<AlbumCommand | undefined>();
   const [slotSelected, setSlotSelected] = useState(false);
@@ -677,7 +681,8 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
         bar={{ command, toolsHost, onSlotSelectedChange: setSlotSelected, onEditableChange: setAlbumEditable, onHistoryChange: setAlbumHistory }}
         layoutBar={{ command: layoutCommand, toolsHost, onStateChange: setLayoutState }}
         sortBar={{ command: sortCommand, onComparisonChange: setSortCounts, zoom: sortZoom, onZoomChange: zoomSortFromView }} layoutPorts={layoutPorts}
-        sidePane={sidePane} onSidePaneChange={changeSidePane} onLayoutLibraryReadyChange={setLayoutLibraryReady} />}
+        sidePane={sidePane} onSidePaneChange={changeSidePane} copyByDefault={copyByDefault} onCopyByDefaultChange={setCopyByDefault}
+        onLayoutLibraryReadyChange={setLayoutLibraryReady} />}
     </main>
   );
 }
