@@ -489,6 +489,16 @@ body {
   background: #c9d8cd;
 }
 
+.photo-breadcrumbs button.drop-target-copy,
+.folder-tile.drop-target-copy .photo-preview {
+  outline-color: #3268b6;
+}
+
+.photo-breadcrumbs button.drop-target-copy.drop-target-over,
+.folder-tile.drop-target-copy.drop-target-over .photo-preview {
+  background: #d4e4fa;
+}
+
 .photo-empty {
   margin: 16px;
   line-height: 1.6;
@@ -546,15 +556,17 @@ body {
   text-align: center;
 }
 
-/* Built off screen for a drag of several Photos; the browser snapshots it as the drag image. */
+/* Built off screen; the browser snapshots only the Photo, not the live badge. */
 .photo-drag-image {
   position: fixed;
   top: -1000px;
   left: -1000px;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  width: 104px;
+  height: 80px;
+  box-sizing: border-box;
   padding: 4px;
   border-radius: 4px;
   background: #fff;
@@ -569,6 +581,9 @@ body {
 }
 
 .photo-drag-count {
+  position: fixed;
+  z-index: 10000;
+  pointer-events: none;
   padding: 2px 8px;
   border-radius: 3px;
   color: #fff;

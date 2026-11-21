@@ -5,7 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
-import { createAlbum, deserializeAlbum, clampZoom, renameFolder, sendPhotosToFolder, serializeAlbum, stepZoom, type Album, type ZoomChange, type HistoryDirection, type LayoutPorts, type Photo, type PhotoIdentity, type PhotoSize, type PlacementRelink } from "../core";
+import { createAlbum, copyPhotosToFolder, deserializeAlbum, clampZoom, renameFolder, sendPhotosToFolder, serializeAlbum, stepZoom, type Album, type ContentIndexStats, type ZoomChange, type HistoryDirection, type LayoutPorts, type Photo, type PhotoIdentity, type PhotoSize, type PlacementRelink } from "../core";
 import AlbumWorkspace, { type AlbumCommand, type AlbumCommandName, type CommandBarLink, type HistoryState, type PhotoMoveRunner } from "./AlbumWorkspace";
 import CommandBar, { type BarCommand } from "./CommandBar";
 import LayoutWorkspace, { type LayoutBarLink, type LayoutBarState, type LayoutCommand, type LayoutCommandName } from "./LayoutWorkspace";
@@ -114,14 +114,14 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
   const [layoutPaneHost, setLayoutPaneHost] = useState<HTMLElement | null>(null);
   const [albumLayoutsHost, setAlbumLayoutsHost] = useState<HTMLElement | null>(null);
   const [paneTab, setPaneTab] = useState<PaneTab>("photos");
-  const busy = useRef({ album: false, layouts: false });
+  const busy = useRef({ album: false, layouts: false, photos: false });
   const reportAlbumBusy = useCallback((value: boolean) => {
     busy.current.album = value;
-    onBusyChange(busy.current.album || busy.current.layouts);
+    onBusyChange(busy.current.album || busy.current.layouts || busy.current.photos);
   }, [onBusyChange]);
   const reportLayoutsBusy = useCallback((value: boolean) => {
     busy.current.layouts = value;
-    onBusyChange(busy.current.album || busy.current.layouts);
+    onBusyChange(busy.current.album || busy.current.layouts || busy.current.photos);
   }, [onBusyChange]);
   const format = (album ?? document.album).pageFormat;
   // Loaded with the Album, as both Album mode and Layout mode use it.
@@ -139,6 +139,16 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
   }, [document.path]);
   const sendPhotos = useCallback(async (photos: string[], target: string) => withOpenAlbum(async (openAlbum) =>
     (await sendPhotosToFolder(tauriSortingPorts, { root: document.root, photos, target, openAlbum })).moves), [withOpenAlbum, document.root]);
+  const copyPhotos = useCallback(async (photos: string[], target: string) => {
+    busy.current.photos = true;
+    onBusyChange(true);
+    try {
+      return await copyPhotosToFolder(tauriSortingPorts, { root: document.root, photos, target });
+    } finally {
+      busy.current.photos = false;
+      onBusyChange(busy.current.album || busy.current.layouts);
+    }
+  }, [document.root, onBusyChange]);
   const createPhotoFolder = useCallback((parent: string, name: string) => createFolder(document.root, parent, name), [document.root]);
   const renamePhotoFolder = useCallback(async (folder: string, name: string) => (await withOpenAlbum(async (openAlbum) =>
     (await renameFolder(tauriSortingPorts, { root: document.root, folder, name, openAlbum })).rename)).to, [withOpenAlbum, document.root]);
@@ -147,6 +157,7 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
   // Effective Resolution uses the scanned pixel sizes, so warnings appear once the Library has been scanned.
   const [photoSizes, setPhotoSizes] = useState<ReadonlyMap<string, PhotoSize>>(() => new Map());
   const [photoIdentities, setPhotoIdentities] = useState<ReadonlyMap<string, PhotoIdentity>>(() => new Map());
+  const [contentIndexStats, setContentIndexStats] = useState<ContentIndexStats | null>(null);
   const reportPhotos = useCallback((photos: readonly Photo[]) => {
     setPhotoSizes(new Map(photos.map(({ path, width, height, orientation }) => [path, { width, height, orientation }])));
   }, []);
@@ -158,8 +169,9 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
           <div className="pane-view" hidden={mode === "album" && paneTab !== "photos"}
             {...mode === "album" ? { role: "tabpanel", id: "pane-panel-photos", "aria-labelledby": "pane-tab-photos" } : {}}>
             <PhotoBrowser root={document.root} album={album} compact={sidePane.compact}
-              onCompactChange={(compact) => onSidePaneChange({ compact })} onSendPhotos={sendPhotos} onCreateFolder={createPhotoFolder}
+              onCompactChange={(compact) => onSidePaneChange({ compact })} onSendPhotos={sendPhotos} onCopyPhotos={copyPhotos} onCreateFolder={createPhotoFolder}
               onRenameFolder={renamePhotoFolder} onPhotosChange={reportPhotos} onIdentitiesChange={setPhotoIdentities}
+              onContentIndexStatsChange={setContentIndexStats}
               mode={mode === "sort" ? "sort" : "album"} visible={photoPaneVisible}
               sort={{ ...sortBar, host: sortHost, active: mode === "sort" && !hidden && !suspended }} />
           </div>
@@ -172,6 +184,7 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
       <div className="mode-view" hidden={mode !== "album"}>
         <AlbumWorkspace root={document.root} document={document} suspended={suspended} active={mode === "album" && !hidden}
           onBusyChange={reportAlbumBusy} onAlbumChange={reportAlbum} bar={bar} photoMoves={photoMoves} photoSizes={photoSizes} photoIdentities={photoIdentities}
+          contentIndexStats={contentIndexStats}
           layouts={{ state: layouts, paneHost: albumLayoutsHost }} />
       </div>
       {layoutsOpened && <div className="mode-view" hidden={mode !== "layouts"}>

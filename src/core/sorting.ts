@@ -6,6 +6,8 @@ export interface PhotoMove {
   to: string;
 }
 
+export type PhotoCopy = PhotoMove;
+
 /** A Folder renamed, with everything under it, from one Library-relative path to another. */
 export interface FolderRename {
   from: string;
@@ -160,6 +162,8 @@ export interface SortingPorts {
   rootAlbums(root: string): Promise<{ name: string; json: string }[]>;
   /** Moves the Photo files and rewrites the Albums together: if any step fails, nothing changes. */
   movePhotos(root: string, moves: PhotoMove[], albums: AlbumRewrite[]): Promise<void>;
+  /** Copies the Photo files as one batch without changing originals or Albums. */
+  copyPhotos(root: string, copies: PhotoCopy[]): Promise<void>;
   /** Renames the Folder and rewrites the Albums together: if any step fails, nothing changes. */
   renameFolder(root: string, rename: FolderRename, albums: AlbumRewrite[]): Promise<void>;
 }
@@ -183,6 +187,15 @@ export async function sendPhotosToFolder(ports: SortingPorts, request: SendPhoto
   const { albums, relinkedOpen } = await albumRewrites(ports, root, openAlbum, moves);
   await ports.movePhotos(root, moves, albums);
   return { moves, openAlbum: relinkedOpen };
+}
+
+export async function copyPhotosToFolder(
+  ports: Pick<SortingPorts, "folderNames" | "copyPhotos">,
+  { root, photos, target }: Pick<SendPhotosRequest, "root" | "photos" | "target">,
+): Promise<PhotoCopy[]> {
+  const copies = planPhotoMove(photos, target, await ports.folderNames(root, target));
+  if (copies.length > 0) await ports.copyPhotos(root, copies);
+  return copies;
 }
 
 export interface RenameFolderRequest {

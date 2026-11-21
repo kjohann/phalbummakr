@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addPhotoSlot, createAlbum, placePhoto, serializeAlbum, setPlacementFit, type Album } from ".";
-import { folderNameProblem, planPhotoMove, relinkPlacements, renameFolder, scanAfterMove, sendPhotosToFolder, type AlbumRewrite, type FolderRename, type PhotoMove, type SortingPorts } from "./sorting";
+import { copyPhotosToFolder, folderNameProblem, planPhotoMove, relinkPlacements, renameFolder, scanAfterMove, sendPhotosToFolder, type AlbumRewrite, type FolderRename, type PhotoMove, type SortingPorts } from "./sorting";
 
 function photo(path: string) {
   return { path, width: 4000, height: 3000, orientation: 1 };
@@ -47,6 +47,26 @@ it("leaves Photos that are already in the target Folder where they are", () => {
   expect(planPhotoMove(["c.jpg", "x/c.jpg"], "", ["c.jpg"])).toEqual([{ from: "x/c.jpg", to: "c (2).jpg" }]);
 });
 
+it("copies a mixed-source batch with collision suffixes and no Album reads or rewrites", async () => {
+  const copied: PhotoMove[][] = [];
+  const ports = {
+    folderNames: async () => ["A.JPG"],
+    copyPhotos: async (_root: string, copies: PhotoMove[]) => { copied.push(copies); },
+  };
+  expect(await copyPhotosToFolder(ports, {
+    root: "D:\\Photos", photos: ["a.jpg", "trip/a.jpg", "kids/a.jpg"], target: "kids",
+  })).toEqual([{ from: "a.jpg", to: "kids/a (2).jpg" }, { from: "trip/a.jpg", to: "kids/a (3).jpg" }]);
+  expect(copied).toHaveLength(1);
+  await expect(copyPhotosToFolder(ports, {
+    root: "D:\\Photos", photos: ["a.jpg"], target: "Exports",
+  })).rejects.toThrow(/Folder/);
+  expect(copied).toHaveLength(1);
+  ports.copyPhotos = async () => { throw new Error("Copy failed; rollback failed"); };
+  await expect(copyPhotosToFolder(ports, {
+    root: "D:\\Photos", photos: ["a.jpg"], target: "kids",
+  })).rejects.toThrow("Copy failed; rollback failed");
+});
+
 it("points every Placement of a moved Photo at its new path and keeps how it is shown", () => {
   const album = setPlacementFit(albumWith("a.jpg", "b.jpg", "a.jpg"), "page-1", "slot-3", true);
   const relinked = relinkPlacements(album, [{ from: "a.jpg", to: "kids/a (2).jpg" }]);
@@ -68,6 +88,7 @@ describe("sendPhotosToFolder", () => {
       folderNames: async () => namesInTarget,
       rootAlbums: async () => Object.entries(albums).map(([name, json]) => ({ name, json })),
       movePhotos: async (_root, moves, rewrites) => { moved.push({ moves, albums: rewrites }); },
+      copyPhotos: async () => { throw new Error("not a copy"); },
       renameFolder: async () => { throw new Error("not a rename"); },
     };
     return { ports, moved };
@@ -140,6 +161,7 @@ describe("renaming a Folder", () => {
       folderNames: async () => namesInParent,
       rootAlbums: async () => Object.entries(albums).map(([name, json]) => ({ name, json })),
       movePhotos: async () => { throw new Error("not a move"); },
+      copyPhotos: async () => { throw new Error("not a copy"); },
       renameFolder: async (_root, rename, rewrites) => { renamed.push({ rename, albums: rewrites }); },
     };
     return { ports, renamed };

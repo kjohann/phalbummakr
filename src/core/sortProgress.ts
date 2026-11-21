@@ -1,4 +1,4 @@
-import { parentFolder, renamedPath, type FolderRename, type PhotoMove } from "./sorting";
+import { parentFolder, renamedPath, type FolderRename, type PhotoCopy, type PhotoMove } from "./sorting";
 
 /** Where the user was in a Folder in Sort mode. */
 export interface FolderPosition {
@@ -65,6 +65,12 @@ export function progressAfterMove(progress: SortProgress, moves: readonly PhotoM
     if (position.shown !== null && moved.has(position.shown)) next = withPosition(next, folder, { shown: null });
   }
   return next;
+}
+
+export function progressAfterCopy(progress: SortProgress, copies: readonly PhotoCopy[]): SortProgress {
+  const reviewed = copies.filter(({ from }) => progress.reviewed.has(from)).map(({ to }) => to);
+  const unreviewed = copies.filter(({ from }) => !progress.reviewed.has(from)).map(({ to }) => to);
+  return setReviewed(setReviewed(progress, reviewed, true), unreviewed, false);
 }
 
 /** Reviewed marks and positions inside a renamed Folder follow it. */

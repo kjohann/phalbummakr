@@ -167,6 +167,13 @@ async fn move_photos(
 }
 
 #[tauri::command]
+async fn copy_photos(root: String, copies: Vec<sorting::PhotoMove>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || sorting::copy_photos(Path::new(&root), &copies))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn rename_folder(
     root: String,
     rename: sorting::FolderRename,
@@ -357,6 +364,7 @@ pub fn run() {
             root_albums,
             create_folder,
             move_photos,
+            copy_photos,
             rename_folder,
             folder_exists,
             photo_thumbnail,

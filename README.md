@@ -36,6 +36,31 @@ exists; otherwise, it returns to the nearest available ancestor and shows a noti
 Opening a folder resets the grid to the top. Folders and Photos are referenced
 where they live on disk; browsing never moves or copies originals.
 
+## Sorting and copying Photos
+
+Drag a Photo to a Folder tile or breadcrumb to move its file. **Hold Alt at
+drop to copy instead**; pressing or releasing Alt during the drag switches the
+live drag badge (including single Photos) and Folder highlight. The badge adds
+Move/Copy while over a valid Folder target. Unlike Slot duplication, this choice
+is not latched at drag start. Drops on Pages and Photo Slots still place normally,
+even with Alt.
+
+Right-click a Photo for **Move to Folder...** or **Copy to Folder...**, including
+**New Folder…**. In Sort mode, a grid Comparison member acts on the whole
+Comparison; a Selected member in the Comparison acts on the Selected Photos.
+Otherwise, the Photo acts alone. Copies keep originals, Comparison selection and
+Placement paths unchanged, and share Usage once their content is indexed.
+
+Protected Folders and same-Folder duplication are forbidden. Mixed batches skip
+Photos already in the destination and report the skips. Name collisions get
+case-insensitive suffixes such as `holiday (2).jpg`; copies never overwrite files,
+even if a destination appears after planning. A failed copy batch rolls back
+new copies, with operation and rollback failures shown explicitly.
+
+App-created copies initially inherit their original's Reviewed mark; after that
+the marks are independent. Identical files found by scanning do not inherit it.
+File moves and copies are outside Album undo and need no ordinary confirmation.
+
 Drag the Side pane's inner edge to resize it (200–640 px, at most 60% of the
 window; with the separator
 focused, the arrow keys resize it too). The ‹ tab on its edge collapses it and the
@@ -89,7 +114,7 @@ opened: Slots, Placements, Crops, text and Pages. A drag, a pan, or one session
 of typing in a Text Slot counts as one step. Undo jumps to the Page where the
 change happened. The history lasts for the session only; autosave always writes
 the current state. In Layout mode, each Layout has its own history. Creating,
-duplicating and deleting Layouts, and moving Photos between Folders, are not
+duplicating and deleting Layouts, and moving or copying Photos between Folders, are not
 undone.
 
 **Album settings** contains the title and print settings. Use **Apply print settings** for the title, Bleed,
@@ -145,8 +170,10 @@ Complete-file SHA-256 hashes are indexed in the background and cached in
 `.phalbummakr/content-index.json` for unchanged files. Browsing and placement
 remain available while badges say **Checking...**. **Unused** excludes
 unresolved checks and shows an indexing notice. Failures are visible and offer
-**Retry Usage check**. Expand **Content index statistics** to see hashing bytes,
-cache hits and backend indexing time; Rescan rechecks files.
+**Retry Usage check**. **Album settings → Diagnostics** keeps content-index
+statistics collapsed until requested: hashing bytes, cache hits and backend
+indexing time are diagnostic information, not everyday browser chrome. Rescan
+rechecks files.
 
 Placing an already-used Photo shows the ordinary dismissible warning without
 preventing the Placement. An unresolved check instead explicitly says the

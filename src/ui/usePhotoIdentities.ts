@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { photoUsage, type Album, type ContentIndexBatch, type Photo, type PhotoIdentity } from "../core";
+import { photoUsage, type Album, type ContentIndexStats, type Photo, type PhotoIdentity } from "../core";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
 
 export function usePhotoIdentities(root: string, photos: readonly Photo[] | null, album: Album | null) {
@@ -13,7 +13,7 @@ export function usePhotoIdentities(root: string, photos: readonly Photo[] | null
     paths.map((path) => [path, { path, status: "pending" }]),
   ), [pathsJson]);
   const [state, setState] = useState<{
-    key: object; identities: ReadonlyMap<string, PhotoIdentity>; stats: Omit<ContentIndexBatch, "identities">;
+    key: object; identities: ReadonlyMap<string, PhotoIdentity>; stats: ContentIndexStats;
   } | null>(null);
   useEffect(() => {
     let active = true;

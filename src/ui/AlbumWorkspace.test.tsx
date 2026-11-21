@@ -701,6 +701,22 @@ it("keeps print settings in Album settings, validates them, and persists changes
   expect(screen.getByText("Safe Zone: 7 mm")).toBeTruthy();
 });
 
+it("keeps content-index statistics in collapsed Album settings diagnostics without editing the Album", async () => {
+  const { ports } = disk();
+  render(<MenuHarness root="D:\\Photos" ports={ports}
+    contentIndexStats={{ hashedFiles: 4, hashedBytes: 1024, cacheHits: 6, elapsedMs: 12.5 }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
+  expect(screen.queryByText("Diagnostics")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Bar album-settings" }));
+  const summary = screen.getByText("Diagnostics");
+  expect(summary.closest("details")?.open).toBe(false);
+  expect(summary.closest("details")?.textContent).toContain("4 files hashed (1,024 bytes), 6 cached; 12.5 ms indexing.");
+  fireEvent.click(summary);
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  expect(ports.write).not.toHaveBeenCalled();
+});
+
 it("adds and duplicates Spreads, selects the result, and reopens saved Pages", async () => {
   const { ports } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} />);
@@ -1198,7 +1214,8 @@ it("reports Album commands as available while an autosave is pending, but not wh
   expect(onEditableChange).toHaveBeenLastCalledWith(false);
 });
 
-it.each(["ready", "pending", "error"] as const)("uses the shared %s duplicate check when placing a Photo", (status) => {
+it.each(["ready", "pending", "error"] as const)("uses the shared %s duplicate check when Alt-placing a Photo", (status) => {
+  vi.stubGlobal("DragEvent", MouseEvent);
   const { ports } = disk();
   const album = placePhoto(addPhotoSlot(addPhotoSlot(createAlbum({ name: "Existing" }), "page-1"), "page-1"),
     "page-1", "slot-1", { path: "a.jpg", width: 6000, height: 4000, orientation: 1 });
@@ -1210,7 +1227,7 @@ it.each(["ready", "pending", "error"] as const)("uses the shared %s duplicate ch
   render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} photoIdentities={photoIdentities}
     document={{ path: "Existing", album }} />);
   const target = screen.getByRole("button", { name: "Page 1 Photo Slot 2" });
-  fireEvent.drop(target, photoDrop({ path: "copy.jpg", width: 6000, height: 4000, orientation: 1 }));
+  fireEvent.drop(target, { ...photoDrop({ path: "copy.jpg", width: 6000, height: 4000, orientation: 1 }), altKey: true });
   if (status === "ready") expect(screen.getByText("copy.jpg is already used in this Album.")).toBeTruthy();
   else expect(screen.getByText(/copy.jpg was placed; duplicate check pending/)).toBeTruthy();
   expect(target.getAttribute("title")).toBe("copy.jpg");

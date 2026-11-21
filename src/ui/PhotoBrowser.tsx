@@ -2,15 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type
 import { createPortal } from "react-dom";
 import {
   afterMove, canStepFolder, currentFolder, EMPTY_COMPARISON, folderNameProblem, folderRenameProblem,
-  contentPhotoUsage, historyAfterRename, historyAfterRescan, isProtectedFolder, photosUpTo, progressAfterMove, progressAfterRename, progressAfterRescan, usageForPhoto,
+  contentPhotoUsage, historyAfterRename, historyAfterRescan, isProtectedFolder, photosUpTo, progressAfterCopy, progressAfterMove, progressAfterRename, progressAfterRescan, usageForPhoto,
   rememberScroll, renamedPath, scanAfterMove, setReviewed, showInProgress, showPhoto, START_FOLDER_HISTORY, stepFolder, stepPhoto,
   photosActedOn, toggleComparison, toggleSelected, visitFolder, withoutPhotos,
-  type Album, type Comparison, type FolderHistory, type FolderRename, type Photo, type PhotoIdentity, type PhotoMove, type PhotoPane, type PhotoScan, type PhotoUsageState, type ZoomChange,
+  type Album, type Comparison, type ContentIndexStats, type FolderHistory, type FolderRename, type Photo, type PhotoCopy, type PhotoIdentity, type PhotoMove, type PhotoPane, type PhotoScan, type PhotoUsageState, type ZoomChange,
 } from "../core";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
 import { folderExists } from "./tauriSortingPorts";
 import { useSortProgress } from "./useSortProgress";
-import { hasPhotoDrag, leftElement, readPhotoDrag, writeCountDragImage, writePhotoDrag, type PhotoDragStart } from "./photoDrag";
+import { hasPhotoDrag, leftElement, readPhotoDrag, writePhotoDragImage, writePhotoDrag, type PhotoDragStart } from "./photoDrag";
 import { useEdgeScroll } from "./edgeScroll";
 import SortView from "./SortView";
 import UsageBadge from "./UsageBadge";
@@ -329,20 +329,26 @@ function fileName(path: string) {
   return path.split("/").pop()!;
 }
 
-function movedMessage(moves: PhotoMove[], target: string) {
-  if (moves.length !== 1) return `Moved ${moves.length} Photos to ${folderName(target)}.`;
+function movedMessage(moves: PhotoMove[], target: string, copy: boolean) {
+  const verb = copy ? "Copied" : "Moved";
+  if (moves.length !== 1) {
+    const renamed = moves.filter(({ from, to }) => fileName(from) !== fileName(to)).map(({ to }) => `"${fileName(to)}"`);
+    return `${verb} ${moves.length} Photos to ${folderName(target)}.${copy && renamed.length ? ` Created: ${renamed.join(", ")}.` : ""}`;
+  }
   const [{ from, to }] = moves;
-  return fileName(from) === fileName(to) ? `Moved "${fileName(from)}" to ${folderName(target)}.`
-    : `Moved "${fileName(from)}" to ${folderName(target)} as "${fileName(to)}".`;
+  return fileName(from) === fileName(to) ? `${verb} "${fileName(from)}" to ${folderName(target)}.`
+    : `${verb} "${fileName(from)}" to ${folderName(target)} as "${fileName(to)}".`;
 }
 
-export default function PhotoBrowser({ root, album = null, compact = false, onCompactChange, onSendPhotos, onCreateFolder, onRenameFolder, onPhotosChange, onIdentitiesChange, sort, mode = "album", visible = true }: {
+export default function PhotoBrowser({ root, album = null, compact = false, onCompactChange, onSendPhotos, onCopyPhotos, onCreateFolder, onRenameFolder, onPhotosChange, onIdentitiesChange, onContentIndexStatsChange, sort, mode = "album", visible = true }: {
   root: string;
   album?: Album | null;
   compact?: boolean;
   onCompactChange?: (compact: boolean) => void;
   /** Moves Photos to a Folder ("" is the Library root), returning the moves made. Without it, Folders aren't drop targets. */
   onSendPhotos?: (photos: string[], target: string) => Promise<PhotoMove[]>;
+  /** Copies Photos without changing originals, Placements or Comparison selection. */
+  onCopyPhotos?: (photos: string[], target: string) => Promise<PhotoCopy[]>;
   /** Creates Folder `name` inside `parent`, returning its Library-relative path, for "New Folder…". */
   onCreateFolder?: (parent: string, name: string) => Promise<string>;
   /** Renames `folder` to `name`, with everything under it, returning its new Library-relative path. */
@@ -350,6 +356,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
   /** Receives every Photo in the Library after each scan. */
   onPhotosChange?: (photos: readonly Photo[]) => void;
   onIdentitiesChange?: (identities: ReadonlyMap<string, PhotoIdentity>) => void;
+  onContentIndexStatsChange?: (stats: ContentIndexStats | null) => void;
   /** Set in Sort mode, where Photos are shown large and compared. */
   sort?: SortLink;
   /** Whose current Folder and back/forward history are shown. */
@@ -359,13 +366,15 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
 }) {
   const [comparison, setComparison] = useState<Comparison>(EMPTY_COMPARISON);
   const [menu, setMenu] = useState<PhotoMenu | null>(null);
-  const [folderDialog, setFolderDialog] = useState<{ paths: string[]; parent: string } | null>(null);
+  const [folderDialog, setFolderDialog] = useState<{ paths: string[]; parent: string; copy: boolean } | null>(null);
   const [naming, setNaming] = useState<FolderNaming | null>(null);
   const [scan, setScan] = useState(0);
   const [unusedOnly, setUnusedOnly] = useState(false);
   // The Photos a drag from the grid or the work area moves; null when no such drag is running.
   const [dragged, setDragged] = useState<readonly string[] | null>(null);
   const [dropOver, setDropOver] = useState<string | null>(null);
+  const [copyDrag, setCopyDrag] = useState(false);
+  const [dragPoint, setDragPoint] = useState({ x: 0, y: 0 });
   const edgeScroll = useEdgeScroll();
   // The Photos being moved; empty when no move is running.
   const [movingPhotos, setMovingPhotos] = useState<readonly string[]>([]);
@@ -431,6 +440,9 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
   const usage = useMemo(() => contentPhotoUsage(album, contentIndex.identities), [album, contentIndex.identities]);
   useEffect(() => { onIdentitiesChange?.(contentIndex.identities); }, [contentIndex.identities, onIdentitiesChange]);
   const pendingIdentities = [...contentIndex.identities.values()].filter((identity) => identity.status === "pending").length;
+  useEffect(() => {
+    onContentIndexStatsChange?.(pendingIdentities === 0 ? contentIndex.stats : null);
+  }, [pendingIdentities, contentIndex.stats, onContentIndexStatsChange]);
   const identityErrors = [...contentIndex.identities.values()].filter((identity) => identity.status === "error");
   const unknownMissing = [...contentIndex.identities.values()].filter((identity) => identity.status === "missing" && !identity.hash);
   const photos = result?.photos.filter((photo) => parentFolder(photo.path) === folder
@@ -530,6 +542,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
   function dragChange(paths: readonly string[] | null) {
     setDragged(paths);
     setDropOver(null);
+    if (!paths) setCopyDrag(false);
   }
 
   /**
@@ -538,33 +551,42 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
    */
   const startDrag = (pane: PhotoPane): PhotoDragStart => (path, event) => {
     const paths = sortActive ? photosActedOn(comparison, path, pane) : [path];
-    if (paths.length > 1) {
-      const picture = event.currentTarget instanceof Element ? event.currentTarget.querySelector("img") : null;
-      writeCountDragImage(event.dataTransfer, paths.length, picture);
-    }
+    const picture = event.currentTarget instanceof Element ? event.currentTarget.querySelector("img") : null;
+    writePhotoDragImage(event.dataTransfer, picture);
     dragChange(paths);
+    setCopyDrag(event.altKey);
+    setDragPoint({ x: event.clientX, y: event.clientY });
   };
   const endDrag = () => dragChange(null);
 
-  async function send(paths: string[], target: string) {
+  async function send(paths: string[], target: string, copy = false) {
     const gridBefore = gridRef.current;
     // The last message stays until this move replaces it, so the grid below it doesn't jump.
     setMovingPhotos(paths);
     try {
-      const moves = await onSendPhotos!(paths, target);
+      const operation = copy ? onCopyPhotos : onSendPhotos;
+      if (!operation) throw new Error(`${copy ? "Copying" : "Moving"} Photos is unavailable.`);
+      const moves = await operation(paths, target);
       if (moves.length > 0) {
-        updateProgress((current) => progressAfterMove(current, moves));
-        // Moved Photos get new revisions, so only they are read again, not the whole Library.
-        const moved = await tauriPhotoPorts.read(root, moves.map(({ to }) => to)).catch(() => null);
-        setResult((current) => current && { ...scanAfterMove(current, moves, moved ?? []), generation: current.generation });
+        updateProgress((current) => copy ? progressAfterCopy(current, moves) : progressAfterMove(current, moves));
+        // Only the new paths need records; originals remain in the scan for copies.
+        let refreshError: string | null = null;
+        const moved = await tauriPhotoPorts.read(root, moves.map(({ to }) => to)).catch((cause: unknown) => {
+          if (copy) refreshError = ` Could not refresh copied Photos: ${String(cause)}. Rescanning the Library.`;
+          return null;
+        });
+        setResult((current) => current && { ...scanAfterMove(current, copy ? [] : moves, moved ?? []), generation: current.generation });
         // A scan still running may have read the Library before the move, so it is replaced by a new one.
         if (!moved || loadingRef.current) setScan((value) => value + 1);
-        setMoveMessage({ text: movedMessage(moves, target), failed: false });
-        setComparison((current) => afterMove(current, moves.map(({ from }) => from), gridBefore));
+        const skipped = paths.length - moves.length;
+        setMoveMessage({ text: movedMessage(moves, target, copy)
+          + (copy && skipped > 0 ? ` Skipped ${skipped} Photo(s) already in ${folderName(target)}.` : "")
+          + (refreshError ?? ""), failed: refreshError !== null });
+        if (!copy) setComparison((current) => afterMove(current, moves.map(({ from }) => from), gridBefore));
       }
     } catch (cause) {
       const what = paths.length === 1 ? `"${fileName(paths[0])}"` : `${paths.length} Photos`;
-      setMoveMessage({ text: `Could not move ${what}: ${cause instanceof Error ? cause.message : String(cause)}`, failed: true });
+      setMoveMessage({ text: `Could not ${copy ? "copy" : "move"} ${what}: ${cause instanceof Error ? cause.message : String(cause)}`, failed: true });
     } finally {
       setMovingPhotos([]);
     }
@@ -578,16 +600,16 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
   /** The Folders `paths` can be sent to, nested as in the Library, each with "New Folder…" inside it. */
   const sendTargets = result?.folders.filter((path) => !isProtectedFolder(path)) ?? [];
   const isAllIn = (paths: readonly string[]) => (target: string) => paths.every((path) => parentFolder(path) === target);
-  function sendToFolderItems(paths: string[]): MenuItem[] {
-    const unavailable = !onSendPhotos || moving;
+  function sendToFolderItems(paths: string[], copy: boolean): MenuItem[] {
+    const unavailable = !(copy ? onCopyPhotos : onSendPhotos) || moving;
     const alreadyIn = isAllIn(paths);
     const level = (parent: string): MenuItem[] => [
       ...sendTargets.filter((path) => parentFolder(path) === parent).map((path) => ({
-        label: fileName(path), onSelect: () => void send(paths, path), disabled: unavailable || alreadyIn(path), items: level(path),
+        label: fileName(path), onSelect: () => void send(paths, path, copy), disabled: unavailable || alreadyIn(path), items: level(path),
       })),
-      { label: "New Folder…", onSelect: () => setFolderDialog({ paths, parent }), disabled: unavailable || !onCreateFolder },
+      { label: "New Folder…", onSelect: () => setFolderDialog({ paths, parent, copy }), disabled: unavailable || !onCreateFolder },
     ];
-    return [{ label: "Library", onSelect: () => void send(paths, ""), disabled: unavailable || alreadyIn("") }, ...level("")];
+    return [{ label: "Library", onSelect: () => void send(paths, "", copy), disabled: unavailable || alreadyIn("") }, ...level("")];
   }
 
   function siblingNames(parent: string) {
@@ -618,12 +640,12 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
     setMenu({ path, where, x: event.clientX, y: event.clientY });
   const spaceContextMenu = (event: ReactMouseEvent) => openFolderMenu("space")(folder, event);
 
-  async function sendToNewFolder(paths: string[], parent: string, name: string) {
+  async function sendToNewFolder(paths: string[], parent: string, name: string, copy: boolean) {
     if (!onCreateFolder) throw new Error("Folders can't be created here.");
     const destination = await onCreateFolder(parent, name);
     addFolder(destination);
     setFolderDialog(null);
-    await send(paths, destination);
+    await send(paths, destination, copy);
   }
 
   const command = sort?.command;
@@ -642,8 +664,10 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
       return [{ label: "New Folder…", onSelect: () => setNaming({ kind: "create", parent: path }), disabled: !onCreateFolder }];
     }
     const inComparison = comparison.shown.includes(path);
-    const targets = photosActedOn(comparison, path, where);
-    const sendItem = { label: "Send to Folder", items: sendToFolderItems(targets) };
+    const targets = sortActive ? photosActedOn(comparison, path, where) : [path];
+    const sendItem = { label: "Move to Folder...", items: sendToFolderItems(targets, false) };
+    const copyItem = { label: "Copy to Folder...", items: sendToFolderItems(targets, true) };
+    if (!sortActive) return [sendItem, copyItem];
     const allReviewed = progress !== null && targets.every((target) => progress.reviewed.has(target));
     const reviewItem: MenuItem = {
       label: allReviewed ? "Mark as unreviewed" : "Mark as reviewed",
@@ -657,6 +681,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
           ? { label: "Remove from Comparison", onSelect: () => setComparison((current) => toggleComparison(current, path)) }
           : { label: "Add to Comparison", onSelect: () => setComparison((current) => toggleComparison(current, path)) },
         sendItem,
+        copyItem,
         reviewItem,
         { label: "Mark all up to here as reviewed", disabled: !progress,
           onSelect: () => updateProgress((current) => setReviewed(current, photosUpTo(gridRef.current, path), true)) },
@@ -667,20 +692,22 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
       ...comparison.shown.length > 1 ? [{ label: isSelected ? "Unselect" : "Select", onSelect: () => setComparison((current) => toggleSelected(current, path)) }] : [],
       { label: "Remove from Comparison", onSelect: () => setComparison((current) => toggleComparison(current, path)) },
       sendItem,
+      copyItem,
       reviewItem,
     ];
   }
 
   // A Folder already holding every dragged Photo is no target, such as the current Folder for a drag from the grid.
   const drop: FolderDrop = (target) => {
-    if (!onSendPhotos || !dragged || moving || isAllIn(dragged)(target)
+    if (!(copyDrag ? onCopyPhotos : onSendPhotos) || !dragged || moving || isAllIn(dragged)(target)
       || isProtectedFolder(target)) return {};
     return {
-      className: dropOver === target ? "drop-target drop-target-over" : "drop-target",
+      className: ["drop-target", dropOver === target && "drop-target-over", copyDrag && "drop-target-copy"].filter(Boolean).join(" "),
       onDragOver: (event) => {
         if (!hasPhotoDrag(event.dataTransfer)) return;
         event.preventDefault();
-        event.dataTransfer.dropEffect = "move";
+        event.dataTransfer.dropEffect = event.altKey ? "copy" : "move";
+        setCopyDrag(event.altKey);
         setDropOver(target);
       },
       onDragLeave: (event) => {
@@ -694,7 +721,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
         event.preventDefault();
         // The tile being dragged may be gone after the move, so dragend can't be relied on.
         dragChange(null);
-        if (dragged.includes(photo.path)) void send([...dragged], target);
+        if (dragged.includes(photo.path)) void send([...dragged], target, event.altKey);
       },
     };
   };
@@ -704,16 +731,35 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
   useEffect(() => {
     if (!dragged) return;
     const forget = () => dragChange(null);
+    const modifier = (event: KeyboardEvent | globalThis.DragEvent) => {
+      setCopyDrag(event.altKey);
+      if ("clientX" in event) setDragPoint({ x: event.clientX, y: event.clientY });
+    };
     window.addEventListener("mousemove", forget);
     window.addEventListener("drop", forget);
+    window.addEventListener("keydown", modifier);
+    window.addEventListener("keyup", modifier);
+    window.addEventListener("dragover", modifier);
+    window.addEventListener("dragend", forget);
+    window.addEventListener("blur", forget);
     return () => {
       window.removeEventListener("mousemove", forget);
       window.removeEventListener("drop", forget);
+      window.removeEventListener("keydown", modifier);
+      window.removeEventListener("keyup", modifier);
+      window.removeEventListener("dragover", modifier);
+      window.removeEventListener("dragend", forget);
+      window.removeEventListener("blur", forget);
     };
   }, [dragged]);
 
   return (
     <aside className="photo-browser" aria-label="Library Photos">
+      {dragged && createPortal(<span className="photo-drag-count" role="status"
+        style={{ left: Math.min(dragPoint.x + 12, Math.max(0, window.innerWidth - 180)),
+          top: Math.min(dragPoint.y + 72, Math.max(0, window.innerHeight - 32)) }}>
+        {dropOver !== null && `${copyDrag ? "Copy" : "Move"} `}{dragged.length} {dragged.length === 1 ? "Photo" : "Photos"}
+      </span>, window.document.body)}
       <header className="photo-browser-header">
         <span className="photo-count" role="status">
           {loading ? "Scanning Library..." : result ? `${photos.length.toLocaleString()} Photos` : "Scan failed"}
@@ -768,11 +814,6 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
         </li>)}</ul>
         <button type="button" className="button-quiet" onClick={contentIndex.retry}>Retry Usage check</button>
       </div>}
-      {contentIndex.stats && pendingIdentities === 0 && <details className="photo-warnings">
-        <summary>Content index statistics</summary>
-        <p>{contentIndex.stats.hashedFiles} files hashed ({contentIndex.stats.hashedBytes.toLocaleString()} bytes),
-          {" "}{contentIndex.stats.cacheHits} cached; {contentIndex.stats.elapsedMs.toFixed(1)} ms indexing.</p>
-      </details>}
       {progressError && <p className="error-banner" role="alert">{progressError}</p>}
       {result && result.warnings.length > 0 && (
         <details className="photo-warnings">
@@ -794,15 +835,15 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
         reviewed={sortActive && progress ? progress.reviewed : NO_PHOTOS}
         initialScrollTop={sortActive && progress ? progress.positions.get(folder)?.scrollTop ?? 0 : undefined}
         onScrollChange={sortActive ? (scrollTop) => updateProgress((current) => rememberScroll(current, folder, scrollTop)) : undefined}
-        onPhotoClick={photoClick} onPhotoContextMenu={sortActive ? openMenu("grid") : undefined}
+        onPhotoClick={photoClick} onPhotoContextMenu={openMenu("grid")}
         onSpaceContextMenu={spaceContextMenu} />}
       {sort?.host && createPortal(<SortView root={root} photos={shownPhotos} selected={comparison.selected} usage={usage} leaving={movingPhotos}
         zoom={sort.zoom ?? 1} onZoomChange={sort.onZoomChange}
         onToggleSelected={(path) => setComparison((current) => toggleSelected(current, path))}
         onContextMenu={openMenu("comparison")} onDragStart={startDrag("comparison")} onDragEnd={endDrag} />, sort.host)}
       {menu && <ContextMenu label="Photo actions" x={menu.x} y={menu.y} items={menuItems(menu)} onClose={() => setMenu(null)} />}
-      {folderDialog && <SendToFolderDialog count={folderDialog.paths.length} parent={folderDialog.parent} siblings={siblingNames}
-        onSend={(parent, name) => sendToNewFolder(folderDialog.paths, parent, name)} onClose={() => setFolderDialog(null)} />}
+      {folderDialog && <SendToFolderDialog count={folderDialog.paths.length} parent={folderDialog.parent} copy={folderDialog.copy} siblings={siblingNames}
+        onSend={(parent, name) => sendToNewFolder(folderDialog.paths, parent, name, folderDialog.copy)} onClose={() => setFolderDialog(null)} />}
       {naming?.kind === "create" && <FolderNameDialog label="New Folder" submitLabel="Create"
         description={`Creates a Folder inside ${folderName(naming.parent)}.`}
         problem={(name) => folderNameProblem(name, siblingNames(naming.parent))}

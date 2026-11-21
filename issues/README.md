@@ -84,7 +84,7 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 039 | [Stop Photo-grid edge scrolling during drags](039-stop-photo-grid-drag-scrolling.md) | 033 | done |
 | 040 | [Alt-drag to duplicate a Slot](040-alt-drag-duplicate-slot.md) | 006, 009, 010, 011, 013, 014 | done |
 | 041 | [Content-aware Photo Usage](041-content-aware-photo-usage.md) | 008 | done |
-| 042 | [Copy Photos to a Folder](042-copy-photos-to-folder.md) | 026, 028, 034, 037, 041 | todo |
+| 042 | [Copy Photos to a Folder](042-copy-photos-to-folder.md) | 026, 028, 034, 037, 041 | done |
 
 Work order for the layout rework: 016, 017, 018, 019, 020, then 011.
 

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   canRedo, canUndo, createAlbum, deserializeAlbum, emptyHistory, endGroup, recordChange, relinkPlacements, serializeAlbum, stepHistory,
-  type Album, type AlbumPorts, type HistoryDirection, type PhotoIdentity, type PhotoPreviewPorts, type PhotoSize, type PlacementRelink, type UndoHistory,
+  type Album, type AlbumPorts, type ContentIndexStats, type HistoryDirection, type PhotoIdentity, type PhotoPreviewPorts, type PhotoSize, type PlacementRelink, type UndoHistory,
 } from "../core";
 import AlbumView from "./AlbumView";
 import ExportDialog from "./ExportDialog";
@@ -77,6 +77,7 @@ interface Props {
   photoSizes?: ReadonlyMap<string, PhotoSize>;
   /** Content identities supplied by the Library index; omitted by standalone workspaces. */
   photoIdentities?: ReadonlyMap<string, PhotoIdentity>;
+  contentIndexStats?: ContentIndexStats | null;
 }
 
 /** The shared Layout Library, and where Album mode lists it: the Layouts tab of the Side pane. */
@@ -87,7 +88,7 @@ export interface AlbumLayouts {
 
 const NO_PHOTO_SIZES: ReadonlyMap<string, PhotoSize> = new Map();
 
-export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document, suspended = false, bar = {}, active = true, layouts, photoMoves, exportPorts = tauriPageExportPorts, photoSizes = NO_PHOTO_SIZES, photoIdentities }: Props) {
+export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document, suspended = false, bar = {}, active = true, layouts, photoMoves, exportPorts = tauriPageExportPorts, photoSizes = NO_PHOTO_SIZES, photoIdentities, contentIndexStats }: Props) {
   const { command, onEditableChange, onHistoryChange } = bar;
   const [names, setNames] = useState<string[]>([]);
   const [current, setCurrent] = useState<{ filename: string; album: Album } | null>(
@@ -423,6 +424,13 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
                   <label>Effective Resolution warning below (DPI)<input name="minEffectiveDpi" type="number" min="1" step="any"
                     defaultValue={current.album.pageFormat.minEffectiveDpi} required /></label>
                 </fieldset>
+                <details>
+                  <summary>Diagnostics</summary>
+                  <h3>Content index statistics</h3>
+                  {contentIndexStats ? <p>{contentIndexStats.hashedFiles} files hashed ({contentIndexStats.hashedBytes.toLocaleString()} bytes),
+                    {" "}{contentIndexStats.cacheHits} cached; {contentIndexStats.elapsedMs.toFixed(1)} ms indexing.</p>
+                    : <p>Content index statistics are not available while checking Photos.</p>}
+                </details>
                 <div className="album-toolbar">
                   <button type="submit" className="button-primary"
                     disabled={suspended || busy || saveStatus === "saving" || saveStatus === "error"}>Apply print settings</button>

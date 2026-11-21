@@ -1,4 +1,4 @@
-//! Sorting: moving Photo files between Folders in the Library, keeping the
+//! Sorting: moving or copying Photo files between Folders in the Library, keeping the
 //! Albums in the Library root pointing at them (ADR 0003).
 
 use crate::photos::{is_hidden_folder, is_photo};
@@ -169,8 +169,8 @@ fn not_found(path: &Path) -> Result<bool, String> {
     }
 }
 
-/// Checks every move before any file is touched.
-fn checked_moves(root: &Path, moves: &[PhotoMove]) -> Result<Vec<(PathBuf, PathBuf)>, String> {
+/// Checks every source/destination pair before any file is touched.
+fn checked_transfers(root: &Path, moves: &[PhotoMove]) -> Result<Vec<(PathBuf, PathBuf)>, String> {
     let mut checked: Vec<(PathBuf, PathBuf)> = Vec::new();
     for PhotoMove { from, to } in moves {
         let source =
@@ -209,7 +209,7 @@ fn checked_moves(root: &Path, moves: &[PhotoMove]) -> Result<Vec<(PathBuf, PathB
             .any(|(earlier, later)| earlier == &source || clashes(later))
         {
             return Err(format!(
-                "\"{from}\" is moved twice or onto another moved Photo."
+                "\"{from}\" is repeated or two Photos have the same destination."
             ));
         }
         checked.push((source, destination));
@@ -312,7 +312,7 @@ pub fn move_photos(
     albums: &[AlbumRewrite],
 ) -> Result<(), String> {
     let root = canonical_root(root)?;
-    let moves = checked_moves(&root, moves)?;
+    let moves = checked_transfers(&root, moves)?;
     let staged = stage_albums(&root, albums, "moving Photos")?;
 
     let mut moved = Vec::new();
@@ -333,6 +333,57 @@ pub fn move_photos(
         moved.push((source, destination));
     }
     commit_albums(staged, || undo_moves(&moved), "No Photos were moved.")
+}
+
+fn undo_copies(copied: &[PathBuf]) -> String {
+    let mut failures = String::new();
+    for destination in copied.iter().rev() {
+        if let Err(error) = fs::remove_file(destination) {
+            failures.push_str(&format!(
+                " Could not remove the copy \"{}\": {error}.",
+                destination.display()
+            ));
+        }
+    }
+    failures
+}
+
+/// Stages complete files before publishing any copy. Publication never replaces a file.
+pub fn copy_photos(root: &Path, copies: &[PhotoMove]) -> Result<(), String> {
+    let root = canonical_root(root)?;
+    let copies = checked_transfers(&root, copies)?;
+    let mut staged = Vec::new();
+    for (source, destination) in copies {
+        let folder = destination.parent().ok_or("Copy has no destination Folder.")?;
+        let source_folder = source.parent().ok_or("Photo has no source Folder.")?
+            .canonicalize().map_err(|error| error.to_string())?;
+        let target_folder = folder.canonicalize().map_err(|error| error.to_string())?;
+        if source_folder == target_folder {
+            return Err("Photos cannot be copied to their own Folder.".into());
+        }
+        let mut temp = tempfile::NamedTempFile::new_in(folder)
+            .map_err(|error| format!("Could not prepare \"{}\": {error}", destination.display()))?;
+        let mut original = fs::File::open(&source)
+            .map_err(|error| format!("Could not read \"{}\": {error}", source.display()))?;
+        io::copy(&mut original, temp.as_file_mut())
+            .and_then(|_| temp.as_file().sync_all())
+            .map_err(|error| format!("Could not copy \"{}\": {error}", source.display()))?;
+        staged.push((destination, temp));
+    }
+    let mut copied = Vec::new();
+    for (destination, temp) in staged {
+        if let Err(error) = temp.persist_noclobber(&destination) {
+            let failures = undo_copies(&copied);
+            return Err(format!(
+                "Could not publish the copy \"{}\": {}.{}",
+                destination.display(),
+                error.error,
+                if failures.is_empty() { " No Photos were copied.".into() } else { failures }
+            ));
+        }
+        copied.push(destination);
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -467,6 +518,21 @@ mod tests {
     }
 
     #[test]
+    fn copies_the_batch_without_changing_originals_or_albums() {
+        let dir = library();
+        fs::write(dir.path().join("b.jpg"), [0, 255, 4, 8]).unwrap();
+        copy_photos(dir.path(), &[
+            photo_move("a.jpg", "kids/a.jpg"), photo_move("b.jpg", "kids/b.jpg"),
+        ]).unwrap();
+        assert_eq!(fs::read(dir.path().join("kids/a.jpg")).unwrap(), b"photo a");
+        assert_eq!(fs::read(dir.path().join("kids/b.jpg")).unwrap(), [0, 255, 4, 8]);
+        assert_eq!(fs::read(dir.path().join("a.jpg")).unwrap(), b"photo a");
+        assert_eq!(fs::read_to_string(dir.path().join("Christmas.phalbum")).unwrap(), "{\"photo\":\"a.jpg\"}");
+        fs::write(dir.path().join("a.jpg"), "changed original").unwrap();
+        assert_eq!(fs::read(dir.path().join("kids/a.jpg")).unwrap(), b"photo a");
+    }
+
+    #[test]
     fn moves_the_photo_file_and_rewrites_the_albums_without_copying() {
         let dir = library();
         let albums = [rewrite(
@@ -487,6 +553,40 @@ mod tests {
             fs::read_to_string(dir.path().join("Christmas.phalbum")).unwrap(),
             "{\"photo\":\"kids/a.jpg\"}"
         );
+    }
+
+    #[test]
+    fn copy_refuses_late_collisions_protected_targets_and_own_folder() {
+        let dir = library();
+        fs::write(dir.path().join("b.jpg"), "photo b").unwrap();
+        let planned = [photo_move("a.jpg", "kids/a.jpg"), photo_move("b.jpg", "kids/b.jpg")];
+        fs::write(dir.path().join("kids/b.jpg"), "created after planning").unwrap();
+        assert!(copy_photos(dir.path(), &planned).unwrap_err().contains("already exists"));
+        assert!(!dir.path().join("kids/a.jpg").exists());
+        assert_eq!(fs::read(dir.path().join("kids/b.jpg")).unwrap(), b"created after planning");
+        for target in [".phalbummakr", "Exports", "kids/.hidden"] {
+            fs::create_dir_all(dir.path().join(target)).unwrap();
+            assert!(copy_photos(dir.path(), &[photo_move("a.jpg", &format!("{target}/a.jpg"))]).is_err());
+        }
+        assert!(copy_photos(dir.path(), &[photo_move("a.jpg", "a (2).jpg")]).is_err());
+        assert_eq!(fs::read(dir.path().join("a.jpg")).unwrap(), b"photo a");
+        assert_eq!(fs::read(dir.path().join("b.jpg")).unwrap(), b"photo b");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn copy_read_failure_leaves_no_published_or_temporary_copies() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = library();
+        fs::write(dir.path().join("b.jpg"), "photo b").unwrap();
+        let _locked = fs::OpenOptions::new().read(true).share_mode(0)
+            .open(dir.path().join("b.jpg")).unwrap();
+        let error = copy_photos(dir.path(), &[
+            photo_move("a.jpg", "kids/a.jpg"), photo_move("b.jpg", "kids/b.jpg"),
+        ]).unwrap_err();
+        assert!(error.contains("Could not read"), "{error}");
+        assert_eq!(entries(&dir.path().join("kids")), Vec::<String>::new());
+        assert_eq!(fs::read(dir.path().join("a.jpg")).unwrap(), b"photo a");
     }
 
     #[test]

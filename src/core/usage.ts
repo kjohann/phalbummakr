@@ -14,6 +14,8 @@ export interface ContentIndexBatch {
   elapsedMs: number;
 }
 
+export type ContentIndexStats = Omit<ContentIndexBatch, "identities">;
+
 export type PhotoUsageState =
   | { status: "ready"; count: number }
   | { status: "pending" | "error"; count: number | null; message: string };

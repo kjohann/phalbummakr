@@ -5,6 +5,7 @@ export const tauriSortingPorts: SortingPorts = {
   folderNames: (root, folder) => invoke<string[]>("folder_names", { root, folder }),
   rootAlbums: (root) => invoke<{ name: string; json: string }[]>("root_albums", { root }),
   movePhotos: (root, moves, albums) => invoke<void>("move_photos", { root, moves, albums }),
+  copyPhotos: (root, copies) => invoke<void>("copy_photos", { root, copies }),
   renameFolder: (root, rename, albums) => invoke<void>("rename_folder", { root, rename, albums }),
 };
 
