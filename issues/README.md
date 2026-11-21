@@ -103,7 +103,7 @@ addendum, then 042. File copying requires content-aware Usage before shipping.
 | [004 addendum – Hide the Albums folder](004-addendum.md#section-2--hide-the-albums-folder) | 004 | done |
 | [004 addendum - Stable autosave status](004-addendum.md#section-3---stable-autosave-status) | 004 | done |
 | [006 addendum – Drop feedback, Slots on drop and faster previews](006-addendum.md) | 006 | doing |
-| [008 addendum – Filesystem-aware Photo Usage](008-addendum.md) | 008 | todo |
+| [008 addendum – Filesystem-aware Photo Usage](008-addendum.md) | 008 | done |
 | [009 addendum - Auto-height text boxes and attached controls](009-addendum.md) | 009 | done |
 | [009 addendum - Stable toolbar appearance](009-addendum.md#section-2---stable-toolbar-appearance) | 009 | done |
 | [010 addendum - Better predefined Layouts and placeholder text](010-addendum.md) | 010 | done |

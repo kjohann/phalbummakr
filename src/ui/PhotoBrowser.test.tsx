@@ -156,6 +156,33 @@ it("excludes pending and failed checks from Unused, keeps browsing available and
   expect(screen.queryByText("Photo Usage check failed.")).toBeNull();
 });
 
+it("retains alias Usage and Unused after a case-only rescan and reopening", async () => {
+  const original = { ...photo(0), path: "Photo.jpg" };
+  let scanned = original;
+  vi.mocked(tauriPhotoPorts.index).mockImplementation(async (_root, paths) => ({
+    identities: paths.map((path) => ({ path, status: "ready", hash: "same-file" })),
+    hashedFiles: 0, hashedBytes: 0, cacheHits: paths.length, elapsedMs: 0,
+  }));
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "scan_photos") return { photos: [scanned], folders: [], warnings: [] };
+    return "data:image/png;base64,dGVzdA==";
+  });
+  const album = placePhoto(addPhotoSlot(createAlbum({ name: "Test" }), "page-1"), "page-1", "slot-1", original);
+  const first = render(<PhotoBrowser root="D:\\Photos" album={album} />);
+  await screen.findByLabelText("Used 1 time in this Album");
+  scanned = { ...original, path: "photo.jpg" };
+  fireEvent.click(screen.getByRole("button", { name: "Rescan" }));
+  await screen.findByText("photo.jpg");
+  await screen.findByLabelText("Used 1 time in this Album");
+  fireEvent.click(screen.getByRole("switch", { name: "All" }));
+  expect(screen.queryByText("photo.jpg")).toBeNull();
+  first.unmount();
+  render(<PhotoBrowser root="D:\\Photos" album={album} />);
+  await screen.findByText("photo.jpg");
+  await screen.findByLabelText("Used 1 time in this Album");
+  fireEvent.click(screen.getByRole("switch", { name: "All" }));
+  expect(screen.queryByText("photo.jpg")).toBeNull();
+});
 it("shows compact tiles without file names but keeps Usage badges and folder names", async () => {
   const first = photo(0);
   vi.mocked(invoke).mockImplementation(async (command) => {

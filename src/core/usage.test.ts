@@ -61,3 +61,22 @@ it("retains known Missing Photo Usage and never treats unresolved or failed chec
   identities.delete("gone.jpg");
   expect(contentPhotoUsage(album, identities).get("copy.jpg")?.status).toBe("pending");
 });
+
+it("counts filesystem aliases but keeps different-content case-sensitive paths distinct", () => {
+  const photo = { path: "Photo.jpg", width: 4000, height: 3000, orientation: 1 };
+  const album = duplicatePage(placePhoto(addPhotoSlot(createAlbum({ name: "Test" }), "page-1"),
+    "page-1", "slot-1", photo), "page-1");
+  const identities = new Map<string, PhotoIdentity>([
+    ["Photo.jpg", { path: "Photo.jpg", status: "ready", hash: "upper" }],
+    ["photo.jpg", { path: "photo.jpg", status: "ready", hash: "upper" }],
+  ]);
+  expect(contentPhotoUsage(album, identities).get("photo.jpg")).toEqual({ status: "ready", count: 2 });
+  identities.set("photo.jpg", { path: "photo.jpg", status: "ready", hash: "lower" });
+  expect(contentPhotoUsage(album, identities).get("Photo.jpg")).toEqual({ status: "ready", count: 2 });
+  expect(contentPhotoUsage(album, identities).get("photo.jpg")).toEqual({ status: "ready", count: 0 });
+  identities.set("Photo.jpg", { path: "Photo.jpg", status: "error", message: "Filesystem identity unavailable" });
+  expect(contentPhotoUsage(album, identities).get("photo.jpg")).toMatchObject({
+    status: "error", count: 0, message: "Duplicate check incomplete for Photo.jpg: Filesystem identity unavailable",
+  });
+  expect(album.pages[0].slots[0].placement?.photoPath).toBe("Photo.jpg");
+});

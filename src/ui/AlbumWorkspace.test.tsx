@@ -1216,6 +1216,23 @@ it.each(["ready", "pending", "error"] as const)("uses the shared %s duplicate ch
   expect(target.getAttribute("title")).toBe("copy.jpg");
 });
 
+it("warns on a renamed filesystem alias without rewriting the original Placement path", async () => {
+  const { ports, files } = disk();
+  const album = placePhoto(addPhotoSlot(addPhotoSlot(createAlbum({ name: "Existing" }), "page-1"), "page-1"),
+    "page-1", "slot-1", { path: "Photo.jpg", width: 6000, height: 4000, orientation: 1 });
+  const photoIdentities = new Map([
+    ["Photo.jpg", { path: "Photo.jpg", status: "ready" as const, hash: "same-file" }],
+    ["photo.jpg", { path: "photo.jpg", status: "ready" as const, hash: "same-file" }],
+  ]);
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} photoIdentities={photoIdentities}
+    document={{ path: "Existing", album }} />);
+  fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 2" }),
+    photoDrop({ path: "photo.jpg", width: 6000, height: 4000, orientation: 1 }));
+  expect(screen.getByText("photo.jpg is already used in this Album.")).toBeTruthy();
+  await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages[0].slots.map((slot) => slot.placement?.photoPath))
+    .toEqual(["Photo.jpg", "photo.jpg"]));
+});
+
 it("Alt-drags a populated Slot without moving the original and commits one undoable duplicate", async () => {
   const { ports, files } = disk();
   const album = rotateSlot(placePhoto(addPhotoSlot(createAlbum({ name: "Existing" }), "page-1"),
