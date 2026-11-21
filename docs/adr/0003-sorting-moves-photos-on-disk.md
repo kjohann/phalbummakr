@@ -5,7 +5,7 @@ A Library can hold far more Photos than anyone wants to browse at once, so users
 ## Considered Options
 
 - **Tags stored in `.phalbummakr/`**: rejected because they duplicate what Folders already do, and nobody sees them outside the app.
-- **Copying Photos into Folders**: rejected. Every file under the root is a Photo, so each copy would appear twice and its Usage would be split.
+- **Copying Photos into Folders**: rejected. Every file under the root is a Photo, so each copy would appear twice and its Usage would be split. _Superseded by [ADR 0005](0005-identical-photos-share-usage.md), which allows independent copies with shared Usage for Identical Photos._
 - **Deleting Folders from the app**: rejected because it is destructive. Folders can only be created and renamed. _Superseded by [ADR 0004](0004-deleting-folders.md)._
 
 ## Consequences

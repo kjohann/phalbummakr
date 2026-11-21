@@ -82,12 +82,18 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 037 | [Reviewed Photos and remembered position](037-reviewed-photos.md) | 028     | done   |
 | 038 | [Touchpad pinch does not zoom Sort mode in the app (bug)](038-touchpad-pinch-in-webview.md) | 035 | doing  |
 | 039 | [Stop Photo-grid edge scrolling during drags](039-stop-photo-grid-drag-scrolling.md) | 033 | done |
+| 040 | [Alt-drag to duplicate a Slot](040-alt-drag-duplicate-slot.md) | 006, 009, 010, 011, 013, 014 | todo |
+| 041 | [Content-aware Photo Usage](041-content-aware-photo-usage.md) | 008 | todo |
+| 042 | [Copy Photos to a Folder](042-copy-photos-to-folder.md) | 026, 028, 034, 037, 041 | todo |
 
 Work order for the layout rework: 016, 017, 018, 019, 020, then 011.
 
 Work order for modes: 023, then 024, the 016 addendum and 011; 026 → 027/028; 010 → 029.
 
 Work order for Sort mode feedback: 032 → 033 → 034, then 035, 036 and 037 in any order; 037 → 034 addendum section 2.
+
+Alt-drag design: 040 is independent; implement 041 together with the 008
+addendum, then 042. File copying requires content-aware Usage before shipping.
 
 ## Addenda
 

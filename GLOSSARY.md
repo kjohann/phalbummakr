@@ -19,7 +19,7 @@ A directory under the Library root that the user sorts Photos into, such as "gra
 _Avoid_: Tag, category, label, keyword, collection
 
 **Sorting**:
-Moving Photos between Folders in the Library. Moving a placed Photo keeps every Album that uses it pointing at the Photo's new location.
+Moving or copying Photos between Folders in the Library. Moving a placed Photo keeps every Album that uses it pointing at the Photo's new location; copying leaves the original Photo and its Placements unchanged.
 _Avoid_: Culling, filing, importing
 
 **Comparison**:
@@ -35,8 +35,12 @@ A Photo the user has looked at while Sorting, either shown in a Comparison or ma
 _Avoid_: Seen, checked, bookmark
 
 **Usage**:
-The number of times a Photo has been placed in an Album.
+The number of Placements in an Album that use a Photo or any of its Identical Photos.
 _Avoid_: Occurrence, reference count
+
+**Identical Photos**:
+Separate Photo files with exactly the same contents. They share Usage, but each has its own location and can be moved or deleted independently.
+_Avoid_: Linked copies
 
 **Missing Photo**:
 A placed Photo whose file no longer exists at its recorded path in the Library. It stays missing until it is relinked to another file.

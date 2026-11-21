@@ -2,6 +2,11 @@
 
 Status: todo · Addendum to: [008 - Usage badges and duplicate warning](008-usage.md)
 
+Planned together with [041 - Content-aware Photo Usage](041-content-aware-photo-usage.md).
+The filesystem-alias requirements below remain in force alongside shared Usage
+for separate, byte-identical files. Both work items stay todo until their
+respective criteria are verified.
+
 ## Finding
 
 On a case-insensitive filesystem, renaming a Photo with only a case change can
