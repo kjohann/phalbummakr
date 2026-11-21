@@ -1,18 +1,20 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
 import {
   afterMove, canStepFolder, currentFolder, EMPTY_COMPARISON, folderNameProblem, folderRenameProblem,
-  historyAfterRename, historyAfterRescan, isProtectedFolder, photosUpTo, photoUsage, progressAfterMove, progressAfterRename, progressAfterRescan,
+  contentPhotoUsage, historyAfterRename, historyAfterRescan, isProtectedFolder, photosUpTo, progressAfterMove, progressAfterRename, progressAfterRescan, usageForPhoto,
   rememberScroll, renamedPath, scanAfterMove, setReviewed, showInProgress, showPhoto, START_FOLDER_HISTORY, stepFolder, stepPhoto,
   photosActedOn, toggleComparison, toggleSelected, visitFolder, withoutPhotos,
-  type Album, type Comparison, type FolderHistory, type FolderRename, type Photo, type PhotoMove, type PhotoPane, type PhotoScan, type ZoomChange,
+  type Album, type Comparison, type FolderHistory, type FolderRename, type Photo, type PhotoIdentity, type PhotoMove, type PhotoPane, type PhotoScan, type PhotoUsageState, type ZoomChange,
 } from "../core";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
 import { folderExists } from "./tauriSortingPorts";
 import { useSortProgress } from "./useSortProgress";
 import { hasPhotoDrag, leftElement, readPhotoDrag, writeCountDragImage, writePhotoDrag, type PhotoDragStart } from "./photoDrag";
 import { useEdgeScroll } from "./edgeScroll";
-import SortView, { usageLabel } from "./SortView";
+import SortView from "./SortView";
+import UsageBadge from "./UsageBadge";
+import { usePhotoIdentities } from "./usePhotoIdentities";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
 import SendToFolderDialog from "./SendToFolderDialog";
 import FolderNameDialog from "./FolderNameDialog";
@@ -97,7 +99,7 @@ function parentFolder(path: string) {
 const NO_PHOTOS: ReadonlySet<string> = new Set();
 
 function PhotoThumbnail({ root, photo, generation, usage, compact, onDragStart, onDragEnd, shown, reviewed, moving, onClick, onContextMenu }: {
-  root: string; photo: Photo; generation: number; usage: number; compact: boolean; onDragStart: PhotoDragStart; onDragEnd: () => void;
+  root: string; photo: Photo; generation: number; usage: PhotoUsageState; compact: boolean; onDragStart: PhotoDragStart; onDragEnd: () => void;
   shown: boolean; reviewed: boolean; moving: boolean; onClick?: PhotoClick; onContextMenu?: PhotoClick;
 }) {
   const [source, setSource] = useState<string | null>(null);
@@ -137,7 +139,7 @@ function PhotoThumbnail({ root, photo, generation, usage, compact, onDragStart, 
         {source && <img src={source} alt={name} loading="lazy" decoding="async" draggable={false} />}
         {!source && !error && <span className="photo-placeholder">{compact ? "…" : "Loading..."}</span>}
         {error && <span className="photo-failure" role="alert" title={error}>{compact ? "!" : "Thumbnail unavailable. Rescan to retry."}</span>}
-        {usage > 0 && <span className="photo-usage" aria-label={usageLabel(usage)}>{usage}</span>}
+        <UsageBadge usage={usage} />
         {reviewed && <span className="photo-reviewed" aria-label="Reviewed" title="Reviewed">✓</span>}
         {moving && <span className="photo-busy" aria-hidden="true" />}
       </div>
@@ -208,7 +210,7 @@ function PhotoGrid({ root, photos, generation, usage, compact, onDragStart, onDr
   photos: Photo[];
   /** Counts scans, so a rescan retries failed thumbnails. */
   generation: number;
-  usage: Map<string, number>;
+  usage: ReadonlyMap<string, PhotoUsageState>;
   compact: boolean;
   onDragStart: PhotoDragStart;
   onDragEnd: () => void;
@@ -294,7 +296,7 @@ function PhotoGrid({ root, photos, generation, usage, compact, onDragStart, onDr
                 width: `${100 / columns}%`,
                 height: rowHeight,
               }}>
-              <PhotoThumbnail root={root} photo={photo} generation={generation} usage={usage.get(photo.path) ?? 0}
+              <PhotoThumbnail root={root} photo={photo} generation={generation} usage={usageForPhoto(usage, photo.path)}
                 compact={compact} onDragStart={onDragStart} onDragEnd={onDragEnd} shown={shown.includes(photo.path)}
                 reviewed={reviewed.has(photo.path)} moving={moving.includes(photo.path)}
                 onClick={onPhotoClick} onContextMenu={onPhotoContextMenu} />
@@ -334,7 +336,7 @@ function movedMessage(moves: PhotoMove[], target: string) {
     : `Moved "${fileName(from)}" to ${folderName(target)} as "${fileName(to)}".`;
 }
 
-export default function PhotoBrowser({ root, album = null, compact = false, onCompactChange, onSendPhotos, onCreateFolder, onRenameFolder, onPhotosChange, sort, mode = "album", visible = true }: {
+export default function PhotoBrowser({ root, album = null, compact = false, onCompactChange, onSendPhotos, onCreateFolder, onRenameFolder, onPhotosChange, onIdentitiesChange, sort, mode = "album", visible = true }: {
   root: string;
   album?: Album | null;
   compact?: boolean;
@@ -347,6 +349,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
   onRenameFolder?: (folder: string, name: string) => Promise<string>;
   /** Receives every Photo in the Library after each scan. */
   onPhotosChange?: (photos: readonly Photo[]) => void;
+  onIdentitiesChange?: (identities: ReadonlyMap<string, PhotoIdentity>) => void;
   /** Set in Sort mode, where Photos are shown large and compared. */
   sort?: SortLink;
   /** Whose current Folder and back/forward history are shown. */
@@ -424,9 +427,14 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
 
   const { history, notice } = places[mode];
   const folder = result ? currentFolder(history) : "";
-  const usage = album ? photoUsage(album) : new Map<string, number>();
+  const contentIndex = usePhotoIdentities(root, result?.photos ?? null, album);
+  const usage = useMemo(() => contentPhotoUsage(album, contentIndex.identities), [album, contentIndex.identities]);
+  useEffect(() => { onIdentitiesChange?.(contentIndex.identities); }, [contentIndex.identities, onIdentitiesChange]);
+  const pendingIdentities = [...contentIndex.identities.values()].filter((identity) => identity.status === "pending").length;
+  const identityErrors = [...contentIndex.identities.values()].filter((identity) => identity.status === "error");
+  const unknownMissing = [...contentIndex.identities.values()].filter((identity) => identity.status === "missing" && !identity.hash);
   const photos = result?.photos.filter((photo) => parentFolder(photo.path) === folder
-    && (!unusedOnly || !usage.has(photo.path))) ?? [];
+    && (!unusedOnly || (usage.get(photo.path)?.status === "ready" && usage.get(photo.path)?.count === 0))) ?? [];
   const folders = result?.folders.filter((path) => parentFolder(path) === folder) ?? [];
   const ancestors = folder ? folder.split("/").map((name, index, parts) => ({
     name, path: parts.slice(0, index + 1).join("/"),
@@ -747,6 +755,24 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
         ? <p className="error-banner" role="alert">{moveMessage.text}</p>
         : <p className="photo-empty" role="status">{moveMessage.text}</p>)}
       {error && <p className="error-banner" role="alert">{error}</p>}
+      {pendingIdentities > 0 && <p className="photo-empty" role="status">
+        Checking Photo Usage... {pendingIdentities} Photos remaining.{unusedOnly && " Unresolved Photos are excluded from Unused."}
+      </p>}
+      {unknownMissing.length > 0 && <p className="usage-warning" role="status">
+        Duplicate check incomplete: {unknownMissing.length} Missing Photo(s) have no known content identity.
+      </p>}
+      {identityErrors.length > 0 && <div className="error-banner" role="alert">
+        <p>Photo Usage check failed.</p>
+        <ul>{identityErrors.map((identity) => <li key={identity.path}>
+          {identity.path}: {identity.status === "error" && identity.message}
+        </li>)}</ul>
+        <button type="button" className="button-quiet" onClick={contentIndex.retry}>Retry Usage check</button>
+      </div>}
+      {contentIndex.stats && pendingIdentities === 0 && <details className="photo-warnings">
+        <summary>Content index statistics</summary>
+        <p>{contentIndex.stats.hashedFiles} files hashed ({contentIndex.stats.hashedBytes.toLocaleString()} bytes),
+          {" "}{contentIndex.stats.cacheHits} cached; {contentIndex.stats.elapsedMs.toFixed(1)} ms indexing.</p>
+      </details>}
       {progressError && <p className="error-banner" role="alert">{progressError}</p>}
       {result && result.warnings.length > 0 && (
         <details className="photo-warnings">
@@ -757,7 +783,9 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
       {!loading && result && photos.length === 0 && (
         <p className="photo-empty">{result.photos.length === 0 && result.folders.length === 0
           ? "No Photos yet. Add JPEG or PNG files to this Library, then rescan."
-          : unusedOnly && album ? "No unused Photos in this folder." : "No Photos in this folder."}</p>
+          : unusedOnly && album && (pendingIdentities > 0 || unknownMissing.length > 0 || identityErrors.length > 0)
+            ? "No verified unused Photos in this folder yet."
+            : unusedOnly && album ? "No unused Photos in this folder." : "No Photos in this folder."}</p>
       )}
       {result && <PhotoGrid key={`${root}:${folder}:${unusedOnly}`} root={root} generation={result.generation}
         photos={photos} usage={usage} compact={compact}

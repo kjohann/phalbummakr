@@ -1,4 +1,5 @@
 mod albums;
+mod content_index;
 mod exports;
 mod fonts;
 mod library_data;
@@ -108,6 +109,16 @@ async fn write_sort_progress(root: String, json: String) -> Result<(), String> {
 #[tauri::command]
 async fn scan_photos(root: String) -> Result<photos::ScanResult, String> {
     tauri::async_runtime::spawn_blocking(move || photos::scan_library(Path::new(&root)))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn index_photo_contents(
+    root: String,
+    paths: Vec<String>,
+) -> Result<content_index::ContentIndexBatch, String> {
+    tauri::async_runtime::spawn_blocking(move || content_index::index_paths(Path::new(&root), &paths))
         .await
         .map_err(|error| error.to_string())?
 }
@@ -340,6 +351,7 @@ pub fn run() {
             read_sort_progress,
             write_sort_progress,
             scan_photos,
+            index_photo_contents,
             read_photos,
             folder_names,
             root_albums,

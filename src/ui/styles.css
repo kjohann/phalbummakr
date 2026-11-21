@@ -1981,3 +1981,14 @@ button.sort-photo--selected:hover {
   align-items: center;
   justify-content: center;
 }
+.photo-identity-status {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  max-width: calc(100% - 8px);
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: #fff7e8;
+  color: #664517;
+  font-size: 11px;
+}

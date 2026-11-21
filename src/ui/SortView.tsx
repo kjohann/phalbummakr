@@ -1,13 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from "react";
-import { anchoredScroll, comparisonGrid, MAX_ZOOM, MIN_ZOOM, stepZoom, wheelZoomFactor, zoomBy, zoomLabel, type Photo, type ZoomChange } from "../core";
+import { anchoredScroll, comparisonGrid, MAX_ZOOM, MIN_ZOOM, stepZoom, usageForPhoto, wheelZoomFactor, zoomBy, zoomLabel, type Photo, type PhotoUsageState, type ZoomChange } from "../core";
+import UsageBadge from "./UsageBadge";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
 import { writePhotoDrag, type PhotoDragStart } from "./photoDrag";
 
-export function usageLabel(usage: number) {
-  return `Used ${usage} ${usage === 1 ? "time" : "times"} in this Album`;
-}
+export { usageLabel } from "./UsageBadge";
 
-function SortPhoto({ root, photo, usage }: { root: string; photo: Photo; usage: number }) {
+function SortPhoto({ root, photo, usage }: { root: string; photo: Photo; usage: PhotoUsageState }) {
   const [source, setSource] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -23,7 +22,7 @@ function SortPhoto({ root, photo, usage }: { root: string; photo: Photo; usage: 
     {source && <img src={source} alt={photo.path} draggable={false} />}
     {!source && !error && <span className="photo-placeholder">Loading...</span>}
     {error && <span className="photo-failure" role="alert" title={error}>Preview unavailable.</span>}
-    {usage > 0 && <span className="photo-usage" aria-label={usageLabel(usage)}>{usage}</span>}
+    <UsageBadge usage={usage} />
   </div>;
 }
 
@@ -139,7 +138,7 @@ export default function SortView({ root, photos, selected, usage, leaving = [], 
   photos: Photo[];
   /** Paths of the Selected Photos; ignored for a single Photo, which always counts as selected. */
   selected: readonly string[];
-  usage: Map<string, number>;
+  usage: ReadonlyMap<string, PhotoUsageState>;
   /** Photos being moved away, which fade out until the move is done. */
   leaving?: readonly string[];
   /** How much the work area is zoomed, 1 being 100%. */
@@ -167,7 +166,7 @@ export default function SortView({ root, photos, selected, usage, leaving = [], 
         const name = photo.path.split("/").pop()!;
         const isSelected = comparing && selected.includes(photo.path);
         const content = <>
-          <SortPhoto root={root} photo={photo} usage={usage.get(photo.path) ?? 0} />
+          <SortPhoto root={root} photo={photo} usage={usageForPhoto(usage, photo.path)} />
           <span className="sort-photo-caption">
             <span className="photo-name">{name}</span>
             {isSelected && <span className="sort-photo-selected">Selected</span>}

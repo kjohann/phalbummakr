@@ -5,6 +5,7 @@ const FOLDER: &str = ".phalbummakr";
 pub const LAYOUTS: &str = "layouts.json";
 /// Reviewed Photos and where the user was in each Folder while Sorting.
 pub const SORTING: &str = "sorting.json";
+pub const CONTENT_INDEX: &str = "content-index.json";
 
 fn data_file(root: &Path, file: &str) -> io::Result<PathBuf> {
     if !root.is_absolute() || !root.is_dir() {

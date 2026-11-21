@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Photo, PhotoScan } from "../core";
+import type { ContentIndexBatch, Photo, PhotoScan } from "../core";
 
 const pending: (() => Promise<void>)[] = [];
 let running = 0;
@@ -74,6 +74,7 @@ function queuedThumbnail(root: string, path: string, signal: AbortSignal, revisi
 }
 
 export const tauriPhotoPorts = {
+  index: (root: string, paths: string[]) => invoke<ContentIndexBatch>("index_photo_contents", { root, paths }),
   scan: (root: string) => invoke<PhotoScan>("scan_photos", { root }),
   /** Reads the Photos at `paths` as a scan would, such as after they were moved. */
   read: (root: string, paths: string[]) => invoke<Photo[]>("read_photos", { root, paths }),

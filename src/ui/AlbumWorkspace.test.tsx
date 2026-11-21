@@ -35,6 +35,10 @@ vi.mock("konva/lib/shapes/Text", () => ({
 }));
 
 beforeEach(() => {
+  vi.spyOn(tauriPhotoPorts, "index").mockImplementation(async (_root, paths) => ({
+    identities: paths.map((path) => ({ path, status: "ready", hash: path })),
+    hashedFiles: 0, hashedBytes: 0, cacheHits: paths.length, elapsedMs: 0,
+  }));
   HTMLElement.prototype.scrollIntoView = vi.fn();
   // A 1278 x 800 editor gives a scale of 2 px per mm, so an A4 trim Page is 594 x 420 px.
   vi.stubGlobal("ResizeObserver", class {
@@ -1192,6 +1196,24 @@ it("reports Album commands as available while an autosave is pending, but not wh
   await act(() => vi.advanceTimersByTimeAsync(500));
   await act(async () => failWrite(new Error("Disk full")));
   expect(onEditableChange).toHaveBeenLastCalledWith(false);
+});
+
+it.each(["ready", "pending", "error"] as const)("uses the shared %s duplicate check when placing a Photo", (status) => {
+  const { ports } = disk();
+  const album = placePhoto(addPhotoSlot(addPhotoSlot(createAlbum({ name: "Existing" }), "page-1"), "page-1"),
+    "page-1", "slot-1", { path: "a.jpg", width: 6000, height: 4000, orientation: 1 });
+  const photoIdentities = new Map([
+    ["a.jpg", { path: "a.jpg", status: "ready" as const, hash: "same" }],
+    ["copy.jpg", status === "ready" ? { path: "copy.jpg", status, hash: "same" }
+      : status === "error" ? { path: "copy.jpg", status, message: "Access denied" } : { path: "copy.jpg", status }],
+  ]);
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} photoIdentities={photoIdentities}
+    document={{ path: "Existing", album }} />);
+  const target = screen.getByRole("button", { name: "Page 1 Photo Slot 2" });
+  fireEvent.drop(target, photoDrop({ path: "copy.jpg", width: 6000, height: 4000, orientation: 1 }));
+  if (status === "ready") expect(screen.getByText("copy.jpg is already used in this Album.")).toBeTruthy();
+  else expect(screen.getByText(/copy.jpg was placed; duplicate check pending/)).toBeTruthy();
+  expect(target.getAttribute("title")).toBe("copy.jpg");
 });
 
 it("Alt-drags a populated Slot without moving the original and commits one undoable duplicate", async () => {

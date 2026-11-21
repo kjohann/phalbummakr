@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   canRedo, canUndo, createAlbum, deserializeAlbum, emptyHistory, endGroup, recordChange, relinkPlacements, serializeAlbum, stepHistory,
-  type Album, type AlbumPorts, type HistoryDirection, type PhotoPreviewPorts, type PhotoSize, type PlacementRelink, type UndoHistory,
+  type Album, type AlbumPorts, type HistoryDirection, type PhotoIdentity, type PhotoPreviewPorts, type PhotoSize, type PlacementRelink, type UndoHistory,
 } from "../core";
 import AlbumView from "./AlbumView";
 import ExportDialog from "./ExportDialog";
@@ -75,6 +75,8 @@ interface Props {
   exportPorts?: PageExportPorts;
   /** Scanned pixel sizes of the Library's Photos by path, for Effective Resolution warnings. */
   photoSizes?: ReadonlyMap<string, PhotoSize>;
+  /** Content identities supplied by the Library index; omitted by standalone workspaces. */
+  photoIdentities?: ReadonlyMap<string, PhotoIdentity>;
 }
 
 /** The shared Layout Library, and where Album mode lists it: the Layouts tab of the Side pane. */
@@ -85,7 +87,7 @@ export interface AlbumLayouts {
 
 const NO_PHOTO_SIZES: ReadonlyMap<string, PhotoSize> = new Map();
 
-export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document, suspended = false, bar = {}, active = true, layouts, photoMoves, exportPorts = tauriPageExportPorts, photoSizes = NO_PHOTO_SIZES }: Props) {
+export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document, suspended = false, bar = {}, active = true, layouts, photoMoves, exportPorts = tauriPageExportPorts, photoSizes = NO_PHOTO_SIZES, photoIdentities }: Props) {
   const { command, onEditableChange, onHistoryChange } = bar;
   const [names, setNames] = useState<string[]>([]);
   const [current, setCurrent] = useState<{ filename: string; album: Album } | null>(
@@ -433,7 +435,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
             <ExportDialog album={exporting.album} root={root} ports={exportPorts} photoSizes={photoSizes} onClose={() => setExporting(null)}
               name={exporting.filename.split(/[\\/]/).pop()!.replace(/\.[^.]+$/, "")} />
           )}
-          <AlbumView key={current.filename} album={current.album} onChange={changeAlbum} history={history}
+          <AlbumView key={current.filename} album={current.album} onChange={changeAlbum} history={history} photoIdentities={photoIdentities}
             root={root} photoPorts={photoPorts} fontPorts={fontPorts} photoSizes={photoSizes}
             bar={bar} active={active} layouts={layouts} onNotice={setNotice}
             onDuplicatePhoto={setDuplicateWarning}

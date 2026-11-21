@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { addPhotoSlot, createAlbum, duplicatePage, placePhoto, type Album, type PhotoMove } from "../core";
+import { addPhotoSlot, createAlbum, duplicatePage, placePhoto, type Album, type ContentIndexBatch, type PhotoMove } from "../core";
 import PhotoBrowser, { type SortCommandName } from "./PhotoBrowser";
 import { hasPhotoDrag, readPhotoDrag } from "./photoDrag";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
@@ -10,6 +10,10 @@ import { tauriPhotoPorts } from "./tauriPhotoPorts";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
 beforeEach(() => {
+  vi.spyOn(tauriPhotoPorts, "index").mockImplementation(async (_root, paths) => ({
+    identities: paths.map((path) => ({ path, status: "ready", hash: path })),
+    hashedFiles: 0, hashedBytes: 0, cacheHits: paths.length, elapsedMs: 0,
+  }));
   vi.stubGlobal("ResizeObserver", class {
     constructor(private callback: ResizeObserverCallback) {}
     observe(target: Element) {
@@ -95,6 +99,61 @@ it("updates Usage badges and the unused filter as the current Album changes", as
   expect(screen.getByText("No unused Photos in this folder.")).toBeTruthy();
   fireEvent.click(filter);
   expect(screen.getAllByLabelText("Used 1 time in this Album")).toHaveLength(2);
+});
+
+it("shows shared Usage for Identical Photos and excludes both from the unused filter", async () => {
+  const first = photo(0);
+  const copy = photo(1);
+  vi.mocked(tauriPhotoPorts.index).mockImplementation(async (_root, paths) => ({
+    identities: paths.map((path) => ({ path, status: "ready", hash: "same" })),
+    hashedFiles: 2, hashedBytes: 100, cacheHits: 0, elapsedMs: 1,
+  }));
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "scan_photos") return { photos: [first, copy], folders: [], warnings: [] };
+    return "data:image/png;base64,dGVzdA==";
+  });
+  const album = placePhoto(addPhotoSlot(createAlbum({ name: "Test" }), "page-1"), "page-1", "slot-1", first);
+  render(<PhotoBrowser root="D:\\Photos" album={album} />);
+  await waitFor(() => expect(screen.getAllByLabelText("Used 1 time in this Album")).toHaveLength(2));
+  fireEvent.click(screen.getByRole("switch", { name: "All" }));
+  expect(screen.queryByText(first.path)).toBeNull();
+  expect(screen.queryByText(copy.path)).toBeNull();
+});
+
+it("excludes pending and failed checks from Unused, keeps browsing available and offers retry", async () => {
+  const first = photo(0);
+  const second = photo(1);
+  const batches: { paths: string[]; finish: (batch: ContentIndexBatch) => void }[] = [];
+  vi.mocked(tauriPhotoPorts.index).mockImplementation((_root, paths) =>
+    new Promise((finish) => batches.push({ paths, finish })));
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "scan_photos") return { photos: [first, second], folders: ["holiday"], warnings: [] };
+    return "data:image/png;base64,dGVzdA==";
+  });
+  render(<PhotoBrowser root="D:\\Photos" album={createAlbum({ name: "Test" })} />);
+  await screen.findByText(first.path);
+  expect(screen.getAllByText("Checking...")).toHaveLength(2);
+  expect((screen.getByRole("button", { name: "Open folder holiday" }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(screen.getByRole("switch", { name: "All" }));
+  expect(screen.queryByText(first.path)).toBeNull();
+  expect(screen.queryByText(second.path)).toBeNull();
+  expect(screen.getByText(/Unresolved Photos are excluded/)).toBeTruthy();
+  expect(screen.queryByText("No unused Photos in this folder.")).toBeNull();
+  batches[0].finish({
+    identities: [{ path: first.path, status: "ready", hash: "a" }, { path: second.path, status: "error", message: "Access denied" }],
+    hashedFiles: 1, hashedBytes: 10, cacheHits: 0, elapsedMs: 1,
+  });
+  await screen.findByText(/Access denied/);
+  expect(screen.getByText(first.path)).toBeTruthy();
+  expect(screen.queryByText(second.path)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Retry Usage check" }));
+  await waitFor(() => expect(batches).toHaveLength(2));
+  batches[1].finish({
+    identities: batches[1].paths.map((path) => ({ path, status: "ready", hash: path })),
+    hashedFiles: 1, hashedBytes: 10, cacheHits: 1, elapsedMs: 1,
+  });
+  expect(await screen.findByText(second.path)).toBeTruthy();
+  expect(screen.queryByText("Photo Usage check failed.")).toBeNull();
 });
 
 it("shows compact tiles without file names but keeps Usage badges and folder names", async () => {

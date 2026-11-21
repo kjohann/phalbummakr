@@ -2,10 +2,10 @@ import { Fragment, useCallback, useEffect, useRef, useState, type DragEvent as R
 import { createPortal } from "react-dom";
 import { Layer, Rect, Stage } from "react-konva";
 import {
-  addPage, addPhotoSlot, addTextSlot, albumSpreads, applyLayout, deletePage, deleteSlot, duplicatePage, lowResolutionPlacements, movePage, pageDimensions,
+  addPage, addPhotoSlot, addTextSlot, albumSpreads, applyLayout, contentPhotoUsage, deletePage, deleteSlot, duplicatePage, lowResolutionPlacements, movePage, pageDimensions,
   panCrop, placePhoto, placePhotoOnPage, placementDisplayCrop, photoUsage, rotateSlot, saveLayoutFromPage, setPlacementCrop,
-  setPlacementFit, setSlotText, setTextStyle, swapPlacements, zoomCrop, POINTS_PER_MM, TEXT_LINE_HEIGHT,
-  type Album, type AppliedLayout, type HistoryDirection, type Crop, type Page, type PageFormat, type PhotoPreviewPorts, type PhotoSize, type Slot, type SlotAddress, type TextStyle,
+  setPlacementFit, setSlotText, setTextStyle, swapPlacements, usageForPhoto, zoomCrop, POINTS_PER_MM, TEXT_LINE_HEIGHT,
+  type Album, type AppliedLayout, type HistoryDirection, type Crop, type Page, type PageFormat, type PhotoIdentity, type PhotoPreviewPorts, type PhotoSize, type Slot, type SlotAddress, type TextStyle,
 } from "../core";
 import { hasLayoutDrag, hasPhotoDrag, readLayoutDrag, readPhotoDrag, writeLayoutDrag } from "./photoDrag";
 import { historyShortcut } from "./historyShortcut";
@@ -43,6 +43,7 @@ interface Props {
   onNotice?: (message: string | null) => void;
   /** Scanned pixel sizes of the Library's Photos by path, for Effective Resolution warnings. */
   photoSizes: ReadonlyMap<string, PhotoSize>;
+  photoIdentities?: ReadonlyMap<string, PhotoIdentity>;
 }
 
 /** Tells the user what applying a Layout dropped, and when it was made for another Page shape. */
@@ -58,7 +59,7 @@ function appliedLayoutNotice({ dropped, aspectMismatch }: AppliedLayout, pageNum
   return messages.length ? messages.join(" ") : null;
 }
 
-export default function AlbumView({ album: savedAlbum, onChange, history, disabled, textDisabled, root, photoPorts, fontPorts, onDuplicatePhoto, onCropPendingChange, bar, active = true, layouts, onNotice, photoSizes }: Props) {
+export default function AlbumView({ album: savedAlbum, onChange, history, disabled, textDisabled, root, photoPorts, fontPorts, onDuplicatePhoto, onCropPendingChange, bar, active = true, layouts, onNotice, photoSizes, photoIdentities }: Props) {
   const { command, toolsHost, onSlotSelectedChange } = bar;
   const viewportRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLElement>(null);
@@ -228,6 +229,16 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
   function changeAlbum(update: (album: Album) => Album, group?: string) {
     commitCropPreview();
     onChange((current) => fitTextSlots(update(current), current), group);
+  }
+
+  function checkDuplicate(path: string) {
+    if (!photoIdentities) {
+      if (photoUsage(savedAlbum).has(path)) onDuplicatePhoto(path);
+      return;
+    }
+    const usage = usageForPhoto(contentPhotoUsage(savedAlbum, photoIdentities), path);
+    if (usage.count !== null && usage.count > 0) onDuplicatePhoto(path);
+    if (usage.status !== "ready") onNotice?.(`${path} was placed; duplicate check pending. ${usage.message}`);
   }
 
   useEffect(() => {
@@ -642,7 +653,7 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
                 try {
                   const updated = placePhotoOnPage(album, page.id, photo, x, y);
                   const slotId = updated.pages.find((item) => item.id === page.id)!.slots.at(-1)!.id;
-                  if (photoUsage(savedAlbum).has(photo.path)) onDuplicatePhoto(photo.path);
+                  checkDuplicate(photo.path);
                   rememberThumbnail(`${page.id}:${slotId}`, photo.thumbnail);
                   changeAlbum((current) => placePhotoOnPage(current, page.id, photo, x, y));
                   selectSlot(page.id, slotId);
@@ -760,7 +771,7 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
                 } catch {
                   return; // Not a valid Photo, e.g. a forged drag payload.
                 }
-                if (photoUsage(savedAlbum).has(photo.path)) onDuplicatePhoto(photo.path);
+                checkDuplicate(photo.path);
                 rememberThumbnail(targetId, photo.thumbnail);
                 selectSlot(page.id, slot.id);
                 changeAlbum((current) => placePhoto(current, page.id, slot.id, photo));

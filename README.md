@@ -135,9 +135,23 @@ with white space as needed, and turning Fit off restores the Crop. Resizing a
 Slot preserves its zoom relative to the minimum cover and retains the Crop
 centre where possible.
 
-The Photo grid shows how many times each Photo is used in the open Album. Enable
-**Unused in this Album** to filter out used Photos. Placing an already-used Photo
-shows a dismissible warning but does not prevent the Placement.
+The Photo grid shows Usage in the open Album. Byte-identical Photos share the
+total number of their Placements, even in different Folders. They remain
+independent files and Placements keep their particular paths. Slot rotation and
+Crop/Fit do not change identity; different bytes (including EXIF edits or
+recompression) do.
+
+Complete-file SHA-256 hashes are indexed in the background and cached in
+`.phalbummakr/content-index.json` for unchanged files. Browsing and placement
+remain available while badges say **Checking...**. **Unused** excludes
+unresolved checks and shows an indexing notice. Failures are visible and offer
+**Retry Usage check**. Expand **Content index statistics** to see hashing bytes,
+cache hits and backend indexing time; Rescan rechecks files.
+
+Placing an already-used Photo shows the ordinary dismissible warning without
+preventing the Placement. An unresolved check instead explicitly says the
+duplicate check is pending. Established Missing Photo identities still count;
+an unknown Missing identity leaves duplicate checking visibly incomplete.
 
 Tauri's native file-drop interception is disabled so HTML Page drag reordering
 can work on Windows. The app does not currently accept file drops from Explorer.

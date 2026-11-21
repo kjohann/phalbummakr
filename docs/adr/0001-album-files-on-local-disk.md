@@ -20,4 +20,4 @@ We chose the Album file as the thing you open because the app should not take ch
 
 - Renaming, moving or deleting a Photo on disk breaks its Placements, which then have to be relinked.
 - Moving an Album file to another folder changes its Library, so its Photo paths break unless the Photos move with it.
-- Data derived from Photos, such as thumbnails, is kept per machine outside the Library and can always be rebuilt.
+- Data derived from Photos, such as thumbnails, is kept per machine outside the Library and can always be rebuilt. [ADR 0005](0005-identical-photos-share-usage.md) makes a narrow exception for established content identities, including identities of Missing Photos that cannot be rebuilt.
