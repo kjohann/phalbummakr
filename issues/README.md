@@ -82,7 +82,7 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 037 | [Reviewed Photos and remembered position](037-reviewed-photos.md) | 028     | done   |
 | 038 | [Touchpad pinch does not zoom Sort mode in the app (bug)](038-touchpad-pinch-in-webview.md) | 035 | doing  |
 | 039 | [Stop Photo-grid edge scrolling during drags](039-stop-photo-grid-drag-scrolling.md) | 033 | done |
-| 040 | [Alt-drag to duplicate a Slot](040-alt-drag-duplicate-slot.md) | 006, 009, 010, 011, 013, 014 | todo |
+| 040 | [Alt-drag to duplicate a Slot](040-alt-drag-duplicate-slot.md) | 006, 009, 010, 011, 013, 014 | done |
 | 041 | [Content-aware Photo Usage](041-content-aware-photo-usage.md) | 008 | todo |
 | 042 | [Copy Photos to a Folder](042-copy-photos-to-folder.md) | 026, 028, 034, 037, 041 | todo |
 

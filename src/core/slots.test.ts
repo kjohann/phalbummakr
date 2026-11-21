@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { createAlbum, deserializeAlbum, serializeAlbum } from "./album";
 import {
-  addPhotoSlot, addTextSlot, deleteSlot, fitPhotoRect, moveSlot, panCrop, placePhoto, placePhotoOnPage,
+  addPhotoSlot, addTextSlot, deleteSlot, duplicateSlot, fitPhotoRect, moveSlot, panCrop, placePhoto, placePhotoOnPage,
   placementDisplayCrop, resizeSlot, rotateSlot, setPlacementCrop, setPlacementFit, swapPlacements, zoomCrop,
 } from "./slots";
 
@@ -20,6 +20,29 @@ it("adds a Slot centred on a point, keeping it inside the Bleed", () => {
   const text = slotOf(addTextSlot(album, "page-1", { x: 0.2, y: 0.6 }));
   expect(text.x).toBeCloseTo(0);
   expect(text.y).toBeCloseTo(0.6 - text.height / 2);
+});
+
+it("duplicates empty, cropped, fitted and formatted text Slots as independent content above the originals", () => {
+  let album = addTextSlot(addPhotoSlot(addPhotoSlot(addPhotoSlot(createAlbum({ name: "Trip" }),
+    "page-1"), "page-1"), "page-1"), "page-1");
+  album = placePhoto(album, "page-1", "slot-2", { path: "a.jpg", width: 6000, height: 4000, orientation: 1 });
+  album = setPlacementCrop(album, "page-1", "slot-2", { x: 0.2, y: 0.1, width: 0.5, height: 0.6 });
+  album = placePhoto(album, "page-1", "slot-3", { path: "b.jpg", width: 6000, height: 4000, orientation: 1 });
+  album = setPlacementFit(album, "page-1", "slot-3", true);
+  album.pages[0].slots[3] = {
+    id: "slot-4", type: "text", x: 0.2, y: 0.2, width: 0.3, height: 0.1, rotation: 180,
+    text: "Our trip", placeholder: "Caption",
+    style: { fontFamily: "Arial", fontSize: 24, color: "#123456", bold: true, italic: true, underline: true, align: "right" },
+  };
+  const originals = structuredClone(album.pages[0].slots);
+  for (let index = 0; index < 4; index += 1) album = duplicateSlot(album, "page-1", `slot-${index + 1}`);
+  expect(album.pages[0].slots.slice(0, 4)).toEqual(originals);
+  expect(album.pages[0].slots.slice(4)).toEqual(originals.map((slot, index) => ({ ...slot, id: `slot-${index + 5}` })));
+  const textCopy = album.pages[0].slots[7];
+  if (textCopy.type !== "text") throw new Error("Expected Text Slot.");
+  textCopy.style.color = "#ffffff";
+  album.pages[0].slots[5].placement!.crop.x = 0.4;
+  expect(album.pages[0].slots.slice(0, 4)).toEqual(originals);
 });
 
 it("swaps Placements across Pages, keeping Slot geometry and refitting Crops without distortion", () => {

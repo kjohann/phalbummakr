@@ -1,7 +1,7 @@
 import { useEffect, useMemo, type ReactNode } from "react";
 import { Group, Image as KonvaImage, Rect, Text } from "react-konva";
 import {
-  fitPhotoRect, moveSlot, pageDimensions, resizeSlot, POINTS_PER_MM, TEXT_LINE_HEIGHT,
+  duplicateSlot, fitPhotoRect, moveSlot, pageDimensions, resizeSlot, POINTS_PER_MM, TEXT_LINE_HEIGHT,
   type Album, type Crop, type PageFormat, type Rectangle, type Slot, type TextSlot,
 } from "../core";
 import { snapSlot, type SnapGuide } from "./slotSnapping";
@@ -15,12 +15,17 @@ export interface SlotDrag {
   dx: number;
   dy: number;
   bypass: boolean;
+  duplicate?: boolean;
 }
 
 export function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, trimHeight: number, measurePlaceholders = false): {
   album: Album;
   guides: SnapGuide[];
 } {
+  if (drag.duplicate && drag.kind === "move") {
+    album = duplicateSlot(album, drag.pageId, drag.slotId);
+    drag = { ...drag, slotId: album.pages.find((page) => page.id === drag.pageId)!.slots.at(-1)!.id };
+  }
   const slot = album.pages.find((page) => page.id === drag.pageId)?.slots.find((item) => item.id === drag.slotId);
   if (!slot) return { album, guides: [] };
   const unclamped = drag.kind === "move"

@@ -107,6 +107,14 @@ export function addTextSlot(album: Album, pageId: string, centre?: { x: number; 
   })), pageId, centre);
 }
 
+export function duplicateSlot(album: Album, pageId: string, slotId: string): Album {
+  return editPage(album, pageId, (page) => {
+    const original = page.slots.find((slot) => slot.id === slotId);
+    if (!original) throw new Error("Slot not found on Page.");
+    return { ...page, slots: [...page.slots, { ...structuredClone(original), id: unusedSlotId(page) }] };
+  });
+}
+
 function editSlot(album: Album, pageId: string, slotId: string, edit: (slot: Slot) => Slot): Album {
   return editPage(album, pageId, (page) => {
     const index = page.slots.findIndex((slot) => slot.id === slotId);

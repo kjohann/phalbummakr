@@ -157,9 +157,17 @@ other Slot edges and centers, and equal gaps on the same Page attract the Slot
 within six screen pixels. Guides show every matching edge and center on both
 axes or mark the equal gaps. For example, equal-height Slots aligned at the top
 also have a guide along their matching bottom edges.
-Hold **Alt** at any point during the gesture to bypass snapping and place or
+Hold **Ctrl** at any point during the gesture to bypass snapping and place or
 resize freely; releasing it restores snapping. Text Slot height still fits its
 content automatically.
+
+**Alt-drag** a Slot in Album or Layout mode to duplicate it, leaving the original
+in place. Hold Alt when the drag starts; changing Alt later does not change the
+gesture. The duplicate keeps all content, formatting, rotation and Crop/Fit,
+stays on the same Page and is selected on drop. No Photo file is copied.
+Alt+Ctrl duplicates without snapping. Escape or focus loss cancels the duplicate
+preview; a click without movement creates nothing. Album duplication is one
+undoable edit. Alt during resizing has no special effect.
 
 The selected Text Slot's tools are in the command bar. They offer installed Windows
 fonts, size presets (12, 18, 24, 36, 48 and 72 pt), **Custom...** for an exact point

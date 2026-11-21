@@ -130,6 +130,54 @@ it("creates a new empty Layout, adds Slots to it and saves the Layout Library", 
   expect(saved(store).layouts).toHaveLength(12);
 });
 
+it("Alt-drags a rotated Text Slot preserving its placeholder and formatting, with undo and redo", async () => {
+  const initial = readLayoutLibrary(null, format);
+  initial.layouts[9].slots[1].width = 0.3;
+  initial.layouts[9].slots[1].y = 0.3;
+  const { ports, store } = disk(serializeLayoutLibrary(initial));
+  render(<Harness ports={ports} />);
+  fireEvent.click((await cards())[9]);
+  const canvas = within(screen.getByRole("group", { name: "Layout editor" }));
+  const text = canvas.getByRole("button", { name: "Text Slot 2" });
+  fireEvent.click(text);
+  fireEvent.doubleClick(text);
+  fireEvent.change(screen.getByRole("textbox", { name: "Edit the placeholder of Text Slot 2" }),
+    { target: { value: "Caption" } });
+  fireEvent.keyDown(screen.getByRole("textbox", { name: "Edit the placeholder of Text Slot 2" }), { key: "Escape" });
+  fireEvent.click(bar().getByRole("button", { name: "Bold" }));
+  fireEvent.click(bar().getByRole("button", { name: "Rotate Slot clockwise" }));
+  await waitFor(() => expect(saved(store).layouts[9].slots[1].rotation).toBe(90));
+  const original = saved(store).layouts[9].slots[1];
+  const left = text.style.left;
+  fireEvent.mouseDown(text, { button: 0, clientX: 100, clientY: 100, altKey: true, ctrlKey: true });
+  fireEvent.mouseMove(window, { clientX: 120, clientY: 140, ctrlKey: true });
+  expect(text.style.left).toBe(left);
+  expect(canvas.getAllByText("Caption")).toHaveLength(2);
+  fireEvent.mouseUp(window, { clientX: 120, clientY: 140, ctrlKey: true });
+  expect(canvas.getByRole("button", { name: "Text Slot 3" }).getAttribute("aria-pressed")).toBe("true");
+  await waitFor(() => expect(saved(store).layouts[9].slots).toHaveLength(3));
+  const duplicate = saved(store).layouts[9].slots[2];
+  expect(duplicate).toEqual({ ...original, id: duplicate.id, x: original.x + 20 / 594, y: original.y + 40 / 420 });
+  fireEvent.click(bar().getByRole("button", { name: "Bar undo" }));
+  expect(canvas.queryByRole("button", { name: "Text Slot 3" })).toBeNull();
+  fireEvent.click(bar().getByRole("button", { name: "Bar redo" }));
+  expect(canvas.getByRole("button", { name: "Text Slot 3" })).toBeTruthy();
+});
+
+it("cancels an empty Photo Slot duplicate when Layout mode is hidden", async () => {
+  const { ports } = disk();
+  const { rerender } = render(<Harness ports={ports} />);
+  await cards();
+  fireEvent.mouseDown(screen.getByRole("button", { name: "Photo Slot 1" }),
+    { button: 0, clientX: 100, clientY: 100, altKey: true });
+  fireEvent.mouseMove(window, { clientX: 150, clientY: 150 });
+  expect(screen.getByRole("button", { name: "Photo Slot 2" })).toBeTruthy();
+  rerender(<Harness ports={ports} active={false} />);
+  fireEvent.mouseUp(window, { clientX: 150, clientY: 150 });
+  expect(screen.queryByRole("button", { name: "Photo Slot 2" })).toBeNull();
+  expect(ports.write).not.toHaveBeenCalled();
+});
+
 it("duplicates the selected Layout and deletes a Layout only after confirmation", async () => {
   const { ports, store } = disk();
   render(<Harness ports={ports} />);
@@ -166,9 +214,9 @@ it("moves a Slot with the mouse, as in Album mode", async () => {
   fireEvent.click((await cards())[1]);
   const slot = screen.getByRole("button", { name: "Photo Slot 1" });
   const before = readLayoutLibrary(null, format).layouts[1].slots[0];
-  fireEvent.mouseDown(slot, { button: 0, clientX: 100, clientY: 100, altKey: true });
-  fireEvent.mouseMove(window, { clientX: 120, clientY: 100, altKey: true });
-  fireEvent.mouseUp(window, { clientX: 120, clientY: 100, altKey: true });
+  fireEvent.mouseDown(slot, { button: 0, clientX: 100, clientY: 100, ctrlKey: true });
+  fireEvent.mouseMove(window, { clientX: 120, clientY: 100, ctrlKey: true });
+  fireEvent.mouseUp(window, { clientX: 120, clientY: 100, ctrlKey: true });
   await waitFor(() => expect(store.json).not.toBeNull());
   // 20 px at 2 px per mm is 10 mm.
   expect(saved(store).layouts[1].slots[0].x * 297).toBeCloseTo(before.x * 297 + 10);

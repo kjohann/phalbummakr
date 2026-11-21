@@ -66,6 +66,9 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
   const focusPageId = useRef<string | null>(null);
   const draggedPlacement = useRef<SlotAddress | null>(null);
   const stopSlotDrag = useRef<(() => void) | null>(null);
+  const [visiblePreviews, setVisiblePreviews] = useState<Record<string, {
+    path: string; image: HTMLImageElement; ready: boolean;
+  }>>({});
   const cropPreviewRef = useRef<{ pageId: string; slotId: string; crop: Crop } | null>(null);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const [selectedId, setSelectedId] = useState(savedAlbum.pages[0].id);
@@ -204,6 +207,10 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
     stopSlotDrag.current?.();
   }, []);
 
+  useEffect(() => {
+    if (!active || (disabled && slotDrag?.duplicate)) stopSlotDrag.current?.();
+  }, [active, disabled, slotDrag?.duplicate]);
+
   function updateCropPreview(next: { pageId: string; slotId: string; crop: Crop } | null) {
     const changed = (cropPreviewRef.current !== null) !== (next !== null);
     cropPreviewRef.current = next;
@@ -270,6 +277,14 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
 
   const reportTextOverflow = useCallback((id: string, overflow: boolean) => {
     setOverflowSlots((current) => current[id] === overflow ? current : { ...current, [id]: overflow });
+  }, []);
+
+  const reportVisiblePreview = useCallback((slotId: string, path: string, image: HTMLImageElement, ready: boolean) => {
+    setVisiblePreviews((current) => {
+      const previous = current[slotId];
+      if (previous?.path === path && ((previous.ready && !ready) || previous.image === image)) return current;
+      return { ...current, [slotId]: { path, image, ready } };
+    });
   }, []);
 
   const reportPreviewStatus = useCallback((slotId: string, path: string, status: "loading" | "ready" | "error") => {
@@ -372,34 +387,42 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
     const startX = event.clientX;
     const startY = event.clientY;
     const sidewaysText = slot?.type === "text" && (slot.rotation === 90 || slot.rotation === 270);
-    let latest: SlotDrag = { pageId, slotId, kind, dx: 0, dy: 0, bypass: event.altKey };
+    const duplicate = kind === "move" && event.altKey;
+    let latest: SlotDrag = { pageId, slotId, kind, dx: 0, dy: 0, bypass: event.ctrlKey, duplicate };
     const offset = (moved: MouseEvent): SlotDrag => ({
       pageId, slotId, kind, dx: kind === "resize" && sidewaysText ? 0 : moved.clientX - startX,
       dy: kind === "resize" && slot?.type === "text" && !sidewaysText ? 0 : moved.clientY - startY,
-      bypass: moved.altKey,
+      bypass: moved.ctrlKey, duplicate,
     });
     const move = (moved: MouseEvent) => {
       latest = offset(moved);
       setSlotDrag(latest.dx !== 0 || latest.dy !== 0 ? latest : null);
     };
     const modifier = (pressed: KeyboardEvent) => {
-      if (pressed.key !== "Alt") return;
+      if (pressed.key !== "Control") return;
       if (pressed.type === "keydown") pressed.preventDefault();
       latest = { ...latest, bypass: pressed.type === "keydown" };
       if (latest.dx !== 0 || latest.dy !== 0) setSlotDrag(latest);
     };
     const finish = (drag: SlotDrag) => {
       stop();
-      if (drag.dx !== 0 || drag.dy !== 0) changeAlbum((current) => applySlotDrag(current, drag, trimWidth, trimHeight).album);
+      if (drag.dx !== 0 || drag.dy !== 0) {
+        const result = applySlotDrag(savedAlbum, drag, trimWidth, trimHeight).album;
+        changeAlbum((current) => applySlotDrag(current, drag, trimWidth, trimHeight).album);
+        if (duplicate) selectSlot(pageId, result.pages.find((page) => page.id === pageId)!.slots.at(-1)!.id);
+      }
     };
     const up = (released: MouseEvent) => finish(offset(released));
-    const blur = () => finish(latest);
+    const blur = () => duplicate ? stop() : finish(latest);
+    const cancel = (pressed: KeyboardEvent) => { if (pressed.key === "Escape") { pressed.preventDefault(); stop(); } };
     const stop = () => {
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
       window.removeEventListener("keydown", modifier);
       window.removeEventListener("keyup", modifier);
       window.removeEventListener("blur", blur);
+      window.removeEventListener("keydown", cancel);
+      window.removeEventListener("pointercancel", stop);
       stopSlotDrag.current = null;
       setSlotDrag(null);
     };
@@ -408,6 +431,8 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
     window.addEventListener("keydown", modifier);
     window.addEventListener("keyup", modifier);
     window.addEventListener("blur", blur);
+    window.addEventListener("keydown", cancel);
+    window.addEventListener("pointercancel", stop);
     stopSlotDrag.current = stop;
   }
 
@@ -564,6 +589,9 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
                   {page.slots.map((slot) => {
                     const rect = slotRect(slot, originX + side * (pageWidth + gap) + bleedMm * scale);
                     const slotId = `${page.id}:${slot.id}`;
+                    const duplicateSource = slotDrag?.duplicate && slotDrag.pageId === page.id
+                      && slot.id === page.slots.at(-1)?.id
+                      ? visiblePreviews[`${page.id}:${slotDrag.slotId}`] : undefined;
                     return (
                       <SlotFrame key={slotId} slot={slot} rect={rect}>
                         {(localRect) => slot.type === "text" ? (
@@ -572,9 +600,10 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
                         ) : slot.placement ? (
                           <PlacementImage {...localRect} crop={placementDisplayCrop(slot.placement)} fit={slot.placement.fit}
                             root={root} path={slot.placement.photoPath} photoPorts={photoPorts}
+                            inheritedPreview={duplicateSource?.path === slot.placement.photoPath ? duplicateSource : undefined}
                             thumbnail={thumbnailBySlot[slotId]} attempt={previewStates[slotId]?.path === slot.placement.photoPath
                               ? previewStates[slotId].attempt : 0}
-                            slotId={slotId} onStatus={reportPreviewStatus} />
+                            slotId={slotId} onStatus={reportPreviewStatus} onVisiblePreview={reportVisiblePreview} />
                         ) : <Rect {...localRect} fill="#e8ebe6" stroke="#9aa49c" strokeWidth={1} dash={[4, 3]} />}
                       </SlotFrame>
                     );
@@ -870,7 +899,7 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
         <span>PAGE {visiblePageIndex + 1} OF {album.pages.length}</span>
         <span className="guide-legend">
           <span>Bleed: {bleedMm} mm</span><span>Trim edge</span><span>Safe Zone: {safeZoneMm} mm</span>
-          <span>Hold Alt for free placement</span>
+          <span>Alt-drag to duplicate · Hold Ctrl for free placement</span>
         </span>
       </div>
       <nav className="spread-strip" aria-label="Spreads" ref={stripRef} onContextMenu={(event) => {
@@ -1076,14 +1105,19 @@ function ignoreOverflow() {}
 function ignorePreviewStatus() {}
 
 /** Draws a Placement from its cached preview; originals are only used by Page Export. */
-function PlacementImage({ x, y, width, height, crop, fit, root, path, photoPorts, thumbnailRequest, thumbnail, attempt, slotId, onStatus }: {
+function PlacementImage({ x, y, width, height, crop, fit, root, path, photoPorts, thumbnailRequest, thumbnail, inheritedPreview, attempt, slotId, onStatus, onVisiblePreview }: {
   x: number; y: number; width: number; height: number; crop: Crop; fit: boolean;
   root: string; path: string; photoPorts: Pick<PhotoPreviewPorts, "preview">;
   thumbnailRequest?: PhotoPreviewPorts["pageThumbnail"];
-  thumbnail?: string; attempt: number; slotId: string;
+  thumbnail?: string; inheritedPreview?: { image: HTMLImageElement; ready: boolean }; attempt: number; slotId: string;
   onStatus: (slotId: string, path: string, status: "loading" | "ready" | "error") => void;
+  onVisiblePreview?: (slotId: string, path: string, image: HTMLImageElement, ready: boolean) => void;
 }) {
   const [preview, setPreview] = useState<{ path: string; attempt: number; image: HTMLImageElement | null } | null>(null);
+  const inherited = useRef<{ root: string; path: string; attempt: number; preview: typeof inheritedPreview } | null>(null);
+  if (inheritedPreview) inherited.current = { root, path, attempt, preview: inheritedPreview };
+  const sharedPreview = inherited.current?.root === root && inherited.current.path === path && inherited.current.attempt === attempt
+    ? inherited.current.preview : undefined;
   const [thumbnailImage, setThumbnailImage] = useState<{ url: string; image: HTMLImageElement } | null>(null);
   useEffect(() => {
     let active = true;
@@ -1096,6 +1130,7 @@ function PlacementImage({ x, y, width, height, crop, fit, root, path, photoPorts
         if (!active) return;
         setPreview({ path, attempt, image });
         onStatus(slotId, path, "ready");
+        onVisiblePreview?.(slotId, path, image, true);
       };
       image.onerror = () => {
         if (!active) return;
@@ -1111,7 +1146,7 @@ function PlacementImage({ x, y, width, height, crop, fit, root, path, photoPorts
       }
     });
     return () => { active = false; controller.abort(); };
-  }, [root, path, photoPorts, thumbnailRequest, attempt, slotId, onStatus]);
+  }, [root, path, photoPorts, thumbnailRequest, attempt, slotId, onStatus, onVisiblePreview]);
 
   useEffect(() => {
     if (!thumbnail) {
@@ -1120,16 +1155,21 @@ function PlacementImage({ x, y, width, height, crop, fit, root, path, photoPorts
     }
     let active = true;
     const image = new Image();
-    image.onload = () => { if (active) setThumbnailImage({ url: thumbnail, image }); };
+    image.onload = () => {
+      if (!active) return;
+      setThumbnailImage({ url: thumbnail, image });
+      onVisiblePreview?.(slotId, path, image, false);
+    };
     image.onerror = () => { if (active) setThumbnailImage(null); };
     image.src = thumbnail;
     return () => { active = false; };
-  }, [thumbnail]);
+  }, [thumbnail, slotId, path, onVisiblePreview]);
 
   const image = preview?.path === path && preview.attempt === attempt ? preview.image : undefined;
-  const visibleImage = image ?? (thumbnailImage && thumbnailImage.url === thumbnail ? thumbnailImage.image : null);
+  const visibleImage = image ?? sharedPreview?.image ?? (thumbnailImage && thumbnailImage.url === thumbnail ? thumbnailImage.image : null);
   if (!visibleImage) {
     return <Rect x={x} y={y} width={width} height={height} fill={image === null ? "#efe1da" : "#eef0ec"} />;
   }
-  return <PhotoImage x={x} y={y} width={width} height={height} image={visibleImage} crop={crop} fit={fit} opacity={image ? 1 : 0.45} />;
+  return <PhotoImage x={x} y={y} width={width} height={height} image={visibleImage} crop={crop} fit={fit}
+    opacity={image || sharedPreview?.ready ? 1 : 0.45} />;
 }

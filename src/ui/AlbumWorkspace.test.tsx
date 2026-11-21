@@ -478,7 +478,7 @@ it("moves and width-resizes Text Slots while retaining fitted height and keyboar
   expect(screen.queryByRole("button", { name: "Page 1 Text Slot 1" })).toBeNull();
 });
 
-it("snaps a Text Slot's width to the Safe Zone after releasing Alt", async () => {
+it("snaps a Text Slot's width to the Safe Zone after releasing Ctrl", async () => {
   const { ports, files } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
@@ -489,12 +489,12 @@ it("snaps a Text Slot's width to the Safe Zone after releasing Alt", async () =>
   const handle = screen.getByRole("button", { name: "Resize Page 1 Text Slot 1" });
   const safeRight = 1 - 5 / 297;
   const endX = 100 + (safeRight - 0.7) * 594 + 3;
-  fireEvent.mouseDown(handle, { button: 0, clientX: 100, clientY: 100, altKey: true });
-  fireEvent.mouseMove(window, { clientX: endX, clientY: 180, altKey: true });
+  fireEvent.mouseDown(handle, { button: 0, clientX: 100, clientY: 100, ctrlKey: true });
+  fireEvent.mouseMove(window, { clientX: endX, clientY: 180, ctrlKey: true });
   expect(parseFloat(slot.style.width)).toBeCloseTo((safeRight - 0.3) * 594 + 3);
   expect(screen.queryByLabelText("Snap to Safe Zone")).toBeNull();
 
-  fireEvent.keyUp(window, { key: "Alt", altKey: false });
+  fireEvent.keyUp(window, { key: "Control", ctrlKey: false });
   expect(parseFloat(slot.style.width)).toBeCloseTo((safeRight - 0.3) * 594);
   expect(parseFloat(slot.style.height)).toBeCloseTo(30.48);
   expect(screen.getByLabelText("Snap to Safe Zone")).toBeTruthy();
@@ -1194,6 +1194,165 @@ it("reports Album commands as available while an autosave is pending, but not wh
   expect(onEditableChange).toHaveBeenLastCalledWith(false);
 });
 
+it("Alt-drags a populated Slot without moving the original and commits one undoable duplicate", async () => {
+  const { ports, files } = disk();
+  const album = rotateSlot(placePhoto(addPhotoSlot(createAlbum({ name: "Existing" }), "page-1"),
+    "page-1", "slot-1", { path: "tree.jpg", width: 6000, height: 4000, orientation: 1 }), "page-1", "slot-1", 90);
+  const original = album.pages[0].slots[0];
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()}
+    document={{ path: "Existing", album }} />);
+  const editor = within(screen.getByRole("group", { name: "Spread editor" }));
+  const slot = editor.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  const left = slot.style.left;
+  fireEvent.mouseDown(slot, { button: 0, clientX: 100, clientY: 100, altKey: true, ctrlKey: true });
+  fireEvent.mouseMove(window, { clientX: 160, clientY: 150, altKey: false, ctrlKey: true });
+  expect(slot.style.left).toBe(left);
+  expect(editor.getByRole("button", { name: "Page 1 Photo Slot 2" })).toBeTruthy();
+  expect(ports.write).not.toHaveBeenCalled();
+  fireEvent.mouseUp(window, { clientX: 160, clientY: 150, ctrlKey: true });
+  expect(editor.getByRole("button", { name: "Page 1 Photo Slot 2" }).getAttribute("aria-pressed")).toBe("true");
+  await waitFor(() => {
+    const slots = deserializeAlbum(files.get("Existing")!).pages[0].slots;
+    expect(slots).toHaveLength(2);
+    expect(slots[0]).toEqual(original);
+    expect(slots[1]).toEqual({ ...original, id: "slot-2", x: original.x + 60 / 594, y: original.y + 50 / 420 });
+  });
+  expect(photoUsage(deserializeAlbum(files.get("Existing")!)).get("tree.jpg")).toBe(2);
+  expect(screen.queryByText(/already used/)).toBeNull();
+  fireEvent.click(bar().getByRole("button", { name: "Bar undo" }));
+  expect(editor.queryByRole("button", { name: "Page 1 Photo Slot 2" })).toBeNull();
+  fireEvent.click(bar().getByRole("button", { name: "Bar redo" }));
+  expect(editor.getByRole("button", { name: "Page 1 Photo Slot 2" })).toBeTruthy();
+});
+
+it("shows the loaded Photo immediately in a duplicate preview without waiting for another image load", async () => {
+  const images: { onload: (() => void) | null }[] = [];
+  vi.stubGlobal("Image", class {
+    onload: (() => void) | null = null;
+    naturalWidth = 2048;
+    naturalHeight = 1365;
+    src = "";
+    constructor() { images.push(this); }
+  });
+  const { ports } = disk();
+  const album = placePhoto(addPhotoSlot(createAlbum({ name: "Existing" }), "page-1"), "page-1", "slot-1",
+    { path: "tree.jpg", width: 6000, height: 4000, orientation: 1 });
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()}
+    document={{ path: "Existing", album }} />);
+  await waitFor(() => expect(images.length).toBeGreaterThan(0));
+  act(() => images.forEach((image) => image.onload?.()));
+  const editor = within(screen.getByRole("group", { name: "Spread editor" }));
+  expect(editor.getAllByAltText("Placement")).toHaveLength(1);
+  fireEvent.mouseDown(editor.getByRole("button", { name: "Page 1 Photo Slot 1" }),
+    { button: 0, clientX: 100, clientY: 100, altKey: true });
+  fireEvent.mouseMove(window, { clientX: 150, clientY: 150 });
+  expect(editor.getAllByAltText("Placement")).toHaveLength(2);
+  fireEvent.keyDown(window, { key: "Escape" });
+});
+
+it.each(["Escape", "blur", "pointercancel", "click"] as const)(
+  "discards an Alt duplicate on %s without saving or adding an undo step", (interruption) => {
+    const { ports } = disk();
+    const album = addPhotoSlot(createAlbum({ name: "Existing" }), "page-1");
+    render(<AlbumWorkspace root="D:\\Photos" ports={ports} document={{ path: "Existing", album }} />);
+    const editor = within(screen.getByRole("group", { name: "Spread editor" }));
+    fireEvent.mouseDown(editor.getByRole("button", { name: "Page 1 Photo Slot 1" }),
+      { button: 0, clientX: 100, clientY: 100, altKey: true });
+    if (interruption !== "click") {
+      fireEvent.mouseMove(window, { clientX: 150, clientY: 150 });
+      expect(editor.getByRole("button", { name: "Page 1 Photo Slot 2" })).toBeTruthy();
+    }
+    if (interruption === "Escape") fireEvent.keyDown(window, { key: "Escape" });
+    else if (interruption === "blur") fireEvent.blur(window);
+    else if (interruption === "pointercancel") fireEvent(window, new Event("pointercancel"));
+    fireEvent.mouseUp(window, { clientX: interruption === "click" ? 100 : 150, clientY: 100 });
+    expect(editor.queryByRole("button", { name: "Page 1 Photo Slot 2" })).toBeNull();
+    expect(ports.write).not.toHaveBeenCalled();
+    fireEvent.click(bar().getByRole("button", { name: "Bar undo" }));
+    expect(editor.getByRole("button", { name: "Page 1 Photo Slot 1" })).toBeTruthy();
+  },
+);
+
+it("shares the visible thumbnail and adopts the original's full Photo as it loads during duplication", async () => {
+  const images: { src: string; onload: (() => void) | null }[] = [];
+  vi.stubGlobal("Image", class {
+    onload: (() => void) | null = null;
+    naturalWidth = 2048;
+    naturalHeight = 1365;
+    private url = "";
+    constructor() { images.push(this); }
+    get src() { return this.url; }
+    set src(url: string) {
+      this.url = url;
+      if (url.startsWith("data:")) queueMicrotask(() => this.onload?.());
+    }
+  });
+  const { ports } = disk();
+  const album = addPhotoSlot(createAlbum({ name: "Existing" }), "page-1");
+  const photoPorts = previews();
+  photoPorts.preview = vi.fn(async () => "preview:tree.jpg");
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={photoPorts}
+    document={{ path: "Existing", album }} />);
+  const editor = within(screen.getByRole("group", { name: "Spread editor" }));
+  const original = editor.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  fireEvent.drop(original, photoDrop({
+    path: "tree.jpg", width: 6000, height: 4000, orientation: 1,
+  }, "data:image/png;base64,dGVzdA=="));
+  await waitFor(() => expect(editor.getAllByAltText("Placement")).toHaveLength(1));
+  fireEvent.mouseDown(original, { button: 0, clientX: 100, clientY: 100, altKey: true });
+  fireEvent.mouseMove(window, { clientX: 150, clientY: 150 });
+  expect(editor.getAllByAltText("Placement")).toHaveLength(2);
+  expect(editor.getAllByAltText("Placement").map((image) => image.style.opacity)).toEqual(["0.45", "0.45"]);
+  const primary = images.find((image) => image.src === "preview:tree.jpg");
+  expect(primary).toBeTruthy();
+  act(() => primary!.onload?.());
+  expect(editor.getAllByAltText("Placement").map((image) => image.style.opacity)).toEqual(["1", "1"]);
+  fireEvent.keyDown(window, { key: "Escape" });
+});
+
+it("latches Alt at drag start, snaps the duplicate to the original, and enforces Page bounds", () => {
+  const { ports } = disk();
+  const album = addPhotoSlot(createAlbum({ name: "Existing" }), "page-1");
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} document={{ path: "Existing", album }} />);
+  const editor = within(screen.getByRole("group", { name: "Spread editor" }));
+  const original = editor.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  fireEvent.mouseDown(original, { button: 0, clientX: 100, clientY: 100, altKey: true });
+  fireEvent.mouseMove(window, { clientX: 104, clientY: 100 });
+  const copy = editor.getByRole("button", { name: "Page 1 Photo Slot 2" });
+  expect(copy.style.left).toBe(original.style.left);
+  expect(screen.getAllByLabelText("Snap to Slot").length).toBeGreaterThan(0);
+  fireEvent.keyDown(window, { key: "Control", ctrlKey: true });
+  expect(parseFloat(copy.style.left) - parseFloat(original.style.left)).toBeCloseTo(4);
+  expect(screen.queryByLabelText("Snap to Slot")).toBeNull();
+  fireEvent.keyUp(window, { key: "Control" });
+  expect(copy.style.left).toBe(original.style.left);
+  fireEvent.mouseMove(window, { clientX: 5000, clientY: 100 });
+  const page = editor.getByRole("button", { name: "Select Page 1" });
+  expect(parseFloat(copy.style.left) + parseFloat(copy.style.width)).toBeCloseTo(parseFloat(page.style.left) + parseFloat(page.style.width));
+  fireEvent.keyDown(window, { key: "Escape" });
+  fireEvent.mouseDown(original, { button: 0, clientX: 100, clientY: 100 });
+  fireEvent.mouseMove(window, { clientX: 130, clientY: 100, altKey: true });
+  expect(editor.queryByRole("button", { name: "Page 1 Photo Slot 2" })).toBeNull();
+  fireEvent.keyDown(window, { key: "Escape" });
+});
+
+it("Alt resizing still snaps and enforces minimum size without duplicating", () => {
+  const { ports } = disk();
+  const album = addPhotoSlot(createAlbum({ name: "Existing" }), "page-1");
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} document={{ path: "Existing", album }} />);
+  const editor = within(screen.getByRole("group", { name: "Spread editor" }));
+  const original = editor.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  const handle = editor.getByRole("button", { name: "Resize Page 1 Photo Slot 1" });
+  fireEvent.mouseDown(handle, { button: 0, clientX: 100, clientY: 100, altKey: true });
+  fireEvent.mouseMove(window, { clientX: 100 + 0.3 * 594 - 4, clientY: 100, altKey: true });
+  expect(screen.getByLabelText("Snap to Page edge")).toBeTruthy();
+  expect(editor.queryByRole("button", { name: "Page 1 Photo Slot 2" })).toBeNull();
+  fireEvent.mouseMove(window, { clientX: -5000, clientY: -5000, altKey: true });
+  expect(parseFloat(original.style.width)).toBeGreaterThan(0);
+  expect(parseFloat(original.style.height)).toBeGreaterThan(0);
+  fireEvent.keyDown(window, { key: "Escape" });
+});
+
 it("snaps a Photo Slot to a nearby Page edge, shows a guide, and saves the position", async () => {
   const { ports, files } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);
@@ -1214,7 +1373,7 @@ it("snaps a Photo Slot to a nearby Page edge, shows a guide, and saves the posit
   });
 });
 
-it("temporarily bypasses and restores snapping with Alt during a Slot drag", async () => {
+it("temporarily bypasses and restores snapping with Ctrl during a Slot drag", async () => {
   const { ports, files } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);
   fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
@@ -1228,21 +1387,21 @@ it("temporarily bypasses and restores snapping with Alt during a Slot drag", asy
   fireEvent.mouseMove(window, { clientX: endX, clientY: 100 });
   expect(parseFloat(slot.style.left)).toBeCloseTo(trimLeft);
 
-  fireEvent.keyDown(window, { key: "Alt", altKey: true });
+  fireEvent.keyDown(window, { key: "Control", ctrlKey: true });
   expect(parseFloat(slot.style.left)).toBeCloseTo(trimLeft + 4);
   expect(screen.queryByLabelText("Snap to Page edge")).toBeNull();
-  fireEvent.keyUp(window, { key: "Alt", altKey: false });
+  fireEvent.keyUp(window, { key: "Control", ctrlKey: false });
   expect(parseFloat(slot.style.left)).toBeCloseTo(trimLeft);
   expect(screen.getByLabelText("Snap to Page edge")).toBeTruthy();
 
-  fireEvent.keyDown(window, { key: "Alt", altKey: true });
-  fireEvent.mouseUp(window, { clientX: endX, clientY: 100, altKey: true });
+  fireEvent.keyDown(window, { key: "Control", ctrlKey: true });
+  fireEvent.mouseUp(window, { clientX: endX, clientY: 100, ctrlKey: true });
   await waitFor(() => {
     expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].x).toBeCloseTo(4 / 594, 9);
   });
 });
 
-it("shows every aligned Slot edge and center during a drag and clears them with Alt", async () => {
+it("shows every aligned Slot edge and center during a drag and clears them with Ctrl", async () => {
   const { ports, files } = disk();
   const album = createAlbum({ name: "Existing", pageCount: 2 });
   album.pages[0].slots = [
@@ -1266,9 +1425,9 @@ it("shows every aligned Slot edge and center during a drag and clears them with 
   fireEvent.mouseMove(window, { clientX: 100, clientY: endY });
   expect(guidePositions()).toEqual([trimTop + 105, trimTop + 157.5, trimTop + 210]);
 
-  fireEvent.keyDown(window, { key: "Alt", altKey: true });
+  fireEvent.keyDown(window, { key: "Control", ctrlKey: true });
   expect(screen.queryByLabelText("Snap to Slot")).toBeNull();
-  fireEvent.keyUp(window, { key: "Alt", altKey: false });
+  fireEvent.keyUp(window, { key: "Control", ctrlKey: false });
   expect(guidePositions()).toEqual([trimTop + 105, trimTop + 157.5, trimTop + 210]);
   fireEvent.mouseUp(window, { clientX: 100, clientY: endY });
   expect(screen.queryByLabelText("Snap to Slot")).toBeNull();

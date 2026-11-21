@@ -132,6 +132,10 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
   useEffect(() => () => { stopSlotDrag.current?.(); }, []);
 
   useEffect(() => {
+    if (!active || (disabled && slotDrag?.duplicate)) stopSlotDrag.current?.();
+  }, [active, disabled, slotDrag?.duplicate]);
+
+  useEffect(() => {
     if (selectedSlot?.type !== "text" || fonts !== null) return;
     let current = true;
     fontPorts.list().then((names) => {
@@ -272,41 +276,50 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
     if (event.button !== 0) return;
     event.stopPropagation();
     selectSlot(slotId);
-    if (disabled) return;
+    if (disabled || !savedAlbum) return;
     event.preventDefault();
     stopSlotDrag.current?.();
+    const baseAlbum = savedAlbum;
     const slot = slots.find((item) => item.id === slotId);
     const startX = event.clientX;
     const startY = event.clientY;
     const sidewaysText = slot?.type === "text" && (slot.rotation === 90 || slot.rotation === 270);
-    let latest: SlotDrag = { pageId: LAYOUT_PAGE, slotId, kind, dx: 0, dy: 0, bypass: event.altKey };
+    const duplicate = kind === "move" && event.altKey;
+    let latest: SlotDrag = { pageId: LAYOUT_PAGE, slotId, kind, dx: 0, dy: 0, bypass: event.ctrlKey, duplicate };
     const offset = (moved: MouseEvent): SlotDrag => ({
       pageId: LAYOUT_PAGE, slotId, kind, dx: kind === "resize" && sidewaysText ? 0 : moved.clientX - startX,
       dy: kind === "resize" && slot?.type === "text" && !sidewaysText ? 0 : moved.clientY - startY,
-      bypass: moved.altKey,
+      bypass: moved.ctrlKey, duplicate,
     });
     const move = (moved: MouseEvent) => {
       latest = offset(moved);
       setSlotDrag(latest.dx !== 0 || latest.dy !== 0 ? latest : null);
     };
     const modifier = (pressed: KeyboardEvent) => {
-      if (pressed.key !== "Alt") return;
+      if (pressed.key !== "Control") return;
       if (pressed.type === "keydown") pressed.preventDefault();
       latest = { ...latest, bypass: pressed.type === "keydown" };
       if (latest.dx !== 0 || latest.dy !== 0) setSlotDrag(latest);
     };
     const finish = (drag: SlotDrag) => {
       stop();
-      if (drag.dx !== 0 || drag.dy !== 0) changeLayout((current) => applySlotDrag(current, drag, trimWidth, trimHeight, true).album);
+      if (drag.dx !== 0 || drag.dy !== 0) {
+        const result = applySlotDrag(baseAlbum, drag, trimWidth, trimHeight, true).album;
+        changeLayout((current) => applySlotDrag(current, drag, trimWidth, trimHeight, true).album);
+        if (duplicate) selectSlot(result.pages[0].slots.at(-1)!.id);
+      }
     };
     const up = (released: MouseEvent) => finish(offset(released));
-    const blur = () => finish(latest);
+    const blur = () => duplicate ? stop() : finish(latest);
+    const cancel = (pressed: KeyboardEvent) => { if (pressed.key === "Escape") { pressed.preventDefault(); stop(); } };
     const stop = () => {
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
       window.removeEventListener("keydown", modifier);
       window.removeEventListener("keyup", modifier);
       window.removeEventListener("blur", blur);
+      window.removeEventListener("keydown", cancel);
+      window.removeEventListener("pointercancel", stop);
       stopSlotDrag.current = null;
       setSlotDrag(null);
     };
@@ -315,6 +328,8 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
     window.addEventListener("keydown", modifier);
     window.addEventListener("keyup", modifier);
     window.addEventListener("blur", blur);
+    window.addEventListener("keydown", cancel);
+    window.addEventListener("pointercancel", stop);
     stopSlotDrag.current = stop;
   }
 
@@ -495,7 +510,7 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
           <span>{layout && library ? `LAYOUT ${layoutIndex + 1} OF ${library.layouts.length}` : "NO LAYOUT SELECTED"}</span>
           <span className="guide-legend">
             <span>Bleed: {bleedMm} mm</span><span>Trim edge</span><span>Safe Zone: {safeZoneMm} mm</span>
-            <span>Hold Alt for free placement</span>
+            <span>Alt-drag to duplicate · Hold Ctrl for free placement</span>
           </span>
         </div>
       </section>
