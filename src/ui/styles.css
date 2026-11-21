@@ -1156,23 +1156,6 @@ button.sort-photo--selected:hover {
   left: auto;
 }
 
-.folder-choices {
-  display: grid;
-  max-height: 260px;
-  margin: 0;
-  padding: 6px 8px;
-  gap: 2px;
-  overflow: auto;
-  border: 1px solid #c5ccc1;
-  border-radius: 4px;
-}
-
-.album-form .folder-choices label {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-
 .send-to-folder {
   display: grid;
   gap: 14px;

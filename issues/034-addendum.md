@@ -56,7 +56,7 @@ to Folder…" all act on the Selected Photos, so they follow along.
   Comparison keeps this rule with no limit on how many Photos it shows.
 ## Section 2 - Separate the Comparison from the Selected Photos
 
-Status: todo · Type: tweak · Depends on: [037](037-reviewed-photos.md)
+Status: done · Type: tweak · Depends on: [037](037-reviewed-photos.md)
 
 ### What
 
@@ -79,19 +79,90 @@ parallel and also changes `PhotoBrowser`. 037 itself is left unchanged.
 
 ### Additional acceptance criteria
 
-- [ ] A Photo added to the Comparison from the grid (Ctrl-click or "Add to
+- [x] A Photo added to the Comparison from the grid (Ctrl-click or "Add to
   Comparison") starts out unselected. Photos already selected stay selected.
-- [ ] A Photo shown on its own still counts as selected, but it doesn't stay
+- [x] A Photo shown on its own still counts as selected, but it doesn't stay
   selected once a second Photo is added.
-- [ ] Dragging a Photo in the Comparison from the grid to a Folder moves every
+- [x] Dragging a Photo in the Comparison from the grid to a Folder moves every
   Photo in the Comparison. Dragging any other grid Photo moves only that Photo.
-- [ ] Dragging a Selected Photo from the Comparison moves every Selected Photo.
+- [x] Dragging a Selected Photo from the Comparison moves every Selected Photo.
   Dragging an unselected Photo from the Comparison moves only that Photo.
-- [ ] Right-click "Send to Folder ▸", including "New Folder…", follows the same
+- [x] Right-click "Send to Folder ▸", including "New Folder…", follows the same
   rule as dragging in each pane.
-- [ ] Right-click "Mark as reviewed" / "Mark as unreviewed" from 037 follow the
+- [x] Right-click "Mark as reviewed" / "Mark as unreviewed" from 037 follow the
   same rule as Send to Folder in each pane.
-- [ ] The grid only marks which Photos are in the Comparison, not which of them
+- [x] The grid only marks which Photos are in the Comparison, not which of them
   are selected.
-- [ ] The command bar no longer has "Send to Folder…" in Sort mode.
-- [ ] Album mode still moves only the dragged Photo.
+- [x] The command bar no longer has "Send to Folder…" in Sort mode.
+- [x] Album mode still moves only the dragged Photo.
+
+### Implementation notes
+
+- `toggleComparison` adds a Photo unselected. Selected Photos stay selected,
+  but a Photo shown on its own only counts as selected while it is alone. It
+  isn't kept selected once a second Photo is added.
+- `photosActedOn(comparison, photo, pane)` in `core/comparison.ts` holds the
+  rule for each pane. From the grid, a Photo in the Comparison takes the whole
+  Comparison with it. From the Comparison, a Selected Photo takes every
+  Selected Photo. Any other Photo goes on its own. `PhotoBrowser` uses it for
+  drags (`startDrag("grid" | "comparison")`) and for the right-click "Send to
+  Folder ▸" (including "New Folder…") and "Mark as reviewed/unreviewed". In
+  Album mode, a drag still moves just the dragged Photo.
+- The grid already marked only the Photos in the Comparison
+  (`photo-tile--shown`), so it needed no change. A test checks that selected
+  and unselected Photos look the same there.
+- The command bar's "Send to Folder…" is gone. `SortCommandName` is only
+  `"clear-comparison"`, and `onComparisonChange` only reports how many Photos
+  are shown, since the selected count only served that button.
+- `SendToFolderDialog` lost its Folder picker, which only that button used.
+  It now only names a New Folder inside a given parent for "New Folder…", with
+  `onSend(parent, name)`. The unused `.folder-choices` styles are removed.
+- Tests: `comparison.test.ts` covers the new rules and `photosActedOn`.
+  `PhotoBrowser.test.tsx` covers grid and Comparison drags, right-click Send to
+  Folder and reviewed marking for each pane. The test for the command bar's
+  dialog is removed. `App.test.tsx` checks that Sort mode's command bar has no
+  "Send to Folder…".
+
+### Earlier considerations reviewed
+
+- **028, `SendToFolderDialog`'s `onSend(folder, name | null)` uses `null` for
+  "no new Folder":** resolved. The dialog only creates a new Folder now, so
+  `onSend(parent, name)` always gets a name.
+- **028, native check in `tauri dev`:** still deferred. Its "send the chosen
+  ones to a Folder" step now means right-click or drag, since the command bar
+  button is gone.
+- **026/028, `fileName`/`parentFolder` duplicated:** still deferred. The
+  dialog now takes one name from a path instead of two.
+- **034, native drag check in WebView2:** still deferred. It should now also
+  check a grid drag of a Comparison Photo.
+- The open points in [037](037-reviewed-photos.md) don't concern which Photos
+  an action takes; they stay deferred.
+- Nothing else in the inbox was resolved by this change. The "Dragging
+  multiple photos" note had already been sorted into this section.
+
+### Code review
+
+- Spec: no findings.
+- Standards, fixed straight away:
+  - `photosToSend` became `photosActedOn`, since it also decides what "Mark
+    as reviewed" marks.
+  - The right-click menu's `"view"` became `"comparison"`, so the menu and
+    the drag share the `PhotoPane` type.
+  - The test helper `compareKeepingSelected` became `compareSelecting`, as it
+    now selects the given Photos instead of keeping them selected.
+
+### Future considerations (low priority)
+
+- **Code review (Standards), judgement calls left:**
+  - `SendToFolderDialog` is now only a "New Folder" name prompt. Its name and
+    `.send-to-folder` class describe the removed Folder picker, and it largely
+    repeats `FolderNameDialog`. Folding the two together would remove both
+    problems.
+  - The dialog inlines the "Folder name, or the Library" label that
+    `folderName` in `PhotoBrowser` also builds (see the 026/028
+    `fileName`/`parentFolder` point).
+  - `SortCommandName` now has one member, and `onComparisonChange` reports
+    `{ shown }` only. Both are kept in case more Sort commands come, but
+    could be simplified.
+- **Native check:** in `tauri dev` (WebView2), drag a Comparison Photo from the
+  grid and a Selected Photo from the Comparison, and check what moves.

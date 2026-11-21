@@ -201,7 +201,7 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
   const [layoutCommand, setLayoutCommand] = useState<LayoutCommand | undefined>();
   const [layoutState, setLayoutState] = useState<LayoutBarState>({ editable: false, layoutSelected: false, slotSelected: false, canUndo: false, canRedo: false });
   const [sortCommand, setSortCommand] = useState<{ name: SortCommandName; serial: number } | undefined>();
-  const [sortCounts, setSortCounts] = useState({ shown: 0, selected: 0 });
+  const [sortCounts, setSortCounts] = useState({ shown: 0 });
   // Keyed by document like the mode, so every Album's work area starts at 100%.
   const [sortZoomState, setSortZoomState] = useState<{ documentId: number | undefined; zoom: number }>({ documentId: undefined, zoom: 1 });
   const [modeState, setModeState] = useState<{ documentId: number | undefined; mode: Mode }>({ documentId: undefined, mode: "album" });
@@ -597,8 +597,6 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
     albumCommand("save-as-layout", "Save as Layout", { overflow: 2, disabled: !(albumCommandsEnabled && layoutLibraryReady) }),
   ] : albumOpen && mode === "layouts" ? layoutCommands()
     : albumOpen && mode === "sort" ? [
-      { id: "send-to-folder", label: "Send to Folder…", disabled: !commandsAvailable || sortCounts.selected === 0,
-        run: () => setSortCommand({ name: "send-to-folder", serial: ++commandSerial.current }) },
       { id: "clear-comparison", label: "Clear Comparison", shortcut: "Escape", disabled: !canClearComparison,
         run: () => actions.current.clearComparison() },
     ] : [];

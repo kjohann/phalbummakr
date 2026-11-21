@@ -3,9 +3,9 @@ import { createPortal } from "react-dom";
 import {
   afterMove, canStepFolder, currentFolder, EMPTY_COMPARISON, folderNameProblem, folderRenameProblem,
   historyAfterRename, historyAfterRescan, isProtectedFolder, photosUpTo, photoUsage, progressAfterMove, progressAfterRename, progressAfterRescan,
-  rememberScroll, renamedPath, scanAfterMove, selectedPhotos, setReviewed, showInProgress, showPhoto, START_FOLDER_HISTORY, stepFolder, stepPhoto,
-  toggleComparison, toggleSelected, visitFolder, withoutPhotos,
-  type Album, type Comparison, type FolderHistory, type FolderRename, type Photo, type PhotoMove, type PhotoScan, type ZoomChange,
+  rememberScroll, renamedPath, scanAfterMove, setReviewed, showInProgress, showPhoto, START_FOLDER_HISTORY, stepFolder, stepPhoto,
+  photosActedOn, toggleComparison, toggleSelected, visitFolder, withoutPhotos,
+  type Album, type Comparison, type FolderHistory, type FolderRename, type Photo, type PhotoMove, type PhotoPane, type PhotoScan, type ZoomChange,
 } from "../core";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
 import { folderExists } from "./tauriSortingPorts";
@@ -18,7 +18,7 @@ import SendToFolderDialog from "./SendToFolderDialog";
 import FolderNameDialog from "./FolderNameDialog";
 
 /** Sort mode's command bar commands that act on the Comparison. */
-export type SortCommandName = "send-to-folder" | "clear-comparison";
+export type SortCommandName = "clear-comparison";
 
 /** Connects the Photo grid to Sort mode's work area and command bar. */
 export interface SortLink {
@@ -28,8 +28,8 @@ export interface SortLink {
   active: boolean;
   /** A command from the command bar; each new serial runs it once. */
   command?: { name: SortCommandName; serial: number };
-  /** Reports how many Photos are shown, and how many "Send to Folder…" would move. */
-  onComparisonChange: (counts: { shown: number; selected: number }) => void;
+  /** Reports how many Photos are shown. */
+  onComparisonChange: (counts: { shown: number }) => void;
   /** How much the work area is zoomed, 1 being 100%. */
   zoom?: number;
   /** Ctrl+wheel or pinching over the work area changes the zoom. */
@@ -45,7 +45,7 @@ type PhotoClick = (photo: string, event: ReactMouseEvent) => void;
  */
 interface PhotoMenu {
   path: string;
-  where: "grid" | "view" | "folder" | "space";
+  where: PhotoPane | "folder" | "space";
   x: number;
   y: number;
 }
@@ -354,7 +354,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
 }) {
   const [comparison, setComparison] = useState<Comparison>(EMPTY_COMPARISON);
   const [menu, setMenu] = useState<PhotoMenu | null>(null);
-  const [folderDialog, setFolderDialog] = useState<{ paths: string[]; parent?: string } | null>(null);
+  const [folderDialog, setFolderDialog] = useState<{ paths: string[]; parent: string } | null>(null);
   const [naming, setNaming] = useState<FolderNaming | null>(null);
   const [scan, setScan] = useState(0);
   const [unusedOnly, setUnusedOnly] = useState(false);
@@ -491,9 +491,8 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
     }
   }, [sortActive, progress, hasResult, root, folder]);
   const shownCount = comparison.shown.length;
-  const selectedCount = selectedPhotos(comparison).length;
   const onComparisonChange = sort?.onComparisonChange;
-  useEffect(() => onComparisonChange?.({ shown: shownCount, selected: selectedCount }), [shownCount, selectedCount, onComparisonChange]);
+  useEffect(() => onComparisonChange?.({ shown: shownCount }), [shownCount, onComparisonChange]);
 
   useEffect(() => {
     if (!sortActive) return;
@@ -523,10 +522,12 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
     setDropOver(null);
   }
 
-  /** Like right-click, a Selected Photo takes the other Selected Photos with it, but only in Sort mode, where they are shown. */
-  const startDrag: PhotoDragStart = (path, event) => {
-    const selected = sortActive ? selectedPhotos(comparison) : [];
-    const paths = selected.includes(path) ? selected : [path];
+  /**
+   * Like right-click, a Photo takes the Photos it goes with in its pane, but only in Sort mode, where they are
+   * shown: from the grid the whole Comparison, from the Comparison the Selected Photos.
+   */
+  const startDrag = (pane: PhotoPane): PhotoDragStart => (path, event) => {
+    const paths = sortActive ? photosActedOn(comparison, path, pane) : [path];
     if (paths.length > 1) {
       const picture = event.currentTarget instanceof Element ? event.currentTarget.querySelector("img") : null;
       writeCountDragImage(event.dataTransfer, paths.length, picture);
@@ -607,30 +608,20 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
     setMenu({ path, where, x: event.clientX, y: event.clientY });
   const spaceContextMenu = (event: ReactMouseEvent) => openFolderMenu("space")(folder, event);
 
-  async function sendFromDialog(paths: string[], target: string, name: string | null) {
-    let destination = target;
-    if (name !== null) {
-      if (!onCreateFolder) throw new Error("Folders can't be created here.");
-      destination = await onCreateFolder(target, name);
-      addFolder(destination);
-    }
+  async function sendToNewFolder(paths: string[], parent: string, name: string) {
+    if (!onCreateFolder) throw new Error("Folders can't be created here.");
+    const destination = await onCreateFolder(parent, name);
+    addFolder(destination);
     setFolderDialog(null);
     await send(paths, destination);
   }
 
-  const comparisonRef = useRef(comparison);
-  comparisonRef.current = comparison;
   const command = sort?.command;
   const handledSerial = useRef(command?.serial);
   useEffect(() => {
     if (!command || command.serial === handledSerial.current) return;
     handledSerial.current = command.serial;
-    if (command.name === "clear-comparison") {
-      setComparison(EMPTY_COMPARISON);
-      return;
-    }
-    const paths = selectedPhotos(comparisonRef.current);
-    if (paths.length > 0) setFolderDialog({ paths });
+    if (command.name === "clear-comparison") setComparison(EMPTY_COMPARISON);
   }, [command]);
 
   function menuItems({ path, where }: PhotoMenu): MenuItem[] {
@@ -641,9 +632,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
       return [{ label: "New Folder…", onSelect: () => setNaming({ kind: "create", parent: path }), disabled: !onCreateFolder }];
     }
     const inComparison = comparison.shown.includes(path);
-    // Like a file manager's selection: a Selected Photo takes the other Selected Photos with it.
-    const selected = selectedPhotos(comparison);
-    const targets = selected.includes(path) ? selected : [path];
+    const targets = photosActedOn(comparison, path, where);
     const sendItem = { label: "Send to Folder", items: sendToFolderItems(targets) };
     const allReviewed = progress !== null && targets.every((target) => progress.reviewed.has(target));
     const reviewItem: MenuItem = {
@@ -770,7 +759,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
       )}
       {result && <PhotoGrid key={`${root}:${folder}:${unusedOnly}`} root={root} generation={result.generation}
         photos={photos} usage={usage} compact={compact}
-        onDragStart={startDrag} onDragEnd={endDrag} shown={sortActive ? comparison.shown : []} moving={movingPhotos}
+        onDragStart={startDrag("grid")} onDragEnd={endDrag} shown={sortActive ? comparison.shown : []} moving={movingPhotos}
         reviewed={sortActive && progress ? progress.reviewed : NO_PHOTOS}
         initialScrollTop={sortActive && progress ? progress.positions.get(folder)?.scrollTop ?? 0 : undefined}
         onScrollChange={sortActive ? (scrollTop) => updateProgress((current) => rememberScroll(current, folder, scrollTop)) : undefined}
@@ -779,11 +768,10 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
       {sort?.host && createPortal(<SortView root={root} photos={shownPhotos} selected={comparison.selected} usage={usage} leaving={movingPhotos}
         zoom={sort.zoom ?? 1} onZoomChange={sort.onZoomChange}
         onToggleSelected={(path) => setComparison((current) => toggleSelected(current, path))}
-        onContextMenu={openMenu("view")} onDragStart={startDrag} onDragEnd={endDrag} />, sort.host)}
+        onContextMenu={openMenu("comparison")} onDragStart={startDrag("comparison")} onDragEnd={endDrag} />, sort.host)}
       {menu && <ContextMenu label="Photo actions" x={menu.x} y={menu.y} items={menuItems(menu)} onClose={() => setMenu(null)} />}
-      {folderDialog && <SendToFolderDialog count={folderDialog.paths.length} folders={sendTargets} parent={folderDialog.parent}
-        siblings={siblingNames} alreadyIn={isAllIn(folderDialog.paths)}
-        onSend={(target, name) => sendFromDialog(folderDialog.paths, target, name)} onClose={() => setFolderDialog(null)} />}
+      {folderDialog && <SendToFolderDialog count={folderDialog.paths.length} parent={folderDialog.parent} siblings={siblingNames}
+        onSend={(parent, name) => sendToNewFolder(folderDialog.paths, parent, name)} onClose={() => setFolderDialog(null)} />}
       {naming?.kind === "create" && <FolderNameDialog label="New Folder" submitLabel="Create"
         description={`Creates a Folder inside ${folderName(naming.parent)}.`}
         problem={(name) => folderNameProblem(name, siblingNames(naming.parent))}

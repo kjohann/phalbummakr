@@ -27,12 +27,13 @@ export function withoutPhotos(comparison: Comparison, removed: readonly string[]
 }
 
 /**
- * Adds a Photo to the shown ones, selected, or removes it if it is shown.
- * A Photo shown on its own counts as selected, so it stays selected when another is added.
+ * Adds a Photo to the shown ones, unselected, or removes it if it is shown. Selected Photos stay
+ * selected, but a Photo shown on its own only counts as selected while it is alone.
  */
 export function toggleComparison(comparison: Comparison, photo: string): Comparison {
-  if (comparison.shown.includes(photo)) return withoutPhotos(comparison, [photo]);
-  return { shown: [...comparison.shown, photo], selected: [...selectedPhotos(comparison), photo] };
+  const { shown, selected } = comparison;
+  if (shown.includes(photo)) return withoutPhotos(comparison, [photo]);
+  return { shown: [...shown, photo], selected: shown.length > 1 ? selected : [] };
 }
 
 /** Selects or unselects a compared Photo. A Photo shown on its own is always selected. */
@@ -67,7 +68,20 @@ export function afterMove(comparison: Comparison, moved: readonly string[], grid
   return withoutPhotos(comparison, moved);
 }
 
-/** The Photos "Send to Folder" moves. */
+/** The Selected Photos, or a Photo shown on its own. */
 export function selectedPhotos({ shown, selected }: Comparison): string[] {
   return shown.length === 1 ? [...shown] : shown.filter((photo) => selected.includes(photo));
+}
+
+/** The pane a Photo is dragged or right-clicked in while Sorting. */
+export type PhotoPane = "grid" | "comparison";
+
+/**
+ * The Photos that sending `photo` to a Folder, or marking it, acts on. In the grid, a Photo in the
+ * Comparison takes the whole Comparison with it; in the Comparison, a Selected Photo takes every
+ * Selected Photo. Any other Photo goes on its own.
+ */
+export function photosActedOn(comparison: Comparison, photo: string, pane: PhotoPane): string[] {
+  const together = pane === "grid" ? [...comparison.shown] : selectedPhotos(comparison);
+  return together.includes(photo) ? together : [photo];
 }
