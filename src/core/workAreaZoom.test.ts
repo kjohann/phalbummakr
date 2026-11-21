@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { anchoredScroll, stepZoom, zoomBy, zoomLabel } from "./workAreaZoom";
+import { anchoredScroll, stepZoom, wheelZoomFactor, zoomBy, zoomLabel } from "./workAreaZoom";
 
 describe("work-area zoom", () => {
   it("steps through the preset levels and stops at 25% and 400%", () => {
@@ -24,6 +24,14 @@ describe("work-area zoom", () => {
   it("shows the zoom as a whole percentage", () => {
     expect(zoomLabel(1)).toBe("100%");
     expect(zoomLabel(1 / 3)).toBe("33%");
+  });
+
+  it("follows a touchpad pinch's fingers, but zooms a mouse wheel notch gently", () => {
+    // Chromium sends a pinch to twice the finger distance as deltas adding up to -100 × ln 2.
+    const steps = Array.from({ length: 10 }, () => -10 * Math.log(2));
+    expect(steps.reduce((zoom, pixels) => zoom * wheelZoomFactor(pixels), 1)).toBeCloseTo(2);
+    expect(wheelZoomFactor(-100)).toBeCloseTo(Math.exp(1 / 8));
+    expect(wheelZoomFactor(150)).toBeCloseTo(Math.exp(-150 / 800));
   });
 
   it("scrolls so the anchor point stays put, including when the grid was centred in a larger work area", () => {

@@ -453,6 +453,7 @@ describe("sending Photos to a Folder by dragging", () => {
     fireEvent.dragOver(folder, { dataTransfer: transfer });
     fireEvent.drop(folder, { dataTransfer: transfer });
     expect(onSendPhotos).toHaveBeenCalledWith(["trips/a.jpg"], "trips/kids");
+    expect(screen.getByLabelText("Photo grid").style.overflowY).toBe("");
     expect(folder.classList.contains("drop-target")).toBe(false);
     finish([{ from: "trips/a.jpg", to: "trips/kids/a (2).jpg" }]);
     expect(await screen.findByText('Moved "a.jpg" to kids as "a (2).jpg".')).toBeTruthy();
@@ -484,7 +485,7 @@ describe("sending Photos to a Folder by dragging", () => {
     expect(folder.classList.contains("drop-target")).toBe(false);
     expect(onSendPhotos).not.toHaveBeenCalled();
   });
-  it("scrolls the Folder area and the grid while a Photo is dragged near their top or bottom edge", async () => {
+  it("keeps the grid still during a Photo drag while the Folder area still scrolls at its edges", async () => {
     // jsdom has no DragEvent, so dragover would lose its pointer position.
     vi.stubGlobal("DragEvent", MouseEvent);
     vi.mocked(invoke).mockImplementation(async (command) => {
@@ -494,7 +495,6 @@ describe("sending Photos to a Folder by dragging", () => {
     render(<PhotoBrowser root="D:\\Photos" onSendPhotos={vi.fn(async () => [])} />);
     const tile = (await screen.findByText(photo(0).path)).closest("figure")!;
     const transfer = photoTransfer();
-    fireEvent.dragStart(tile, { dataTransfer: transfer });
     const placed = (element: HTMLElement, top: number, bottom: number) => {
       element.getBoundingClientRect = () => new DOMRect(0, top, 340, bottom - top);
       return element;
@@ -503,18 +503,27 @@ describe("sending Photos to a Folder by dragging", () => {
     const grid = placed(screen.getByLabelText("Photo grid"), 270, 870);
     const hover = (element: HTMLElement, clientY: number) => fireEvent.dragOver(element, { dataTransfer: transfer, clientY });
 
+    fireEvent.scroll(grid, { target: { scrollTop: 160 } });
+    expect(grid.style.overflowY).toBe("");
+    fireEvent.dragStart(tile, { dataTransfer: transfer });
+    expect(grid.style.overflowY).toBe("hidden");
     hover(area, 180);
-    hover(grid, 570);
-    expect([area.scrollTop, grid.scrollTop]).toEqual([0, 0]);
+    expect(area.scrollTop).toBe(0);
+    hover(tile, 868);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(grid.scrollTop).toBe(160);
+    hover(grid, 272);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(grid.scrollTop).toBe(160);
     hover(screen.getByRole("button", { name: "Open folder e" }), 258);
     expect(area.scrollTop).toBeGreaterThan(0);
-    hover(tile, 868);
-    expect(grid.scrollTop).toBeGreaterThan(0);
-    const scrolled = [area.scrollTop, grid.scrollTop];
+    const scrolled = area.scrollTop;
     hover(area, 102);
-    hover(grid, 272);
-    expect(area.scrollTop).toBeLessThan(scrolled[0]);
-    expect(grid.scrollTop).toBeLessThan(scrolled[1]);
+    await waitFor(() => expect(area.scrollTop).toBeLessThan(scrolled));
+    fireEvent.dragEnd(tile, { dataTransfer: transfer });
+    expect(grid.style.overflowY).toBe("");
+    fireEvent.scroll(grid, { target: { scrollTop: 320 } });
+    expect(grid.scrollTop).toBe(320);
   });
 });
 
@@ -528,6 +537,7 @@ it("forgets a grid drag whose tile disappeared before the drag ended, and only t
   const tile = (await screen.findByText(photo(0).path)).closest("figure")!;
   const folder = screen.getByRole("button", { name: "Open folder kids" });
   fireEvent.dragStart(tile, { dataTransfer: { effectAllowed: "none", setData: () => {} } });
+  expect(screen.getByLabelText("Photo grid").style.overflowY).toBe("hidden");
   expect(folder.classList.contains("drop-target")).toBe(true);
   const layoutDrag = { types: ["application/x-phalbummakr-layout"], getData: () => "layout-1", dropEffect: "none" };
   expect(fireEvent.dragOver(folder, { dataTransfer: layoutDrag })).toBe(true);
@@ -536,6 +546,7 @@ it("forgets a grid drag whose tile disappeared before the drag ended, and only t
   // Browsers send no mouse moves during a drag, so the first one means it ended.
   fireEvent.mouseMove(window);
   expect(folder.classList.contains("drop-target")).toBe(false);
+  expect(screen.getByLabelText("Photo grid").style.overflowY).toBe("");
 });
 
 describe("Sort mode", () => {
@@ -577,6 +588,26 @@ describe("Sort mode", () => {
     const lastWrite = () => writes.at(-1);
     return { host, work: within(host), tile, onComparisonChange, onSendPhotos, onCreateFolder, rerunCommand, leaveSort, lastWrite, view };
   }
+
+  it("keeps the grid still at both edges while dragging a Photo from the work area", async () => {
+    vi.stubGlobal("DragEvent", MouseEvent);
+    const { work, tile } = await browseSort({ photos: Array.from({ length: 40 }, (_, index) => photo(index)) });
+    fireEvent.click(tile(photo(0).path));
+    const source = (await work.findByRole("img", { name: photo(0).path })).closest("figure")!;
+    const grid = screen.getByLabelText("Photo grid");
+    grid.getBoundingClientRect = () => new DOMRect(0, 270, 340, 600);
+    fireEvent.scroll(grid, { target: { scrollTop: 160 } });
+    const transfer = photoTransfer();
+    fireEvent.dragStart(source, { dataTransfer: transfer });
+    expect(grid.style.overflowY).toBe("hidden");
+    for (const clientY of [272, 868]) {
+      fireEvent.dragOver(grid, { dataTransfer: transfer, clientY });
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      expect(grid.scrollTop).toBe(160);
+    }
+    fireEvent.dragEnd(source, { dataTransfer: transfer });
+    expect(grid.style.overflowY).toBe("");
+  });
 
   it("shows a clicked Photo large with its Usage badge, and steps through the grid with the arrow keys", async () => {
     const album = placePhoto(addPhotoSlot(createAlbum({ name: "Test", pageCount: 2 }), "page-1"), "page-1", "slot-1", photo(1));

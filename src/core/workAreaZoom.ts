@@ -25,6 +25,18 @@ export function zoomBy(zoom: number, factor: number): number {
   return clampZoom(zoom * factor);
 }
 
+// Chromium sends a touchpad pinch as Ctrl+wheel with deltaY = -100 × ln(pinch scale), in small steps,
+// while a mouse wheel notch is at least 100 px.
+const PINCH_MAX_PIXELS = 50;
+
+/**
+ * The zoom factor for a Ctrl+wheel of `pixels`. A touchpad pinch follows the fingers;
+ * a mouse wheel notch zooms about 13%.
+ */
+export function wheelZoomFactor(pixels: number): number {
+  return Math.exp(-pixels / (Math.abs(pixels) < PINCH_MAX_PIXELS ? 100 : 800));
+}
+
 export function zoomLabel(zoom: number) {
   return `${Math.round(zoom * 100)}%`;
 }

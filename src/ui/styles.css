@@ -29,6 +29,8 @@ body,
 
 body {
   overflow: hidden;
+  /* A touchscreen pinch never zooms the app itself, also over portaled menus and dialogs; Sort mode's work area handles its own. */
+  touch-action: pan-x pan-y;
 }
 
 .app-shell {
@@ -37,8 +39,6 @@ body {
   height: 100%;
   flex-direction: column;
   background: #e9ebe6;
-  /* A touchscreen pinch never zooms the app itself; Sort mode's work area handles its own. */
-  touch-action: pan-x pan-y;
 }
 
 .topbar {

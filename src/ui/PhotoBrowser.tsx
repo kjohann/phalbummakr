@@ -202,8 +202,8 @@ function FolderArea({ folders, compact, onOpenFolder, drop, onFolderContextMenu,
   );
 }
 
-function PhotoGrid({ root, photos, generation, usage, compact, onDragStart, onDragEnd, shown, reviewed, moving, initialScrollTop, onScrollChange,
-  onPhotoClick, onPhotoContextMenu, onSpaceContextMenu, edgeScroll }: {
+function PhotoGrid({ root, photos, generation, usage, compact, onDragStart, onDragEnd, dragging, shown, reviewed, moving, initialScrollTop, onScrollChange,
+  onPhotoClick, onPhotoContextMenu, onSpaceContextMenu }: {
   root: string;
   photos: Photo[];
   /** Counts scans, so a rescan retries failed thumbnails. */
@@ -212,6 +212,7 @@ function PhotoGrid({ root, photos, generation, usage, compact, onDragStart, onDr
   compact: boolean;
   onDragStart: PhotoDragStart;
   onDragEnd: () => void;
+  dragging: boolean;
   shown: readonly string[];
   /** Reviewed Photos to mark; empty outside Sort mode. */
   reviewed: ReadonlySet<string>;
@@ -224,7 +225,6 @@ function PhotoGrid({ root, photos, generation, usage, compact, onDragStart, onDr
   onPhotoClick?: PhotoClick;
   onPhotoContextMenu?: PhotoClick;
   onSpaceContextMenu: (event: ReactMouseEvent) => void;
-  edgeScroll: EdgeScroll;
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
@@ -275,9 +275,11 @@ function PhotoGrid({ root, photos, generation, usage, compact, onDragStart, onDr
 
   return (
     <div className={compact ? "photo-grid photo-grid-compact" : "photo-grid"} ref={viewportRef} aria-label="Photo grid" tabIndex={0}
+      // The browser also scrolls overflow areas at drag edges, even without our edge-scroll handler.
+      style={dragging ? { overflowY: "hidden" } : undefined}
       onScroll={(event) => scrolled(event.currentTarget.scrollTop)}
       // Tiles have menus of their own, or none; only empty space gets the grid's menu.
-      onContextMenu={spaceMenu(onSpaceContextMenu)} {...edgeScroll}>
+      onContextMenu={spaceMenu(onSpaceContextMenu)}>
       <div className="photo-grid-content" role="list" aria-label="Photos"
         style={{ height: rows * rowHeight }}>
         {visible.map((photo, offset) => {
@@ -759,12 +761,13 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
       )}
       {result && <PhotoGrid key={`${root}:${folder}:${unusedOnly}`} root={root} generation={result.generation}
         photos={photos} usage={usage} compact={compact}
-        onDragStart={startDrag("grid")} onDragEnd={endDrag} shown={sortActive ? comparison.shown : []} moving={movingPhotos}
+        onDragStart={startDrag("grid")} onDragEnd={endDrag} dragging={dragged !== null}
+        shown={sortActive ? comparison.shown : []} moving={movingPhotos}
         reviewed={sortActive && progress ? progress.reviewed : NO_PHOTOS}
         initialScrollTop={sortActive && progress ? progress.positions.get(folder)?.scrollTop ?? 0 : undefined}
         onScrollChange={sortActive ? (scrollTop) => updateProgress((current) => rememberScroll(current, folder, scrollTop)) : undefined}
         onPhotoClick={photoClick} onPhotoContextMenu={sortActive ? openMenu("grid") : undefined}
-        onSpaceContextMenu={spaceContextMenu} edgeScroll={edgeScroll} />}
+        onSpaceContextMenu={spaceContextMenu} />}
       {sort?.host && createPortal(<SortView root={root} photos={shownPhotos} selected={comparison.selected} usage={usage} leaving={movingPhotos}
         zoom={sort.zoom ?? 1} onZoomChange={sort.onZoomChange}
         onToggleSelected={(path) => setComparison((current) => toggleSelected(current, path))}

@@ -80,6 +80,8 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 035 | [Unlimited Comparison, Clear Comparison and work-area zoom](035-unlimited-comparison-and-zoom.md) | 028 | done   |
 | 036 | [Delete Folders](036-delete-folders.md)                        | 027        | todo   |
 | 037 | [Reviewed Photos and remembered position](037-reviewed-photos.md) | 028     | done   |
+| 038 | [Touchpad pinch does not zoom Sort mode in the app (bug)](038-touchpad-pinch-in-webview.md) | 035 | doing  |
+| 039 | [Stop Photo-grid edge scrolling during drags](039-stop-photo-grid-drag-scrolling.md) | 033 | done |
 
 Work order for the layout rework: 016, 017, 018, 019, 020, then 011.
 

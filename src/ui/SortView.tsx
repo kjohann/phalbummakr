@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from "react";
-import { anchoredScroll, comparisonGrid, MAX_ZOOM, MIN_ZOOM, stepZoom, zoomBy, zoomLabel, type Photo, type ZoomChange } from "../core";
+import { anchoredScroll, comparisonGrid, MAX_ZOOM, MIN_ZOOM, stepZoom, wheelZoomFactor, zoomBy, zoomLabel, type Photo, type ZoomChange } from "../core";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
 import { writePhotoDrag, type PhotoDragStart } from "./photoDrag";
 
@@ -78,8 +78,7 @@ function useViewZoom(view: HTMLElement | null, zoom: number, onZoomChange: ((cha
       event.preventDefault();
       const pixels = event.deltaY * (event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? 400 : 1);
       anchorAt(event.clientX, event.clientY);
-      // About 13% per 100-pixel wheel notch; touchpad pinches send many small deltas.
-      changeRef.current?.((current) => zoomBy(current, Math.exp(-pixels / 800)));
+      changeRef.current?.((current) => zoomBy(current, wheelZoomFactor(pixels)));
     };
     let pinch: { distance: number; zoom: number } | null = null;
     const fingers = (event: TouchEvent) => {
