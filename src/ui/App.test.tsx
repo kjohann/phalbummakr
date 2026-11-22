@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createAlbum, newLayout, serializeAlbum } from "../core";
+import { createAlbum, newLayout, serializeAlbum, type LayoutPorts } from "../core";
 import App, { type DocumentPorts } from "./App";
 import type { LayoutLibraryState } from "./useLayoutLibrary";
 
@@ -95,6 +95,7 @@ vi.mock("./AlbumWorkspace", () => ({
       {selected && active && toolsHost && createPortal(<button type="button">Mock Slot tool</button>, toolsHost)}
       {layouts?.paneHost && createPortal(<p>Album mode lists {layouts.state.library?.layouts.length ?? "no"} Layouts</p>, layouts.paneHost)}
       <button type="button" onClick={() => layouts?.state.change((library) => newLayout(library, 1.5).library)}>Save mock Layout</button>
+      {layouts?.state.saveStatus === "error" && <button type="button" onClick={layouts.state.retrySave}>Retry mock Layout save</button>}
       {!active && <p>Album workspace inactive</p>}
     </>;
   },
@@ -417,16 +418,16 @@ it("routes Layout commands to Layout mode, swapping Add Slot for the Slot tools 
   const middle = () => Array.from(screen.getByRole("toolbar", { name: "Commands" }).querySelector(".command-context")!.querySelectorAll("button"),
     (button) => button.textContent);
   await waitFor(() => expect(barButton("New Layout").disabled).toBe(false));
-  expect(middle()).toEqual(["Add Photo Slot", "Add Text Slot", "New Layout", "Duplicate Layout", "Delete Layout"]);
+  expect(middle()).toEqual(["Add Photo Slot", "Add Text Slot", "New Layout", "Make grid layout...", "Duplicate Layout", "Delete Layout"]);
   fireEvent.click(barButton("Add Photo Slot"));
   expect(screen.getByText("Layout command add-photo-slot 1")).toBeTruthy();
   expect(screen.queryByText(/^Command add-photo-slot/)).toBeNull();
-  for (const [label, name] of [["New Layout", "new-layout"], ["Duplicate Layout", "duplicate-layout"], ["Delete Layout", "delete-layout"]]) {
+  for (const [label, name] of [["New Layout", "new-layout"], ["Make grid layout...", "make-grid-layout"], ["Duplicate Layout", "duplicate-layout"], ["Delete Layout", "delete-layout"]]) {
     fireEvent.click(barButton(label));
     expect(screen.getByText(new RegExp(`^Layout command ${name} \\d+$`))).toBeTruthy();
   }
   fireEvent.click(screen.getByRole("button", { name: "Select mock Layout Slot" }));
-  expect(middle()).toEqual(["New Layout", "Duplicate Layout", "Delete Layout"]);
+  expect(middle()).toEqual(["New Layout", "Make grid layout...", "Duplicate Layout", "Delete Layout"]);
 
   await waitFor(() => expect(native.items.find((entry) => entry.text === "Close Album")?.enabled).toBe(true));
   fireEvent.click(screen.getByRole("button", { name: "Begin mock Layout edit" }));
@@ -446,15 +447,111 @@ it("offers a Photos | Layouts tab in Album mode's Side pane, sharing one Layout 
   fireEvent.click(tabs.getByRole("tab", { name: "Layouts" }));
   expect(tabs.getByRole("tab", { name: "Layouts" }).getAttribute("aria-selected")).toBe("true");
   expect(pane.getByText("Photo browser").closest("[hidden]")).not.toBeNull();
-  await waitFor(() => expect(pane.getByText("Album mode lists 11 Layouts").closest("[hidden]")).toBeNull());
+  await waitFor(() => expect(pane.getByText("Album mode lists 10 Layouts").closest("[hidden]")).toBeNull());
   fireEvent.keyDown(tabs.getByRole("tab", { name: "Layouts" }), { key: "ArrowLeft" });
   expect(tabs.getByRole("tab", { name: "Photos" }).getAttribute("aria-selected")).toBe("true");
 
   fireEvent.click(screen.getByRole("button", { name: "Save mock Layout" }));
   fireEvent.click(modeGroup().getByRole("button", { name: "Layouts" }));
-  expect(screen.getByText("Layout mode has 12 Layouts")).toBeTruthy();
+  expect(screen.getByText("Layout mode has 11 Layouts")).toBeTruthy();
   expect(pane.queryByRole("tablist", { name: "Side pane content" })).toBeNull();
   await waitFor(() => expect(layoutDisk.json).not.toBeNull());
+});
+
+it("allows closing an Album after an unedited automatic Layout migration fails", async () => {
+  native.enabled = true;
+  const ports = openAlbumPorts();
+  const layoutPorts = {
+    read: vi.fn(async () => JSON.stringify({ schemaVersion: 1, layouts: [] })),
+    write: vi.fn(async () => { throw new Error("Permission denied"); }),
+  };
+  render(<App ports={ports} layoutPorts={layoutPorts} />);
+  await screen.findByText("Original");
+  await waitFor(() => expect(native.items.find((entry) => entry.text === "Close Album")?.enabled).toBe(false));
+  await waitFor(() => expect(layoutPorts.write).toHaveBeenCalled(), { timeout: 2000 });
+  await waitFor(() => expect(native.items.find((entry) => entry.text === "Close Album")?.enabled).toBe(true));
+  await chooseMenu("Close Album");
+  expect(ports.close).toHaveBeenCalledOnce();
+  expect(await screen.findByText("No Album open")).toBeTruthy();
+});
+
+it("protects user Layout edits when the automatic migration save fails", async () => {
+  native.enabled = true;
+  const ports = openAlbumPorts();
+  let rejectWrite!: (cause: Error) => void;
+  let firstWrite = true;
+  const layoutPorts = {
+    read: vi.fn(async () => JSON.stringify({ schemaVersion: 1, layouts: [] })),
+    write: vi.fn<LayoutPorts["write"]>(() => {
+      if (!firstWrite) return Promise.resolve();
+      firstWrite = false;
+      return new Promise<void>((_resolve, reject) => { rejectWrite = reject; });
+    }),
+  };
+  render(<App ports={ports} layoutPorts={layoutPorts} />);
+  await screen.findByText("Album mode lists 6 Layouts");
+  fireEvent.click(screen.getByRole("button", { name: "Save mock Layout" }));
+  expect(screen.getByText("Album mode lists 7 Layouts")).toBeTruthy();
+  await waitFor(() => expect(layoutPorts.write).toHaveBeenCalled(), { timeout: 2000 });
+  await act(async () => rejectWrite(new Error("Permission denied")));
+  expect(native.items.find((entry) => entry.text === "Close Album")?.enabled).toBe(false);
+  await chooseMenu("Close Album");
+  expect(ports.close).not.toHaveBeenCalled();
+  expect(screen.getByRole("alert").textContent).toContain("retry its failed save");
+  fireEvent.click(screen.getByRole("button", { name: "Retry mock Layout save" }));
+  await waitFor(() => expect(layoutPorts.write).toHaveBeenCalledTimes(2), { timeout: 2000 });
+  expect(JSON.parse(layoutPorts.write.mock.calls[1][1]).layouts).toHaveLength(7);
+  await waitFor(() => expect(native.items.find((entry) => entry.text === "Close Album")?.enabled).toBe(true));
+  await chooseMenu("Close Album");
+  expect(ports.close).toHaveBeenCalledOnce();
+});
+
+it("keeps the existing Album visible if a Layout migration starts while choosing a new Album", async () => {
+  native.enabled = true;
+  let finishPicker!: (path: string) => void;
+  let finishRead!: (json: string) => void;
+  let rejectWrite!: (cause: Error) => void;
+  const ports = {
+    ...openAlbumPorts(),
+    chooseNew: vi.fn(() => new Promise<string>((resolve) => { finishPicker = resolve; })),
+  };
+  const layoutPorts = {
+    read: vi.fn(() => new Promise<string>((resolve) => { finishRead = resolve; })),
+    write: vi.fn(() => new Promise<void>((_resolve, reject) => { rejectWrite = reject; })),
+  };
+  render(<App ports={ports} layoutPorts={layoutPorts} />);
+  await screen.findByText("Original");
+  await waitFor(() => expect(native.items.find((entry) => entry.text === "New Album…")?.enabled).toBe(true));
+  await chooseMenu("New Album…");
+  await act(async () => finishRead(JSON.stringify({ schemaVersion: 1, layouts: [] })));
+  await waitFor(() => expect(layoutPorts.write).toHaveBeenCalled(), { timeout: 2000 });
+  await act(async () => finishPicker("D:\\Photos\\new.phalbum"));
+  expect(screen.queryByRole("dialog", { name: "Album settings" })).toBeNull();
+  expect(screen.getByText("Original")).toBeTruthy();
+  expect(screen.getByRole("alert").textContent).toContain("retry after saving");
+  await act(async () => rejectWrite(new Error("Permission denied")));
+});
+
+it("can cancel New Album settings when a Layout migration starts after they open", async () => {
+  native.enabled = true;
+  let finishRead!: (json: string) => void;
+  const ports = { ...openAlbumPorts(), chooseNew: vi.fn(async () => "D:\\Photos\\new.phalbum") };
+  const layoutPorts = {
+    read: vi.fn(() => new Promise<string>((resolve) => { finishRead = resolve; })),
+    write: vi.fn(async () => { throw new Error("Permission denied"); }),
+  };
+  render(<App ports={ports} layoutPorts={layoutPorts} />);
+  await screen.findByText("Original");
+  await waitFor(() => expect(native.items.find((entry) => entry.text === "New Album…")?.enabled).toBe(true));
+  await chooseMenu("New Album…");
+  const dialog = screen.getByRole("dialog", { name: "Album settings" });
+  await act(async () => finishRead(JSON.stringify({ schemaVersion: 1, layouts: [] })));
+  await waitFor(() => expect((within(dialog).getByRole("button", { name: "Create Album" }) as HTMLButtonElement).disabled).toBe(true));
+  const cancel = within(dialog).getByRole("button", { name: "Cancel" }) as HTMLButtonElement;
+  expect(cancel.disabled).toBe(false);
+  fireEvent.click(cancel);
+  expect(screen.getByText("Original")).toBeTruthy();
+  await waitFor(() => expect(layoutPorts.write).toHaveBeenCalled(), { timeout: 2000 });
 });
 
 it("routes Save as Layout from the command bar to Album mode once the Layout Library is loaded", async () => {

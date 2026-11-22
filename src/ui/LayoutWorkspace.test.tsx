@@ -44,6 +44,8 @@ afterEach(() => {
 });
 
 const format = createAlbum({ name: "Summer" }).pageFormat;
+const captionIndex = readLayoutLibrary(null, format).layouts.findIndex((layout) =>
+  layout.slots.length === 2 && layout.slots[0].type === "photo" && layout.slots[1].type === "text");
 
 function disk(json: string | null = null) {
   const store = { json };
@@ -65,7 +67,7 @@ function Harness({ ports, ...props }: Omit<ComponentProps<typeof LayoutWorkspace
     <section aria-label="Side pane" ref={setPaneHost} />
     <div role="toolbar" aria-label="Commands">
       <div ref={setToolsHost} />
-      {(["new-layout", "duplicate-layout", "delete-layout", "add-photo-slot", "add-text-slot", "undo", "redo"] as const).map((name) => (
+      {(["new-layout", "make-grid-layout", "duplicate-layout", "delete-layout", "add-photo-slot", "add-text-slot", "undo", "redo"] as const).map((name) => (
         <button key={name} type="button" onClick={() => send(name)}>Bar {name}</button>
       ))}
     </div>
@@ -83,16 +85,17 @@ it("lists the predefined Layouts in the pane and shows the first on the canvas, 
   render(<Harness ports={ports} />);
   const cards = await waitFor(() => {
     const found = library().getAllByRole("button");
-    expect(found).toHaveLength(11);
+    expect(found).toHaveLength(10);
     return found;
   });
   expect(cards[0].getAttribute("aria-label")).toBe("Layout 1: 1 Photo Slot");
-  expect(cards[9].getAttribute("aria-label")).toBe("Layout 10: 1 Photo Slot, 1 Text Slot");
+  expect(cards[captionIndex].getAttribute("aria-label")).toBe(`Layout ${captionIndex + 1}: 1 Photo Slot, 1 Text Slot`);
   expect(cards[0].getAttribute("aria-pressed")).toBe("true");
-  expect(cards[7].querySelectorAll("svg rect.layout-preview-photo")).toHaveLength(6);
+  expect(cards.slice(4).map((card) => card.querySelectorAll("svg rect.layout-preview-photo").length))
+    .toEqual([4, 5, 5, 4, 5, 6]);
   const canvas = within(screen.getByRole("group", { name: "Layout editor" }));
   expect(canvas.getAllByRole("button", { name: /^(Photo|Text) Slot \d+$/ })).toHaveLength(1);
-  fireEvent.click(cards[9]);
+  fireEvent.click(cards[captionIndex]);
   expect(canvas.getByRole("button", { name: "Text Slot 2" })).toBeTruthy();
   expect(canvas.getByText("Text")).toBeTruthy();
   expect(canvas.queryByText("Sample text")).toBeNull();
@@ -112,31 +115,111 @@ function saved(store: { json: string | null }) {
   return readLayoutLibrary(store.json, format);
 }
 
+it("persists a saved Library's mosaic migration and does not restore deleted additions on reopen", async () => {
+  const original = readLayoutLibrary(null, format).layouts[1];
+  const { ports, store } = disk(JSON.stringify({ schemaVersion: 1, layouts: [original] }));
+  const { unmount } = render(<Harness ports={ports} />);
+  await waitFor(() => expect(library().getAllByRole("button")).toHaveLength(7));
+  await waitFor(() => expect(JSON.parse(store.json!).schemaVersion).toBe(2), { timeout: 2000 });
+  expect(saved(store).layouts[0]).toEqual(original);
+
+  fireEvent.click(library().getAllByRole("button")[1]);
+  fireEvent.click(bar().getByRole("button", { name: "Bar delete-layout" }));
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Delete Layout?" })).getByRole("button", { name: "Delete Layout" }));
+  await waitFor(() => expect(JSON.parse(store.json!).layouts).toHaveLength(6), { timeout: 2000 });
+  const afterDeletion = store.json;
+  const writes = vi.mocked(ports.write).mock.calls.length;
+  unmount();
+
+  render(<Harness ports={ports} />);
+  await waitFor(() => expect(library().getAllByRole("button")).toHaveLength(6));
+  await act(() => new Promise((resolve) => setTimeout(resolve, 700)));
+  expect(store.json).toBe(afterDeletion);
+  expect(ports.write).toHaveBeenCalledTimes(writes);
+});
+
+it("reports and retries a failed mosaic migration without losing the saved Layouts", async () => {
+  const original = readLayoutLibrary(null, format).layouts[1];
+  const { ports, store } = disk(JSON.stringify({ schemaVersion: 1, layouts: [original] }));
+  vi.mocked(ports.write).mockRejectedValueOnce(new Error("Disk full"));
+  render(<Harness ports={ports} />);
+  expect((await screen.findByRole("alert")).textContent).toContain("Could not save the Layout Library: Error: Disk full");
+  expect(JSON.parse(store.json!)).toEqual({ schemaVersion: 1, layouts: [original] });
+  expect(library().getAllByRole("button")).toHaveLength(7);
+  fireEvent.click(screen.getByRole("button", { name: "Retry save" }));
+  await waitFor(() => expect(JSON.parse(store.json!).schemaVersion).toBe(2), { timeout: 2000 });
+  expect(saved(store).layouts[0]).toEqual(original);
+  expect(saved(store).layouts).toHaveLength(7);
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+it("creates and selects an editable grid Layout without changing the previous Layout", async () => {
+  const { ports, store } = disk();
+  render(<Harness ports={ports} />);
+  const before = await cards();
+  const original = before[0].getAttribute("aria-label");
+  const originalLayout = saved(store).layouts[0];
+  fireEvent.click(bar().getByRole("button", { name: "Bar make-grid-layout" }));
+  let dialog = within(screen.getByRole("dialog", { name: "Create grid layout" }));
+  fireEvent.click(within(dialog.getByRole("grid", { name: "Grid dimensions" })).getByRole("gridcell", { name: "2 columns x 3 rows" }));
+  expect(library().getAllByRole("button")).toHaveLength(10);
+  fireEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+  expect(library().getAllByRole("button")).toHaveLength(10);
+  expect(ports.write).not.toHaveBeenCalled();
+
+  fireEvent.click(bar().getByRole("button", { name: "Bar make-grid-layout" }));
+  dialog = within(screen.getByRole("dialog", { name: "Create grid layout" }));
+  fireEvent.change(dialog.getByLabelText("Columns"), { target: { value: "2" } });
+  fireEvent.change(dialog.getByLabelText("Rows"), { target: { value: "3" } });
+  fireEvent.click(dialog.getByRole("button", { name: "Create" }));
+  const created = library().getAllByRole("button")[10];
+  expect(created.getAttribute("aria-label")).toBe("Layout 11: 6 Photo Slots");
+  expect(created.getAttribute("aria-pressed")).toBe("true");
+  expect(library().getAllByRole("button")[0].getAttribute("aria-label")).toBe(original);
+  fireEvent.click(bar().getByRole("button", { name: "Bar add-photo-slot" }));
+  expect(created.getAttribute("aria-label")).toBe("Layout 11: 7 Photo Slots");
+  await waitFor(() => expect(saved(store).layouts[10].slots).toHaveLength(7));
+  expect(saved(store).layouts[0]).toEqual(originalLayout);
+});
+
+it("reports and retries a failed grid Layout save", async () => {
+  const { ports, store } = disk();
+  vi.mocked(ports.write).mockRejectedValueOnce(new Error("Disk full"));
+  render(<Harness ports={ports} />);
+  await cards();
+  fireEvent.click(bar().getByRole("button", { name: "Bar make-grid-layout" }));
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Create grid layout" })).getByRole("button", { name: "Create" }));
+  expect((await screen.findByRole("alert")).textContent).toContain("Could not save the Layout Library: Error: Disk full");
+  fireEvent.click(screen.getByRole("button", { name: "Retry save" }));
+  await waitFor(() => expect(saved(store).layouts[10].slots).toHaveLength(4));
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
 it("creates a new empty Layout, adds Slots to it and saves the Layout Library", async () => {
   const { ports, store } = disk();
   render(<Harness ports={ports} />);
   await cards();
   fireEvent.click(bar().getByRole("button", { name: "Bar new-layout" }));
-  const created = library().getAllByRole("button")[11];
-  expect(created.getAttribute("aria-label")).toBe("Layout 12: empty");
+  const created = library().getAllByRole("button")[10];
+  expect(created.getAttribute("aria-label")).toBe("Layout 11: empty");
   expect(created.getAttribute("aria-pressed")).toBe("true");
   fireEvent.click(bar().getByRole("button", { name: "Bar add-photo-slot" }));
   fireEvent.click(bar().getByRole("button", { name: "Bar add-text-slot" }));
-  expect(library().getAllByRole("button")[11].getAttribute("aria-label")).toBe("Layout 12: 1 Photo Slot, 1 Text Slot");
+  expect(library().getAllByRole("button")[10].getAttribute("aria-label")).toBe("Layout 11: 1 Photo Slot, 1 Text Slot");
   await waitFor(() => expect(ports.write).toHaveBeenCalled());
-  const layout = saved(store).layouts[11];
+  const layout = saved(store).layouts[10];
   expect(layout.aspectRatio).toBeCloseTo(297 / 210);
   expect(layout.slots).toMatchObject([{ type: "photo", placement: null }, { type: "text", text: "" }]);
-  expect(saved(store).layouts).toHaveLength(12);
+  expect(saved(store).layouts).toHaveLength(11);
 });
 
 it("Alt-drags a rotated Text Slot preserving its placeholder and formatting, with undo and redo", async () => {
   const initial = readLayoutLibrary(null, format);
-  initial.layouts[9].slots[1].width = 0.3;
-  initial.layouts[9].slots[1].y = 0.3;
+  initial.layouts[captionIndex].slots[1].width = 0.3;
+  initial.layouts[captionIndex].slots[1].y = 0.3;
   const { ports, store } = disk(serializeLayoutLibrary(initial));
   render(<Harness ports={ports} />);
-  fireEvent.click((await cards())[9]);
+  fireEvent.click((await cards())[captionIndex]);
   const canvas = within(screen.getByRole("group", { name: "Layout editor" }));
   const text = canvas.getByRole("button", { name: "Text Slot 2" });
   fireEvent.click(text);
@@ -146,8 +229,8 @@ it("Alt-drags a rotated Text Slot preserving its placeholder and formatting, wit
   fireEvent.keyDown(screen.getByRole("textbox", { name: "Edit the placeholder of Text Slot 2" }), { key: "Escape" });
   fireEvent.click(bar().getByRole("button", { name: "Bold" }));
   fireEvent.click(bar().getByRole("button", { name: "Rotate Slot clockwise" }));
-  await waitFor(() => expect(saved(store).layouts[9].slots[1].rotation).toBe(90));
-  const original = saved(store).layouts[9].slots[1];
+  await waitFor(() => expect(saved(store).layouts[captionIndex].slots[1].rotation).toBe(90));
+  const original = saved(store).layouts[captionIndex].slots[1];
   const left = text.style.left;
   fireEvent.mouseDown(text, { button: 0, clientX: 100, clientY: 100, altKey: true, ctrlKey: true });
   fireEvent.mouseMove(window, { clientX: 120, clientY: 140, ctrlKey: true });
@@ -155,8 +238,8 @@ it("Alt-drags a rotated Text Slot preserving its placeholder and formatting, wit
   expect(canvas.getAllByText("Caption")).toHaveLength(2);
   fireEvent.mouseUp(window, { clientX: 120, clientY: 140, ctrlKey: true });
   expect(canvas.getByRole("button", { name: "Text Slot 3" }).getAttribute("aria-pressed")).toBe("true");
-  await waitFor(() => expect(saved(store).layouts[9].slots).toHaveLength(3));
-  const duplicate = saved(store).layouts[9].slots[2];
+  await waitFor(() => expect(saved(store).layouts[captionIndex].slots).toHaveLength(3));
+  const duplicate = saved(store).layouts[captionIndex].slots[2];
   expect(duplicate).toEqual({ ...original, id: duplicate.id, x: original.x + 20 / 594, y: original.y + 40 / 420 });
   fireEvent.click(bar().getByRole("button", { name: "Bar undo" }));
   expect(canvas.queryByRole("button", { name: "Text Slot 3" })).toBeNull();
@@ -181,28 +264,31 @@ it("cancels an empty Photo Slot duplicate when Layout mode is hidden", async () 
 it("duplicates the selected Layout and deletes a Layout only after confirmation", async () => {
   const { ports, store } = disk();
   render(<Harness ports={ports} />);
-  fireEvent.click((await cards())[1]);
+  const before = await cards();
+  const duplicateDescription = before[1].getAttribute("aria-label")!.replace(/^Layout 2:/, "");
+  const nextLabel = before[2].getAttribute("aria-label");
+  fireEvent.click(before[1]);
   fireEvent.click(bar().getByRole("button", { name: "Bar duplicate-layout" }));
   let all = library().getAllByRole("button");
-  expect(all).toHaveLength(12);
-  expect(all[2].getAttribute("aria-label")).toBe("Layout 3: 2 Photo Slots");
+  expect(all).toHaveLength(11);
+  expect(all[2].getAttribute("aria-label")).toBe(`Layout 3:${duplicateDescription}`);
   expect(all[2].getAttribute("aria-pressed")).toBe("true");
-  await waitFor(() => expect(store.json && saved(store).layouts).toHaveLength(12));
+  await waitFor(() => expect(store.json && saved(store).layouts).toHaveLength(11));
   fireEvent.click(bar().getByRole("button", { name: "Bar delete-layout" }));
   fireEvent.click(within(screen.getByRole("dialog", { name: "Delete Layout?" })).getByRole("button", { name: "Cancel" }));
-  expect(library().getAllByRole("button")).toHaveLength(12);
+  expect(library().getAllByRole("button")).toHaveLength(11);
   fireEvent.click(bar().getByRole("button", { name: "Bar delete-layout" }));
   fireEvent.click(within(screen.getByRole("dialog", { name: "Delete Layout?" })).getByRole("button", { name: "Delete Layout" }));
   all = library().getAllByRole("button");
-  expect(all).toHaveLength(11);
-  expect(all[2].getAttribute("aria-label")).toBe("Layout 3: 3 Photo Slots");
+  expect(all).toHaveLength(10);
+  expect(all[2].getAttribute("aria-label")).toBe(nextLabel);
   expect(all[2].getAttribute("aria-pressed")).toBe("true");
-  await waitFor(() => expect(saved(store).layouts).toHaveLength(11));
+  await waitFor(() => expect(saved(store).layouts).toHaveLength(10));
   expect(saved(store).layouts.map((layout) => layout.id)).toEqual(readLayoutLibrary(null, format).layouts.map((layout) => layout.id));
 });
 
 it("does not bring deleted predefined Layouts back", async () => {
-  const { ports } = disk(serializeLayoutLibrary({ schemaVersion: 1, layouts: [] }));
+  const { ports } = disk(serializeLayoutLibrary({ schemaVersion: 2, layouts: [] }));
   render(<Harness ports={ports} />);
   expect(await pane().findByText("No Layouts yet. Use New Layout in the command bar.")).toBeTruthy();
   expect(pane().queryByRole("list", { name: "Layout Library" })).toBeNull();
@@ -225,7 +311,7 @@ it("moves a Slot with the mouse, as in Album mode", async () => {
 it("offers the Slot tools without content commands, and saves style, rotation and deletion", async () => {
   const { ports, store } = disk();
   render(<Harness ports={ports} />);
-  fireEvent.click((await cards())[9]);
+  fireEvent.click((await cards())[captionIndex]);
   fireEvent.click(screen.getByRole("button", { name: "Text Slot 2" }));
   const textTools = within(bar().getByRole("group", { name: "Text Slot tools" }));
   fireEvent.click(textTools.getByRole("button", { name: "Align right" }));
@@ -240,10 +326,10 @@ it("offers the Slot tools without content commands, and saves style, rotation an
   fireEvent.keyDown(document.body, { key: "ArrowLeft", ctrlKey: true });
   fireEvent.keyDown(document.body, { key: "ArrowRight", ctrlKey: true });
   await waitFor(() => expect(store.json).not.toBeNull());
-  await waitFor(() => expect(saved(store).layouts[9].slots[0].rotation).toBe(180));
-  expect(saved(store).layouts[9].slots[1]).toMatchObject({ type: "text", text: "", style: { align: "right", italic: true } });
+  await waitFor(() => expect(saved(store).layouts[captionIndex].slots[0].rotation).toBe(180));
+  expect(saved(store).layouts[captionIndex].slots[1]).toMatchObject({ type: "text", text: "", style: { align: "right", italic: true } });
   fireEvent.click(within(bar().getByRole("group", { name: "Photo Slot tools" })).getByRole("button", { name: "Delete Slot" }));
-  await waitFor(() => expect(saved(store).layouts[9].slots.map((slot) => slot.type)).toEqual(["text"]));
+  await waitFor(() => expect(saved(store).layouts[captionIndex].slots.map((slot) => slot.type)).toEqual(["text"]));
 });
 
 it("leaves the Delete key alone while another mode is shown", async () => {
@@ -262,7 +348,7 @@ it("leaves the Delete key alone while another mode is shown", async () => {
 it("edits a Text Slot's placeholder in Layout mode", async () => {
   const { ports, store } = disk();
   render(<Harness ports={ports} />);
-  fireEvent.click((await cards())[9]);
+  fireEvent.click((await cards())[captionIndex]);
   fireEvent.doubleClick(screen.getByRole("button", { name: "Text Slot 2" }));
   const editor = screen.getByRole("textbox", { name: "Edit the placeholder of Text Slot 2" });
   const slot = screen.getByRole("button", { name: "Text Slot 2" });
@@ -274,7 +360,7 @@ it("edits a Text Slot's placeholder in Layout mode", async () => {
   fireEvent.keyDown(editor, { key: "Escape" });
   expect(screen.queryByRole("textbox", { name: /placeholder/ })).toBeNull();
   expect(within(screen.getByRole("group", { name: "Layout editor" })).getByText("Where and when?")).toBeTruthy();
-  await waitFor(() => expect(store.json && saved(store).layouts[9].slots[1]).toMatchObject({ text: "", placeholder: "Where and when?" }));
+  await waitFor(() => expect(store.json && saved(store).layouts[captionIndex].slots[1]).toMatchObject({ text: "", placeholder: "Where and when?" }));
 });
 
 it("keeps a separate undo history for each Layout", async () => {
@@ -290,7 +376,7 @@ it("keeps a separate undo history for each Layout", async () => {
   };
   await cards();
   deleteSlot("Photo Slot 1");
-  fireEvent.click(library().getAllByRole("button")[9]);
+  fireEvent.click(library().getAllByRole("button")[captionIndex]);
   expect(onStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ canUndo: false, canRedo: false }));
   deleteSlot("Text Slot 2");
   expect(onStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ canUndo: true, canRedo: false }));

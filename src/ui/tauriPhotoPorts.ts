@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ContentIndexBatch, Photo, PhotoScan } from "../core";
+import { createRequestQueue } from "./requestQueue";
 
-const pending: (() => Promise<void>)[] = [];
-let running = 0;
+const queuedThumbnail = createRequestQueue(4);
 const previewRequests = new Map<string, { revision: string | null; pending: boolean; promise: Promise<string> }>();
 const MAX_CACHED_PREVIEWS = 8;
 
@@ -44,35 +44,6 @@ function previewRequest(root: string, path: string, revision?: string): Promise<
   return entry.promise;
 }
 
-function drain() {
-  while (running < 4 && pending.length > 0) {
-    const job = pending.shift()!;
-    running++;
-    void job().finally(() => {
-      running--;
-      drain();
-    });
-  }
-}
-
-function queuedThumbnail(root: string, path: string, signal: AbortSignal, revision?: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    pending.push(async () => {
-      if (signal.aborted) {
-        reject(new DOMException("Thumbnail request cancelled", "AbortError"));
-        return;
-      }
-      try {
-        const command = revision === undefined ? "photo_page_thumbnail" : "photo_thumbnail";
-        resolve(await invoke<string>(command, { root, path, ...(revision === undefined ? {} : { revision }) }));
-      } catch (error) {
-        reject(error);
-      }
-    });
-    drain();
-  });
-}
-
 export const tauriPhotoPorts = {
   index: (root: string, paths: string[]) => invoke<ContentIndexBatch>("index_photo_contents", { root, paths }),
   scan: (root: string) => invoke<PhotoScan>("scan_photos", { root }),
@@ -80,8 +51,9 @@ export const tauriPhotoPorts = {
   read: (root: string, paths: string[]) => invoke<Photo[]>("read_photos", { root, paths }),
   preview: (root: string, path: string) => previewRequest(root, path),
   prewarmPreview: (root: string, photo: Photo) => previewRequest(root, photo.path, photo.revision),
-  pageThumbnail: (root: string, path: string, signal: AbortSignal) => queuedThumbnail(root, path, signal),
+  pageThumbnail: (root: string, path: string, signal: AbortSignal) =>
+    queuedThumbnail(signal, () => invoke<string>("photo_page_thumbnail", { root, path })),
   thumbnail(root: string, photo: Photo, signal: AbortSignal): Promise<string> {
-    return queuedThumbnail(root, photo.path, signal, photo.revision);
+    return queuedThumbnail(signal, () => invoke<string>("photo_thumbnail", { root, path: photo.path, revision: photo.revision }));
   },
 };

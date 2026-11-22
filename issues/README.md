@@ -86,9 +86,9 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 041 | [Content-aware Photo Usage](041-content-aware-photo-usage.md) | 008 | done |
 | 042 | [Copy Photos to a Folder](042-copy-photos-to-folder.md) | 026, 028, 034, 037, 041 | done |
 | 043 | [Default Photo drag action](043-default-photo-drag-action.md) | 042 | done |
-| 044 | [Folder Photo counts](044-folder-photo-counts.md) | 033, 042 | todo |
-| 045 | [Quick grid layout tool](045-quick-grid-layout.md) | 010, 011, 029 | todo |
-| 046 | [Mosaic starter Layouts](046-mosaic-starter-layouts.md) | 045 | todo |
+| 044 | [Folder Photo counts](044-folder-photo-counts.md) | 033, 042 | done |
+| 045 | [Quick grid layout tool](045-quick-grid-layout.md) | 010, 011, 029 | done |
+| 046 | [Mosaic starter Layouts](046-mosaic-starter-layouts.md) | 045 | done |
 
 Work order for the layout rework: 016, 017, 018, 019, 020, then 011.
 
@@ -125,6 +125,7 @@ Folder counts (044) are independent of the Layout changes. Implement 045 before
 | [028 addendum - Right-click sends the chosen Photos](028-addendum.md) | 028 | done |
 | [034 addendum - Ctrl-click in the grid selects](034-addendum.md) | 034 | done |
 | [034 addendum - Separate the Comparison from the Selected Photos](034-addendum.md#section-2---separate-the-comparison-from-the-selected-photos) | 034 | done |
+| [045 addendum - Bound grid Page previews](045-addendum.md) | 045 | done |
 
 ## After the MVP
 

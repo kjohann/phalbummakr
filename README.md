@@ -19,6 +19,8 @@ subfolders, including empty folders; use the breadcrumbs to return to any ancest
 or the Library root. `Albums/` is browsed like any other folder. Each view shows only its immediate folders (alphabetically
 first) and Photos, with Photos sorted by capture date (oldest first, then relative
 path for ties). The Photo count is for the current folder, not its descendants.
+Each Folder tile also shows its total Photos, including descendants (or zero);
+that count is independent of Photo filters and Usage.
 Dates come from EXIF's original/digitized date, falling back to the file's modified
 time. EXIF wall-clock dates are treated as UTC so sorting and display do not change
 with the machine's timezone. Pixel sizes describe the original file; thumbnails
@@ -233,8 +235,17 @@ is available.
 
 A Layout is a reusable arrangement of Slots on one Page. The Library's Layout
 Library is stored in `.phalbummakr/layouts.json` and is shared by every Album in
-that folder. A new Library starts with predefined Layouts. The file is only
-written once something changes. Edit Layouts in **Layouts** mode.
+that folder. A new Library starts with ten editable Layouts: four established
+presets and six mosaics. It is not written until edited. Existing saved Layout
+Libraries keep their Layouts and gain the mosaics once; deleted additions stay
+deleted. If an automatic upgrade cannot be saved, retry it from the error
+message; you can still leave the Album if you have no unsaved Layout edits.
+Edit Layouts in **Layouts** mode.
+
+The starter Layouts use the default Safe Zone and 3 mm Bleed, with a 15 mm
+inset and 6 mm gaps in the mosaics. The actual Album guides still apply: if its
+Safe Zone is larger, Slots may lie outside it. A full-bleed starter may need
+adjustment to cover an Album with more than 3 mm Bleed.
 
 In Album mode, the **Layouts** tab of the Side pane lists the Layout Library.
 Drag a Layout onto a Page, or onto one of its Slots, to apply it to that Page.
@@ -248,6 +259,13 @@ Slot. Anything that does not fit is removed, and a notice says what was removed.
 A notice also warns when the Layout was made for Pages with a different aspect
 ratio. The Page and the Layout are unlinked from then on, so editing or
 deleting the Layout later never changes the Page.
+
+To make an equal grid, right-click a Page, one of its Slots or its strip
+thumbnail and choose **Apply grid layout...**, or use **Make grid layout...**
+in Layout mode to create an editable Layout.
+Choose 1 to 12 columns and rows, then explicitly apply or create it. Grid Slots
+use a 6 mm gap and the greater of 15 mm or the Album's Safe Zone as their
+inset. Applying a grid does not add it to the Layout Library.
 
 **Save as Layout** in the command bar adds the selected Page's Slots to the end
 of the Layout Library as a new Layout. It keeps their geometry, rotation and

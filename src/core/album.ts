@@ -10,6 +10,8 @@ export interface PageFormat {
   minEffectiveDpi: number;
 }
 
+export const DEFAULT_BLEED_MM = 3;
+export const DEFAULT_SAFE_ZONE_MM = 5;
 export const DEFAULT_MIN_EFFECTIVE_DPI = 150;
 
 export interface Page {
@@ -123,8 +125,8 @@ export function createAlbum(options: AlbumOptions): Album {
     pageFormat: {
       size: "A4",
       orientation: "landscape",
-      bleedMm: options.bleedMm ?? 3,
-      safeZoneMm: options.safeZoneMm ?? 5,
+      bleedMm: options.bleedMm ?? DEFAULT_BLEED_MM,
+      safeZoneMm: options.safeZoneMm ?? DEFAULT_SAFE_ZONE_MM,
       dpi: options.dpi ?? 300,
       minEffectiveDpi: options.minEffectiveDpi ?? DEFAULT_MIN_EFFECTIVE_DPI,
     },

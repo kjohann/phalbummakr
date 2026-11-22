@@ -2,11 +2,12 @@ import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent as R
 import { createPortal } from "react-dom";
 import { Group, Layer, Rect, Stage } from "react-konva";
 import {
-  addPhotoSlot, addTextSlot, deleteLayout, deleteSlot, duplicateLayout, madeForOtherAspectRatio, newLayout, pageAspectRatio, pageDimensions,
+  addPhotoSlot, addTextSlot, createGridLayout, deleteLayout, deleteSlot, duplicateLayout, madeForOtherAspectRatio, newLayout, pageAspectRatio, pageDimensions,
   canRedo, canUndo, emptyHistory, endGroup, recordChange, rotateSlot, setLayoutSlots, setSlotPlaceholder, setTextStyle, stepHistory,
   POINTS_PER_MM, TEXT_LINE_HEIGHT, type Album, type Layout, type PageFormat, type Slot, type HistoryDirection, type TextStyle, type UndoHistory,
 } from "../core";
 import LayoutLibraryPane from "./LayoutLibraryPane";
+import GridLayoutDialog from "./GridLayoutDialog";
 import ModalDialog from "./ModalDialog";
 import { historyShortcut } from "./historyShortcut";
 import { applySlotDrag, LayerPage, SnapGuides, TextContent, type SlotDrag } from "./pageCanvas";
@@ -17,7 +18,7 @@ import { fitTextSlots } from "./textLayout";
 import TextSlotTools from "./TextSlotTools";
 import type { LayoutLibraryState } from "./useLayoutLibrary";
 
-export type LayoutCommandName = "new-layout" | "duplicate-layout" | "delete-layout" | "add-photo-slot" | "add-text-slot" | "undo" | "redo";
+export type LayoutCommandName = "new-layout" | "make-grid-layout" | "duplicate-layout" | "delete-layout" | "add-photo-slot" | "add-text-slot" | "undo" | "redo";
 
 /** A command bar command for Layout mode; `serial` makes repeated commands distinct. */
 export interface LayoutCommand {
@@ -71,6 +72,7 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
   /** The Text Slot whose placeholder is being edited. */
   const [editingPlaceholder, setEditingPlaceholder] = useState<string | null>(null);
   const [layoutDeleteTarget, setLayoutDeleteTarget] = useState<string | null>(null);
+  const [gridDialogOpen, setGridDialogOpen] = useState(false);
   // Each Layout's own undo history, for the session.
   const histories = useRef(new Map<string, UndoHistory<Layout>>());
   const [, setHistoryVersion] = useState(0);
@@ -341,6 +343,8 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
     if (command.name === "new-layout") {
       const created = newLayout(current, pageAspectRatio(format));
       if (changeLibrary(() => created.library)) selectLayout(created.id);
+    } else if (command.name === "make-grid-layout") {
+      setGridDialogOpen(true);
     } else if (command.name === "duplicate-layout" && layout) {
       const copy = duplicateLayout(current, layout.id);
       if (changeLibrary(() => copy.library)) selectLayout(copy.id);
@@ -541,6 +545,14 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
           <button type="button" onClick={() => setLayoutDeleteTarget(null)}>Cancel</button>
         </div>
       </ModalDialog>}
+      {gridDialogOpen && <GridLayoutDialog format={format} action="Create" disabled={disabled}
+        onSubmit={(columns, rows) => {
+          const created = createGridLayout(format, columns, rows);
+          if (changeLibrary((current) => ({ ...current, layouts: [...current.layouts, created] }))) {
+            selectLayout(created.id);
+            setGridDialogOpen(false);
+          }
+        }} onClose={() => setGridDialogOpen(false)} />}
     </section>
   );
 }

@@ -557,7 +557,8 @@ body {
   object-fit: contain;
 }
 
-.photo-usage {
+.photo-usage,
+.folder-photo-count {
   position: absolute;
   top: 5px;
   right: 5px;
@@ -569,6 +570,23 @@ body {
   font-size: 11px;
   font-weight: 700;
   text-align: center;
+}
+
+.folder-area-compact .folder-photo-count {
+  top: 3px;
+  right: 3px;
+  min-width: 18px;
+  padding: 1px 3px;
+  font-size: 10px;
+}
+
+.folder-photo-count-description {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
 }
 
 /* Built off screen; the browser snapshots only the Photo, not the live badge. */
@@ -1288,6 +1306,50 @@ button.sort-photo--selected:hover {
 .dialog-backdrop .album-form {
   background: white;
   padding: 24px;
+}
+
+.grid-layout-form {
+  display: grid;
+  gap: 14px;
+}
+
+.grid-dimensions {
+  display: grid;
+  gap: 3px;
+  width: max-content;
+}
+
+.grid-dimensions-row {
+  display: flex;
+  gap: 3px;
+}
+
+.grid-dimension-cell {
+  width: 28px;
+  height: 28px;
+  border: 1px solid #9aa49c;
+  border-radius: 2px;
+  background: #f7f8f4;
+  cursor: pointer;
+}
+
+.grid-dimension-cell--preview {
+  border-color: #415d50;
+  background: #c9d8cd;
+}
+
+.grid-dimensions-label {
+  margin: 0;
+  font-weight: 700;
+}
+
+.grid-dimensions-inputs {
+  display: flex;
+  gap: 12px;
+}
+
+.grid-dimensions-inputs input {
+  width: 100px;
 }
 
 .strip-menu {

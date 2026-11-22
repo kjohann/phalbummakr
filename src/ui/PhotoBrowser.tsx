@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
 import {
   afterMove, canStepFolder, currentFolder, EMPTY_COMPARISON, folderNameProblem, folderRenameProblem,
-  contentPhotoUsage, historyAfterRename, historyAfterRescan, isProtectedFolder, photosUpTo, progressAfterCopy, progressAfterMove, progressAfterRename, progressAfterRescan, usageForPhoto,
+  contentPhotoUsage, historyAfterRename, historyAfterRescan, isProtectedFolder, parentFolder, photosUpTo, progressAfterCopy, progressAfterMove, progressAfterRename, progressAfterRescan, usageForPhoto,
   rememberScroll, renamedPath, scanAfterMove, setReviewed, showInProgress, showPhoto, START_FOLDER_HISTORY, stepFolder, stepPhoto,
   photosActedOn, toggleComparison, toggleSelected, visitFolder, withoutPhotos,
   type Album, type Comparison, type ContentIndexStats, type FolderHistory, type FolderRename, type Photo, type PhotoCopy, type PhotoIdentity, type PhotoMove, type PhotoPane, type PhotoScan, type PhotoUsageState, type ZoomChange,
@@ -91,11 +91,6 @@ const dateFormat = new Intl.DateTimeFormat(undefined, {
   year: "numeric", month: "short", day: "numeric", timeZone: "UTC",
 });
 
-function parentFolder(path: string) {
-  const separator = path.lastIndexOf("/");
-  return separator < 0 ? "" : path.slice(0, separator);
-}
-
 const NO_PHOTOS: ReadonlySet<string> = new Set();
 
 function PhotoThumbnail({ root, photo, generation, usage, compact, onDragStart, onDragEnd, shown, reviewed, moving, onClick, onContextMenu }: {
@@ -151,19 +146,24 @@ function PhotoThumbnail({ root, photo, generation, usage, compact, onDragStart, 
   );
 }
 
-function FolderTile({ path, compact, onOpen, onContextMenu, drop }: {
-  path: string; compact: boolean; onOpen: (path: string) => void; onContextMenu: PhotoClick; drop: FolderDrop;
+function FolderTile({ path, count, compact, onOpen, onContextMenu, drop }: {
+  path: string; count: number; compact: boolean; onOpen: (path: string) => void; onContextMenu: PhotoClick; drop: FolderDrop;
 }) {
   const name = path.split("/").pop();
   const target = drop(path);
+  const countId = useId();
+  const formattedCount = count.toLocaleString();
   return (
-    <button type="button" title={path} aria-label={`Open folder ${name}`} onClick={() => onOpen(path)}
+    <button type="button" title={path} aria-label={`Open folder ${name}`} aria-describedby={countId} onClick={() => onOpen(path)}
       onContextMenu={(event) => { event.preventDefault(); onContextMenu(path, event); }}
       {...target} className={withClass("folder-tile", target.className)}>
       <span className="photo-preview">
         <svg width="48" height="40" viewBox="0 0 48 40" fill="none" aria-hidden="true">
           <path d="M3 9V5h16l5 5h21v26H3V9Z" fill="currentColor" />
         </svg>
+        <span id={countId} className="folder-photo-count" title="Photos in this Folder and its subfolders">
+          {formattedCount}<span className="folder-photo-count-description"> Photos in this Folder and its subfolders</span>
+        </span>
         {compact && <span className="photo-name">{name}</span>}
       </span>
       {!compact && <span className="photo-name">{name}</span>}
@@ -181,8 +181,9 @@ function spaceMenu(onSpaceContextMenu: (event: ReactMouseEvent) => void) {
 }
 
 /** The current Folder's subfolders, pinned above the Photo grid: at most two rows, scrolling on their own. */
-function FolderArea({ folders, compact, onOpenFolder, drop, onFolderContextMenu, onSpaceContextMenu, edgeScroll }: {
+function FolderArea({ folders, counts, compact, onOpenFolder, drop, onFolderContextMenu, onSpaceContextMenu, edgeScroll }: {
   folders: string[];
+  counts: ReadonlyMap<string, number>;
   compact: boolean;
   onOpenFolder: (folder: string) => void;
   drop: FolderDrop;
@@ -197,7 +198,7 @@ function FolderArea({ folders, compact, onOpenFolder, drop, onFolderContextMenu,
       onContextMenu={spaceMenu(onSpaceContextMenu)} {...edgeScroll}>
       {folders.map((path) => (
         <div key={path} className="folder-cell" role="listitem">
-          <FolderTile path={path} compact={compact} onOpen={onOpenFolder} onContextMenu={onFolderContextMenu} drop={drop} />
+          <FolderTile path={path} count={counts.get(path) ?? 0} compact={compact} onOpen={onOpenFolder} onContextMenu={onFolderContextMenu} drop={drop} />
         </div>
       ))}
     </div>
@@ -451,6 +452,15 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
   const photos = result?.photos.filter((photo) => parentFolder(photo.path) === folder
     && (!unusedOnly || (usage.get(photo.path)?.status === "ready" && usage.get(photo.path)?.count === 0))) ?? [];
   const folders = result?.folders.filter((path) => parentFolder(path) === folder) ?? [];
+  const folderCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const photo of result?.photos ?? []) {
+      for (let parent = parentFolder(photo.path); parent; parent = parentFolder(parent)) {
+        counts.set(parent, (counts.get(parent) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }, [result?.photos]);
   const ancestors = folder ? folder.split("/").map((name, index, parts) => ({
     name, path: parts.slice(0, index + 1).join("/"),
   })) : [];
@@ -804,7 +814,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
             title="Only Photos not used in this Album" onChange={setUnusedOnly} />
         </div>
       )}
-      {folders.length > 0 && <FolderArea key={`${root}:${folder}`} folders={folders} compact={compact} onOpenFolder={openFolder} drop={drop}
+      {folders.length > 0 && <FolderArea key={`${root}:${folder}`} folders={folders} counts={folderCounts} compact={compact} onOpenFolder={openFolder} drop={drop}
         onFolderContextMenu={openFolderMenu("folder")} onSpaceContextMenu={spaceContextMenu} edgeScroll={edgeScroll} />}
       {notice && <p className="photo-empty" role="status">{notice}</p>}
       {moveMessage && (moveMessage.failed

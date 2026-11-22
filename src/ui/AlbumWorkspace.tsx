@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
-  canRedo, canUndo, createAlbum, deserializeAlbum, emptyHistory, endGroup, recordChange, relinkPlacements, serializeAlbum, stepHistory,
+  canRedo, canUndo, createAlbum, DEFAULT_BLEED_MM, DEFAULT_SAFE_ZONE_MM, deserializeAlbum, emptyHistory, endGroup, recordChange, relinkPlacements, serializeAlbum, stepHistory,
   type Album, type AlbumPorts, type ContentIndexStats, type HistoryDirection, type PhotoIdentity, type PhotoPreviewPorts, type PhotoSize, type PlacementRelink, type UndoHistory,
 } from "../core";
 import AlbumView from "./AlbumView";
@@ -384,8 +384,8 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
           <h2>New Album</h2>
           <label>Name<input name="name" required maxLength={100} autoFocus disabled={busy} /></label>
           <label>Page Format<select name="pageFormat" disabled={busy}><option>A4 - landscape (297 x 210 mm)</option></select></label>
-          <label>Bleed (mm)<input name="bleedMm" type="number" min="0" step="any" defaultValue="3" required disabled={busy} /></label>
-          <label>Safe Zone (mm)<input name="safeZoneMm" type="number" min="0" max="104.99" step="any" defaultValue="5" required disabled={busy} /></label>
+          <label>Bleed (mm)<input name="bleedMm" type="number" min="0" step="any" defaultValue={DEFAULT_BLEED_MM} required disabled={busy} /></label>
+          <label>Safe Zone (mm)<input name="safeZoneMm" type="number" min="0" max="104.99" step="any" defaultValue={DEFAULT_SAFE_ZONE_MM} required disabled={busy} /></label>
           <label>Export resolution (DPI)<input name="dpi" type="number" min="1" step="any" defaultValue="300" required disabled={busy} /></label>
           <label>Effective Resolution warning below (DPI)<input name="minEffectiveDpi" type="number" min="1" step="any" defaultValue="150" required disabled={busy} /></label>
           <label>Page count<input name="pageCount" type="number" min="2" max="10000" step="2" defaultValue="2" required disabled={busy} /></label>

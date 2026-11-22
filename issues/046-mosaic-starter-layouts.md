@@ -1,6 +1,6 @@
 # 046 - Mosaic starter Layouts
 
-Status: todo · Type: feature · Depends on: 045
+Status: done · Type: feature · Depends on: 045
 
 ## What
 
@@ -13,33 +13,42 @@ Follows [010](010-layouts.md), its [addendum](010-addendum.md), and
 
 ## Acceptance criteria
 
-- [ ] The starter set retains full bleed, one large Photo with two stacked,
+- [x] The starter set retains full bleed, one large Photo with two stacked,
   a Photo with a caption, and the title page.
-- [ ] Remove all seven equal-Slot arrangements from the starter set: two side
+- [x] Remove all seven equal-Slot arrangements from the starter set: two side
   by side, three landscape, three portrait, 2 by 2, 2 by 2 portrait,
   2 by 3 and 3 by 3.
-- [ ] Add the six compositions listed below, making ten starter Layouts in
-  total. New Photo Slots are non-overlapping and unrotated, with the existing
-  inset of the greater of 15 mm and the Safe Zone, and 6 mm gaps.
-- [ ] Mosaic Layouts mix larger and smaller rectangular Photo Slots. Landscape
+- [x] Add the six compositions listed below, making ten starter Layouts in
+  total. New Photo Slots are non-overlapping and unrotated, with a 15 mm inset
+  and 6 mm gaps.
+- [x] Starter Layouts use the default Safe Zone (5 mm) and Bleed (3 mm),
+  rather than adapting to unusually large values in the Album. If Slots extend
+  outside the actual Safe Zone, the existing Page guides and interaction
+  behavior apply. Quick grids continue to use the Album's actual Safe Zone.
+- [x] Mosaic Layouts mix larger and smaller rectangular Photo Slots. Landscape
   and portrait Slot shapes are allowed; overlap, Slot rotation and automatic
   collage generation are outside scope.
-- [ ] The compositions fit the open Album's Page Format and remain ordinary
+- [x] The compositions fit the open Album's Page Format and remain ordinary
   editable Layouts. They use existing card previews; descriptive labels below
   do not introduce stored Layout names.
-- [ ] Libraries without a saved Layout Library receive the new starter set,
+- [x] Libraries without a saved Layout Library receive the new starter set,
   following the existing rule of not writing seeded Layouts until needed.
-- [ ] Existing saved Layout Libraries retain every existing Layout, including
+- [x] Existing saved Layout Libraries retain every existing Layout, including
   old grids and edited presets, and receive the six mosaics once. Subsequent
   opens do not append duplicates; deliberately deleted additions do not return.
-- [ ] Later changes to Layouts never alter Album Pages that already copied
+- [x] A failed automatic migration reports the error and offers retry. If no
+  user edits are pending, it does not prevent leaving the Album; pending user
+  edits remain protected. A file picker returning during a save must not hide
+  the save or retry controls. If migration starts while New Album settings are
+  already open, the user can cancel those settings and return to the Album.
+- [x] Later changes to Layouts never alter Album Pages that already copied
   their Slots. No Album rewrite is needed for this update.
-- [ ] Verify the user's 2024 Album receives the refreshed starter set as
+- [x] Verify the user's 2024 Album receives the refreshed starter set as
   described below, without modifying Photos or existing Page designs.
-- [ ] Focused tests cover the ten starter compositions, geometry and Slot
+- [x] Focused tests cover the ten starter compositions, geometry and Slot
   counts, preserving saved Layouts, adding mosaics once, keeping deleted
   additions deleted and leaving existing Album Pages unchanged.
-- [ ] Inspect all six new previews and applied Pages visually.
+- [x] Inspect all six new previews and applied Pages visually.
 
 ## Six compositions
 
@@ -73,4 +82,58 @@ is needed; do not apply that exception to other Libraries, remove edited
 Layouts, or rewrite the Album unnecessarily.
 
 No personal Album or Layout Library data was modified during specification.
+
+## Implementation and verification
+
+The starter generator retains the four non-grid presets and adds the six
+mosaics as ordinary Layouts. Their geometry uses the default margins even
+when the Album has a larger Safe Zone or Bleed. Quick grids continue to use
+the actual Safe Zone.
+
+Saved schema-1 Layout Libraries are upgraded to schema 2 by appending the six
+mosaics and autosaving once through the existing atomic-write and retry path.
+Existing Layouts are preserved, including edited presets, grids and ID
+collisions; later schema-2 reads do not restore deletions. Missing Libraries
+remain in memory until edited. No Album file is written by the migration.
+
+An automatic migration failure leaves navigation available when there are no
+user edits, while edited Layouts remain protected until retry succeeds. The New
+Album picker checks for saves that start while it is open, and its settings
+can be cancelled if a migration starts later.
+
+Focused core and workspace tests cover the compositions and their geometry,
+the migration, failed-save retry and navigation, deleted additions, the
+default-margin edge case and unchanged Album Pages. The six previews and
+applied Pages were inspected in a temporary Chromium harness, including a
+larger actual Safe Zone. A read-only check of the specified 2024 Album
+confirmed its ten seeded Layouts, no saved Layout Library, and an unchanged
+Album hash; no Photos were accessed or changed.
+
+## Earlier considerations and inbox
+
+- The starter seeding note in [010](010-layouts.md) is superseded: saved
+  Libraries now migrate once, while missing Libraries still remain unwritten
+  until edited. Starter margins use defaults rather than the Album's Bleed.
+- The position-dependent caption tests noted in
+  [010's addendum](010-addendum.md) now find the caption by its Slot types;
+  composition-order tests intentionally verify the starter order.
+- [022](022-effective-resolution-warning.md)'s repeated print-settings
+  fields remain deferred. The default Bleed and Safe Zone values are now
+  shared by the Album creation forms and starter generator.
+- The possible need to flag Slots outside the Bleed from
+  [006](006-photo-slots.md) remains deferred; the default full-bleed starter
+  can require adjustment when an Album uses a larger Bleed.
+- [029](029-apply-layouts.md)'s native Layout-drag check remains deferred;
+  the visual check used the existing Apply menu in Chromium.
+- Dense-Page snapping profiling from [013](013-slot-snapping.md) remains
+  deferred; the grid and mosaic work does not change snapping.
+- Shared Slot gesture/editor refactoring, native WebView2 checks, bundle size,
+  export, caching and external-edit coordination remain outside this scope.
+- No inbox notes were resolved.
+
+## Future considerations (low priority)
+
+- The large-grid preview finding was resolved for Page canvases in
+  [045's review addendum](045-addendum.md), which records the remaining
+  broader performance considerations.
 

@@ -2,7 +2,7 @@
 import { useState, type ComponentProps, type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { addPhotoSlot, addTextSlot, createAlbum, deserializeAlbum, photoUsage, placePhoto, readLayoutLibrary, relinkPlacements, rotateSlot, serializeAlbum, serializeLayoutLibrary, setSlotPlaceholder, setSlotText, type Album, type AlbumPorts, type Layout, type LayoutPorts } from "../core";
+import { addPhotoSlot, addTextSlot, applyLayout, createAlbum, createGridLayout, deserializeAlbum, photoUsage, placePhoto, readLayoutLibrary, relinkPlacements, rotateSlot, serializeAlbum, serializeLayoutLibrary, setSlotPlaceholder, setSlotText, type Album, type AlbumPorts, type Layout, type LayoutPorts } from "../core";
 import Workspace, { type AlbumCommand, type AlbumCommandName, type PhotoMoveLink } from "./AlbumWorkspace";
 import PhotoBrowser from "./PhotoBrowser";
 import { PhotoSlotTools } from "./SlotTools";
@@ -1127,7 +1127,8 @@ it("selects a right-clicked Slot and offers its toolbar actions", async () => {
   fireEvent.contextMenu(text);
   expect(text.getAttribute("aria-pressed")).toBe("true");
   expect(screen.queryByRole("menuitemcheckbox", { name: "Fit" })).toBeNull();
-  expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Rotate left", "Rotate right", "Delete"]);
+  expect(screen.getAllByRole("menuitem").map((item) => item.textContent))
+    .toEqual(["Rotate left", "Rotate right", "Delete", "Apply grid layout..."]);
   fireEvent.contextMenu(photo);
   expect(photo.getAttribute("aria-pressed")).toBe("true");
   const fit = screen.getByRole("menuitemcheckbox", { name: "Fit" });
@@ -2206,7 +2207,7 @@ function WithLayouts({ layoutPorts, ...props }: ComponentProps<typeof Workspace>
 }
 
 function layoutDisk(layouts: Layout[]) {
-  const store = { json: serializeLayoutLibrary({ schemaVersion: 1, layouts }) as string | null };
+  const store = { json: serializeLayoutLibrary({ schemaVersion: 2, layouts }) as string | null };
   const ports: LayoutPorts = {
     read: vi.fn(async () => store.json),
     write: vi.fn(async (_root: string, json: string) => { store.json = json; }),
@@ -2233,6 +2234,22 @@ function albumWithContent() {
 }
 
 const layoutCards = () => within(within(screen.getByRole("region", { name: "Side pane" })).getByRole("list", { name: "Layout Library" }));
+
+it("migrates a Layout Library without rewriting the existing Album or its Pages", async () => {
+  const { ports, files } = disk();
+  const album = placePhoto(addPhotoSlot(createAlbum({ name: "Existing" }), "page-1"), "page-1", "slot-1",
+    { path: "a.jpg", width: 6000, height: 4000, orientation: 1 });
+  const original = serializeAlbum(album);
+  files.set("Existing", original);
+  const library = layoutDisk([onePhotoLayout]);
+  library.store.json = JSON.stringify({ schemaVersion: 1, layouts: [onePhotoLayout] });
+  render(<WithLayouts root="D:\\Photos" ports={ports} photoPorts={previews()} layoutPorts={library.ports}
+    document={{ path: "Existing", album }} />);
+  await waitFor(() => expect(library.ports.write).toHaveBeenCalled(), { timeout: 2000 });
+  expect(layoutCards().getAllByRole("button")).toHaveLength(7);
+  expect(files.get("Existing")).toBe(original);
+  expect(ports.write).not.toHaveBeenCalled();
+});
 
 it("applies a Layout from its menu in the Side pane to a Page of the current Spread, with notices", async () => {
   const { ports, files } = disk();
@@ -2270,6 +2287,298 @@ it("applies a Layout from its menu in the Side pane to a Page of the current Spr
 
 const canvasPage = (number: number) =>
   within(screen.getByRole("group", { name: "Spread editor" })).getByRole("button", { name: `Select Page ${number}` });
+
+it("previews grid dimensions for a real Page without applying them when cancelled", async () => {
+  const { ports } = disk();
+  const library = layoutDisk([onePhotoLayout]);
+  render(<WithLayouts root="D:\\Photos" ports={ports} photoPorts={previews()} layoutPorts={library.ports}
+    document={{ path: "Existing", album: albumWithContent() }} />);
+  await waitFor(() => expect(layoutCards().getAllByRole("button")).toHaveLength(1));
+  const editor = within(screen.getByRole("group", { name: "Spread editor" }));
+  fireEvent.contextMenu(editor.getByText("Inside cover"));
+  expect(screen.queryByRole("menu", { name: "Page actions" })).toBeNull();
+  fireEvent.contextMenu(canvasPage(1));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Apply grid layout..." }));
+  const dialog = within(screen.getByRole("dialog", { name: "Apply grid layout" }));
+  const grid = within(dialog.getByRole("grid", { name: "Grid dimensions" }));
+  const choice = grid.getByRole("gridcell", { name: "2 columns x 3 rows" });
+  fireEvent.mouseEnter(choice);
+  expect(dialog.getByText("2 columns x 3 rows")).toBeTruthy();
+  fireEvent.click(choice);
+  expect((dialog.getByLabelText("Columns") as HTMLInputElement).value).toBe("2");
+  expect((dialog.getByLabelText("Rows") as HTMLInputElement).value).toBe("3");
+  expect(editor.getAllByRole("button", { name: /^Page 1 (Photo|Text) Slot/ })).toHaveLength(3);
+  fireEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(editor.getAllByRole("button", { name: /^Page 1 (Photo|Text) Slot/ })).toHaveLength(3);
+  expect(layoutCards().getAllByRole("button")).toHaveLength(1);
+  expect(library.ports.write).not.toHaveBeenCalled();
+});
+
+it("applies a grid to only its Page, reports removed content, and supports undo and redo", async () => {
+  const { ports } = disk();
+  const library = layoutDisk([onePhotoLayout]);
+  const onAlbumChange = vi.fn();
+  const album = albumWithContent();
+  render(<WithLayouts root="D:\\Photos" ports={ports} photoPorts={previews()} layoutPorts={library.ports}
+    onAlbumChange={onAlbumChange} document={{ path: "Existing", album }} />);
+  await waitFor(() => expect(layoutCards().getAllByRole("button")).toHaveLength(1));
+  const current = () => onAlbumChange.mock.lastCall![0] as Album;
+  const original = structuredClone(current());
+  fireEvent.contextMenu(canvasPage(1));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Apply grid layout..." }));
+  const dialog = within(screen.getByRole("dialog", { name: "Apply grid layout" }));
+  fireEvent.change(dialog.getByLabelText("Columns"), { target: { value: "1" } });
+  fireEvent.change(dialog.getByLabelText("Rows"), { target: { value: "1" } });
+  fireEvent.click(dialog.getByRole("button", { name: "Apply" }));
+
+  expect(screen.getByText("1 Photo and 1 text did not fit the Layout on Page 1 and were removed.")).toBeTruthy();
+  const page = current().pages[0];
+  expect(page.slots).toHaveLength(1);
+  expect(page.slots[0]).toMatchObject({ type: "photo", placement: { photoPath: "a.jpg" } });
+  const crop = page.slots[0].placement!.crop;
+  expect((crop.width * 6000) / (crop.height * 4000)).toBeCloseTo(267 / 180);
+  expect(current().pages.slice(1)).toEqual(original.pages.slice(1));
+  expect(layoutCards().getAllByRole("button")).toHaveLength(1);
+  expect(library.ports.write).not.toHaveBeenCalled();
+
+  fireEvent.click(bar().getByRole("button", { name: "Bar undo" }));
+  expect(current().pages).toEqual(original.pages);
+  fireEvent.click(bar().getByRole("button", { name: "Bar redo" }));
+  expect(current().pages[0].slots).toEqual(page.slots);
+  fireEvent.click(bar().getByRole("button", { name: "Bar save-as-layout" }));
+  expect(layoutCards().getAllByRole("button")).toHaveLength(2);
+  expect(screen.getByText("Saved Page 1 as a new Layout.")).toBeTruthy();
+});
+
+it("targets the right-clicked Page in the strip, not its Spread sibling", async () => {
+  const { ports } = disk();
+  const onAlbumChange = vi.fn();
+  const album = albumWithContent();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()}
+    onAlbumChange={onAlbumChange} document={{ path: "Existing", album }} />);
+  const current = () => onAlbumChange.mock.lastCall![0] as Album;
+  const original = structuredClone(current());
+  fireEvent.contextMenu(within(screen.getByRole("navigation", { name: "Spreads" })).getByRole("button", { name: "Select Page 2" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Apply grid layout..." }));
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Apply grid layout" })).getByRole("button", { name: "Apply" }));
+  expect(current().pages[0]).toEqual(original.pages[0]);
+  expect(current().pages[1].slots).toHaveLength(4);
+  expect(current().pages[2]).toEqual(original.pages[2]);
+});
+
+it("offers the grid command from a full-bleed Slot and targets that Slot's Page", () => {
+  const { ports } = disk();
+  const onAlbumChange = vi.fn();
+  const empty = createAlbum({ name: "Existing", pageCount: 4 });
+  const album = applyLayout(empty, "page-2", readLayoutLibrary(null, empty.pageFormat).layouts[0]).album;
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()}
+    onAlbumChange={onAlbumChange} document={{ path: "Existing", album }} />);
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Spreads" })).getByRole("button", { name: "Select Page 2" }));
+  fireEvent.contextMenu(screen.getByRole("button", { name: "Page 2 Photo Slot 1" }));
+  fireEvent.click(within(screen.getByRole("menu", { name: "Slot actions" })).getByRole("menuitem", { name: "Apply grid layout..." }));
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Apply grid layout" })).getByRole("button", { name: "Apply" }));
+  const current = onAlbumChange.mock.lastCall![0] as Album;
+  expect(current.pages[1].slots).toHaveLength(4);
+  expect(current.pages[2]).toEqual(album.pages[2]);
+});
+
+it("applies the largest supported grid and keeps the existing Photo", () => {
+  const { ports } = disk();
+  const onAlbumChange = vi.fn();
+  const album = placePhoto(addPhotoSlot(createAlbum({ name: "Existing" }), "page-1"), "page-1", "slot-1",
+    { path: "a.jpg", width: 6000, height: 4000, orientation: 1 });
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()}
+    onAlbumChange={onAlbumChange} document={{ path: "Existing", album }} />);
+  fireEvent.contextMenu(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Apply grid layout..." }));
+  const dialog = within(screen.getByRole("dialog", { name: "Apply grid layout" }));
+  fireEvent.change(dialog.getByLabelText("Columns"), { target: { value: "12" } });
+  fireEvent.change(dialog.getByLabelText("Rows"), { target: { value: "12" } });
+  fireEvent.click(dialog.getByRole("button", { name: "Apply" }));
+  const current = onAlbumChange.mock.lastCall![0] as Album;
+  expect(current.pages[0].slots).toHaveLength(144);
+  expect(current.pages[0].slots[0]).toMatchObject({ placement: { photoPath: "a.jpg" } });
+  expect(screen.getByRole("button", { name: "Page 1 Photo Slot 144" })).toBeTruthy();
+});
+
+it("bounds preview requests across a populated Spread and skips the old Page after navigation", async () => {
+  const { ports } = disk();
+  const empty = createAlbum({ name: "Existing", pageCount: 4 });
+  let album = empty;
+  for (const page of [1, 2, 3]) {
+    const pageId = `page-${page}`;
+    album = applyLayout(album, pageId, createGridLayout(empty.pageFormat, 12, 12)).album;
+    for (const [index, slot] of album.pages[page - 1].slots.entries()) {
+      album = placePhoto(album, pageId, slot.id, { path: `${page}-${index}.jpg`, width: 6000, height: 4000, orientation: 1 });
+    }
+  }
+  const requests: { path: string; finish: (url: string) => void }[] = [];
+  const photoPorts = {
+    preview: vi.fn((_root: string, path: string) => new Promise<string>((finish) => requests.push({ path, finish }))),
+    pageThumbnail: vi.fn(async () => "thumbnail"),
+  };
+  const view = render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={photoPorts} document={{ path: "Existing", album }} />);
+  expect(photoPorts.preview).toHaveBeenCalledTimes(4);
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Spreads" })).getByRole("button", { name: "Select Page 2" }));
+  await act(async () => requests[0].finish("preview"));
+  await waitFor(() => expect(photoPorts.preview).toHaveBeenCalledTimes(5));
+  expect(requests[4].path).toMatch(/^[23]-/);
+  await act(async () => requests.slice(1, 4).forEach(({ finish }) => finish("preview")));
+  await waitFor(() => expect(photoPorts.preview).toHaveBeenCalledTimes(8));
+  expect(requests.slice(4).every(({ path }) => /^[23]-/.test(path))).toBe(true);
+  view.unmount();
+  await act(async () => requests.slice(4).forEach(({ finish }) => finish("preview")));
+});
+
+it("prioritizes a newly placed Photo while other grid previews wait", async () => {
+  const { ports } = disk();
+  const empty = createAlbum({ name: "Existing" });
+  let album = applyLayout(empty, "page-1", createGridLayout(empty.pageFormat, 6, 1)).album;
+  for (const [index, slot] of album.pages[0].slots.slice(0, 5).entries()) {
+    album = placePhoto(album, "page-1", slot.id, { path: `${index}.jpg`, width: 6000, height: 4000, orientation: 1 });
+  }
+  const requests: { path: string; finish: (url: string) => void }[] = [];
+  const photoPorts = {
+    preview: vi.fn((_root: string, path: string) => new Promise<string>((finish) => requests.push({ path, finish }))),
+    pageThumbnail: vi.fn(async () => "thumbnail"),
+  };
+  const view = render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={photoPorts} document={{ path: "Existing", album }} />);
+  expect(photoPorts.preview).toHaveBeenCalledTimes(4);
+  fireEvent.drop(screen.getByRole("button", { name: "Page 1 Photo Slot 6" }), photoDrop(
+    { path: "new.jpg", width: 6000, height: 4000, orientation: 1 }, "data:image/png;base64,dGh1bWJuYWls"));
+  await act(async () => requests[0].finish("preview"));
+  await waitFor(() => expect(photoPorts.preview).toHaveBeenCalledTimes(5));
+  expect(requests[4].path).toBe("new.jpg");
+  view.unmount();
+  await act(async () => requests.slice(1).forEach(({ finish }) => finish("preview")));
+});
+
+it("continues queued previews after a failure and prioritizes an explicit retry", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const { ports } = disk();
+  const empty = createAlbum({ name: "Existing" });
+  let album = applyLayout(empty, "page-1", createGridLayout(empty.pageFormat, 6, 1)).album;
+  for (const [index, slot] of album.pages[0].slots.entries()) {
+    album = placePhoto(album, "page-1", slot.id, { path: `${index}.jpg`, width: 6000, height: 4000, orientation: 1 });
+  }
+  const requests: { path: string; finish: (url: string) => void; fail: (error: Error) => void }[] = [];
+  const photoPorts = {
+    preview: vi.fn((_root: string, path: string) => new Promise<string>((finish, fail) => requests.push({ path, finish, fail }))),
+    pageThumbnail: vi.fn(async () => "thumbnail"),
+  };
+  const view = render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={photoPorts} document={{ path: "Existing", album }} />);
+  expect(photoPorts.preview).toHaveBeenCalledTimes(4);
+  await act(async () => requests[0].fail(new Error("Preview unavailable")));
+  expect(await screen.findByText("Couldn't load Photo")).toBeTruthy();
+  await waitFor(() => expect(photoPorts.preview).toHaveBeenCalledTimes(5));
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await act(async () => requests[1].finish("preview"));
+  await waitFor(() => expect(photoPorts.preview).toHaveBeenCalledTimes(6));
+  expect(requests[5].path).toBe("0.jpg");
+  view.unmount();
+  await act(async () => requests.slice(2).forEach(({ finish }) => finish("preview")));
+});
+
+it("pauses queued previews outside Album mode without reloading ready ones on return", async () => {
+  vi.stubGlobal("Image", class {
+    onload: (() => void) | null = null;
+    naturalWidth = 2048;
+    naturalHeight = 1365;
+    private url = "";
+    get src() { return this.url; }
+    set src(url: string) { this.url = url; queueMicrotask(() => this.onload?.()); }
+  });
+  const { ports } = disk();
+  const empty = createAlbum({ name: "Existing" });
+  let album = applyLayout(empty, "page-1", createGridLayout(empty.pageFormat, 6, 1)).album;
+  for (const [index, slot] of album.pages[0].slots.entries()) {
+    album = placePhoto(album, "page-1", slot.id, { path: `${index}.jpg`, width: 6000, height: 4000, orientation: 1 });
+  }
+  const requests: { path: string; finish: (url: string) => void }[] = [];
+  const photoPorts = {
+    preview: vi.fn((_root: string, path: string) => new Promise<string>((finish) => requests.push({ path, finish }))),
+    pageThumbnail: vi.fn(async () => "thumbnail"),
+  };
+  const document = { path: "Existing", album };
+  const view = render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={photoPorts} document={document} active />);
+  await act(async () => requests[0].finish("preview-0"));
+  await waitFor(() => expect(photoPorts.preview).toHaveBeenCalledTimes(5));
+  expect(screen.getAllByRole("img", { name: "Placement" }).some((image) => image.getAttribute("src") === "preview-0")).toBe(true);
+  view.rerender(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={photoPorts} document={document} active={false} />);
+  await act(async () => requests[1].finish("preview-1"));
+  expect(photoPorts.preview).toHaveBeenCalledTimes(5);
+  view.rerender(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={photoPorts} document={document} active />);
+  await waitFor(() => expect(photoPorts.preview).toHaveBeenCalledTimes(6));
+  expect(requests.filter(({ path }) => path === "0.jpg")).toHaveLength(1);
+  view.unmount();
+  await act(async () => requests.slice(2).forEach(({ finish }) => finish("preview")));
+});
+
+it("reloads a restored Photo after a replacement preview starts", async () => {
+  vi.stubGlobal("Image", class {
+    onload: (() => void) | null = null;
+    naturalWidth = 2048;
+    naturalHeight = 1365;
+    private url = "";
+    get src() { return this.url; }
+    set src(url: string) { this.url = url; queueMicrotask(() => this.onload?.()); }
+  });
+  const { ports } = disk();
+  const album = placePhoto(addPhotoSlot(createAlbum({ name: "Existing" }), "page-1"), "page-1", "slot-1",
+    { path: "a.jpg", width: 6000, height: 4000, orientation: 1 });
+  let finishReplacement!: (url: string) => void;
+  const photoPorts = {
+    preview: vi.fn((_root: string, path: string) => path === "b.jpg"
+      ? new Promise<string>((resolve) => { finishReplacement = resolve; })
+      : Promise.resolve("preview-a")),
+    pageThumbnail: vi.fn(async () => "thumbnail"),
+  };
+  const view = render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={photoPorts} document={{ path: "Existing", album }} />);
+  await waitFor(() => expect(screen.queryByRole("status", { name: "Loading Photo preview" })).toBeNull());
+  const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  fireEvent.drop(slot, photoDrop({ path: "b.jpg", width: 6000, height: 4000, orientation: 1 }));
+  await waitFor(() => expect(photoPorts.preview).toHaveBeenCalledTimes(2));
+  fireEvent.drop(slot, photoDrop({ path: "a.jpg", width: 6000, height: 4000, orientation: 1 }));
+  await waitFor(() => expect(photoPorts.preview).toHaveBeenCalledTimes(3));
+  await waitFor(() => expect(screen.queryByRole("status", { name: "Loading Photo preview" })).toBeNull());
+  view.unmount();
+  await act(async () => finishReplacement("preview-b"));
+});
+
+it("explains invalid and no-area grids and supports keyboard selection", () => {
+  const { ports } = disk();
+  const album = createAlbum({ name: "Existing", safeZoneMm: 104 });
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} document={{ path: "Existing", album }} />);
+  fireEvent.contextMenu(canvasPage(1));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Apply grid layout..." }));
+  const dialog = within(screen.getByRole("dialog", { name: "Apply grid layout" }));
+  const apply = dialog.getByRole("button", { name: "Apply" }) as HTMLButtonElement;
+  expect(dialog.getByRole("alert").textContent).toContain("no positive Slot width or height");
+  expect(apply.disabled).toBe(true);
+
+  const columns = dialog.getByLabelText("Columns") as HTMLInputElement;
+  const rows = dialog.getByLabelText("Rows") as HTMLInputElement;
+  fireEvent.change(rows, { target: { value: "1" } });
+  expect(apply.disabled).toBe(false);
+  fireEvent.change(columns, { target: { value: "13" } });
+  expect(dialog.getByRole("alert").textContent).toContain("whole numbers from 1 to 12");
+  expect(apply.disabled).toBe(true);
+  fireEvent.change(columns, { target: { value: "1.5" } });
+  expect(apply.disabled).toBe(true);
+  fireEvent.change(columns, { target: { value: "" } });
+  expect(apply.disabled).toBe(true);
+  fireEvent.change(columns, { target: { value: "1" } });
+  const grid = dialog.getByRole("grid", { name: "Grid dimensions" });
+  grid.focus();
+  fireEvent.keyDown(grid, { key: "ArrowRight" });
+  expect(columns.value).toBe("2");
+  expect(dialog.getByText("2 columns x 1 row")).toBeTruthy();
+  expect(apply.disabled).toBe(false);
+  fireEvent.keyDown(grid, { key: "Escape" });
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(album.pages[0].slots).toEqual([]);
+});
 
 function layoutTransfer() {
   const data = new Map<string, string>();

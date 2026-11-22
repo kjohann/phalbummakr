@@ -2,23 +2,26 @@ import { Fragment, useCallback, useEffect, useRef, useState, type DragEvent as R
 import { createPortal } from "react-dom";
 import { Layer, Rect, Stage } from "react-konva";
 import {
-  addPage, addPhotoSlot, addTextSlot, albumSpreads, applyLayout, contentPhotoUsage, deletePage, deleteSlot, duplicatePage, lowResolutionPlacements, movePage, pageDimensions,
+  addPage, addPhotoSlot, addTextSlot, albumSpreads, applyLayout, contentPhotoUsage, createGridLayout, deletePage, deleteSlot, duplicatePage, lowResolutionPlacements, movePage, pageDimensions,
   panCrop, placePhoto, placePhotoOnPage, placementDisplayCrop, photoUsage, rotateSlot, saveLayoutFromPage, setPlacementCrop,
   setPlacementFit, setSlotText, setTextStyle, swapPlacements, usageForPhoto, zoomCrop, POINTS_PER_MM, TEXT_LINE_HEIGHT,
-  type Album, type AppliedLayout, type HistoryDirection, type Crop, type Page, type PageFormat, type PhotoIdentity, type PhotoPreviewPorts, type PhotoSize, type Slot, type SlotAddress, type TextStyle,
+  type Album, type AppliedLayout, type HistoryDirection, type Crop, type Layout, type Page, type PageFormat, type PhotoIdentity, type PhotoPreviewPorts, type PhotoSize, type Slot, type SlotAddress, type TextStyle,
 } from "../core";
 import { hasLayoutDrag, hasPhotoDrag, readLayoutDrag, readPhotoDrag, writeLayoutDrag } from "./photoDrag";
 import { historyShortcut } from "./historyShortcut";
 import LayoutLibraryPane, { plural } from "./LayoutLibraryPane";
+import GridLayoutDialog from "./GridLayoutDialog";
 import { applySlotDrag, LayerPage, PhotoImage, SlotFrame, SnapGuides, TextContent, type SlotDrag } from "./pageCanvas";
 import type { FontPorts } from "./tauriFontPorts";
 import { fitTextSlots } from "./textLayout";
 import TextSlotTools from "./TextSlotTools";
 import { PhotoSlotTools, SlotActions } from "./SlotTools";
+import { createRequestQueue } from "./requestQueue";
 import { useSlotShortcuts } from "./slotShortcuts";
 import type { AlbumHistory, AlbumLayouts, CommandBarLink } from "./AlbumWorkspace";
 
 const PLACEMENT_DRAG_TYPE = "application/x-phalbummakr-placement";
+const queuedPreview = createRequestQueue(4);
 
 function hasPlacementDrag(dataTransfer: DataTransfer): boolean {
   return Array.from(dataTransfer.types ?? []).includes(PLACEMENT_DRAG_TYPE);
@@ -89,6 +92,7 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
   ) | null>(null);
   const [pageDropId, setPageDropId] = useState<string | null>(null);
   const [layoutMenu, setLayoutMenu] = useState<{ x: number; y: number; layoutId: string } | null>(null);
+  const [gridPageId, setGridPageId] = useState<string | null>(null);
   /** The Page a dragged Layout would be applied to. */
   const [layoutDropPageId, setLayoutDropPageId] = useState<string | null>(null);
   const handledCommand = useRef(command?.serial);
@@ -484,15 +488,19 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
     removeSlot(pageId, slotId);
   }
 
-  function applyLayoutTo(pageId: string, layoutId: string) {
-    const layout = layouts?.state.library?.layouts.find((item) => item.id === layoutId);
-    if (disabled || !layout) return;
+  function applyLayoutOnPage(pageId: string, layout: Layout) {
+    if (disabled) return;
     const result = applyLayout(savedAlbum, pageId, layout);
     changeAlbum((current) => applyLayout(current, pageId, layout).album);
     setSelectedId(pageId);
     setSelectedSlotId(null);
     setEditingText(null);
     onNotice?.(appliedLayoutNotice(result, pageNumbers.get(pageId)));
+  }
+
+  function applyLayoutTo(pageId: string, layoutId: string) {
+    const layout = layouts?.state.library?.layouts.find((item) => item.id === layoutId);
+    if (layout) applyLayoutOnPage(pageId, layout);
   }
 
   /** Lets a dragged Layout land anywhere on a Page, including on its Slots. Returns whether the drag was a Layout. */
@@ -611,6 +619,8 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
                         ) : slot.placement ? (
                           <PlacementImage {...localRect} crop={placementDisplayCrop(slot.placement)} fit={slot.placement.fit}
                             root={root} path={slot.placement.photoPath} photoPorts={photoPorts}
+                            active={active}
+                            priority={page.id === selectedId && slot.id === selectedSlotId}
                             inheritedPreview={duplicateSource?.path === slot.placement.photoPath ? duplicateSource : undefined}
                             thumbnail={thumbnailBySlot[slotId]} attempt={previewStates[slotId]?.path === slot.placement.photoPath
                               ? previewStates[slotId].attempt : 0}
@@ -1015,6 +1025,8 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
                 editPages((current) => duplicatePage(current, stripMenu.pageId!), copyIndex);
                 close();
               }}>Duplicate Page onto New Spread</button>
+            <button role="menuitem" type="button"
+              onClick={() => { setGridPageId(stripMenu.pageId); close(); }}>Apply grid layout...</button>
           </>}
         </div>;
       })()}
@@ -1024,6 +1036,8 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
           onClick={() => { addSlot("photo", canvasMenu.pageId, canvasMenu.centre); setCanvasMenu(null); }}>Add Photo Slot</button>
         <button role="menuitem" type="button"
           onClick={() => { addSlot("text", canvasMenu.pageId, canvasMenu.centre); setCanvasMenu(null); }}>Add Text Slot</button>
+        <button role="menuitem" type="button"
+          onClick={() => { setGridPageId(canvasMenu.pageId); setCanvasMenu(null); }}>Apply grid layout...</button>
       </div>}
       {canvasMenu?.kind === "slot" && (() => {
         const { pageId, slotId } = canvasMenu;
@@ -1040,6 +1054,8 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
           <button role="menuitem" type="button"
             onClick={() => { changeAlbum((current) => rotateSlot(current, pageId, slotId, 90)); close(); }}>Rotate right</button>
           <button role="menuitem" type="button" onClick={() => { deleteSlotAt(pageId, slotId); close(); }}>Delete</button>
+          <button role="menuitem" type="button"
+            onClick={() => { setGridPageId(pageId); close(); }}>Apply grid layout...</button>
         </div>;
       })()}
       {layouts?.paneHost && createPortal(
@@ -1065,6 +1081,11 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
             onClick={() => { applyLayoutTo(page.id, layoutMenu.layoutId); setLayoutMenu(null); }}>Apply to {side} Page</button>
         ))}
       </div>, document.body)}
+      {gridPageId && <GridLayoutDialog format={savedAlbum.pageFormat} action="Apply" disabled={disabled}
+        onSubmit={(columns, rows) => {
+          applyLayoutOnPage(gridPageId, createGridLayout(savedAlbum.pageFormat, columns, rows));
+          setGridPageId(null);
+        }} onClose={() => setGridPageId(null)} />}
     </section>
   );
 }
@@ -1116,11 +1137,12 @@ function ignoreOverflow() {}
 function ignorePreviewStatus() {}
 
 /** Draws a Placement from its cached preview; originals are only used by Page Export. */
-function PlacementImage({ x, y, width, height, crop, fit, root, path, photoPorts, thumbnailRequest, thumbnail, inheritedPreview, attempt, slotId, onStatus, onVisiblePreview }: {
+function PlacementImage({ x, y, width, height, crop, fit, root, path, photoPorts, thumbnailRequest, thumbnail, inheritedPreview, active = true, priority, attempt, slotId, onStatus, onVisiblePreview }: {
   x: number; y: number; width: number; height: number; crop: Crop; fit: boolean;
   root: string; path: string; photoPorts: Pick<PhotoPreviewPorts, "preview">;
   thumbnailRequest?: PhotoPreviewPorts["pageThumbnail"];
   thumbnail?: string; inheritedPreview?: { image: HTMLImageElement; ready: boolean }; attempt: number; slotId: string;
+  active?: boolean; priority?: boolean;
   onStatus: (slotId: string, path: string, status: "loading" | "ready" | "error") => void;
   onVisiblePreview?: (slotId: string, path: string, image: HTMLImageElement, ready: boolean) => void;
 }) {
@@ -1129,35 +1151,51 @@ function PlacementImage({ x, y, width, height, crop, fit, root, path, photoPorts
   if (inheritedPreview) inherited.current = { root, path, attempt, preview: inheritedPreview };
   const sharedPreview = inherited.current?.root === root && inherited.current.path === path && inherited.current.attempt === attempt
     ? inherited.current.preview : undefined;
+  // Selecting an existing Slot must not restart its preview.
+  const priorityRef = useRef(priority);
+  priorityRef.current = priority;
+  const completedRequest = useRef<readonly [
+    root: string, path: string, ports: Pick<PhotoPreviewPorts, "preview">,
+    thumbnailRequest: PhotoPreviewPorts["pageThumbnail"] | undefined, attempt: number, slotId: string,
+    onStatus: typeof onStatus, onVisiblePreview: typeof onVisiblePreview,
+  ] | null>(null);
   const [thumbnailImage, setThumbnailImage] = useState<{ url: string; image: HTMLImageElement } | null>(null);
   useEffect(() => {
-    let active = true;
+    if (!active) return;
+    const requestKey = [root, path, photoPorts, thumbnailRequest, attempt, slotId, onStatus, onVisiblePreview] as const;
+    if (completedRequest.current?.every((value, index) => value === requestKey[index])) return;
+    completedRequest.current = null;
+    let current = true;
     const controller = new AbortController();
     onStatus(slotId, path, "loading");
-    const request = thumbnailRequest ? thumbnailRequest(root, path, controller.signal) : photoPorts.preview(root, path);
+    const request = thumbnailRequest ? thumbnailRequest(root, path, controller.signal)
+      : queuedPreview(controller.signal, () => photoPorts.preview(root, path), priorityRef.current || attempt > 0);
     request.then((url) => {
       const image = new Image();
       image.onload = () => {
-        if (!active) return;
+        if (!current) return;
+        completedRequest.current = requestKey;
         setPreview({ path, attempt, image });
         onStatus(slotId, path, "ready");
         onVisiblePreview?.(slotId, path, image, true);
       };
       image.onerror = () => {
-        if (!active) return;
+        if (!current) return;
+        completedRequest.current = requestKey;
         setPreview({ path, attempt, image: null });
         onStatus(slotId, path, "error");
       };
       image.src = url;
     }).catch((cause: unknown) => {
-      if (active) {
+      if (current) {
         console.error(`Could not load the preview of ${path}`, cause);
+        completedRequest.current = requestKey;
         setPreview({ path, attempt, image: null });
         onStatus(slotId, path, "error");
       }
     });
-    return () => { active = false; controller.abort(); };
-  }, [root, path, photoPorts, thumbnailRequest, attempt, slotId, onStatus, onVisiblePreview]);
+    return () => { current = false; controller.abort(); };
+  }, [active, root, path, photoPorts, thumbnailRequest, attempt, slotId, onStatus, onVisiblePreview]);
 
   useEffect(() => {
     if (!thumbnail) {

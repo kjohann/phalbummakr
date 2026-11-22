@@ -398,6 +398,100 @@ it("shows compact tiles without file names but keeps Usage badges and folder nam
   expect(screen.getByRole("list", { name: "Folders" }).style.maxHeight).toBe("192px");
 });
 
+it.each([
+  ["album", false], ["album", true], ["sort", false], ["sort", true],
+] as const)("shows Folder Photo counts in %s mode (compact: %s)", async (mode, compact) => {
+  const first = { ...photo(0), path: "holiday/a.jpg" };
+  const identical = { ...photo(1), path: "holiday/beach/copy.jpg" };
+  const extra = { ...photo(2), path: "holiday-extra/b.jpg" };
+  vi.mocked(tauriPhotoPorts.index).mockImplementation(async (_root, paths) => ({
+    identities: paths.map((path) => ({ path, status: "ready", hash: path === extra.path ? "extra" : "identical" })),
+    hashedFiles: 0, hashedBytes: 0, cacheHits: paths.length, elapsedMs: 0,
+  }));
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "scan_photos") return {
+      photos: [first, identical, extra], folders: ["empty", "holiday", "holiday/beach", "holiday-extra"],
+      warnings: ["bad.png: invalid PNG"],
+    };
+    if (command === "read_sort_progress") return JSON.stringify({ reviewed: [first.path], folders: {} });
+    if (command === "write_sort_progress") return undefined;
+    return "data:image/png;base64,dGVzdA==";
+  });
+  const album = placePhoto(addPhotoSlot(createAlbum({ name: "Test" }), "page-1"), "page-1", "slot-1", first);
+  const sort = mode === "sort" ? { host: null, active: true, onComparisonChange: vi.fn() } : undefined;
+  render(<PhotoBrowser root="D:\\Photos" album={album} mode={mode} compact={compact} sort={sort} />);
+
+  const count = (name: string, value: number) => {
+    const tile = screen.getByRole("button", {
+      name: `Open folder ${name}`, description: `${value} Photos in this Folder and its subfolders`,
+    });
+    const badge = within(tile).getByTitle("Photos in this Folder and its subfolders");
+    expect(badge.firstChild?.textContent).toBe(String(value));
+  };
+  await screen.findByRole("button", { name: "Open folder holiday" });
+  count("empty", 0);
+  count("holiday", 2);
+  count("holiday-extra", 1);
+  expect(screen.getByText("bad.png: invalid PNG")).toBeTruthy();
+  await waitFor(() => expect(screen.queryByText("Checking Photo Usage...", { exact: false })).toBeNull());
+  fireEvent.click(screen.getByRole("switch", { name: "All" }));
+  count("holiday", 2);
+  fireEvent.click(screen.getByRole("button", { name: "Open folder holiday" }));
+  count("beach", 1);
+  expect(screen.queryByText("a.jpg")).toBeNull();
+  expect(within(screen.getByRole("navigation", { name: "Photo folders" }))
+    .queryByTitle("Photos in this Folder and its subfolders")).toBeNull();
+});
+
+it("updates affected Folder counts after moves, copies and a Rescan", async () => {
+  const first = { ...photo(0), path: "source/a.jpg" };
+  const nested = { ...photo(1), path: "source/nested/b.jpg" };
+  const existing = { ...photo(2), path: "target/deep/c.jpg" };
+  const moved = { ...first, path: "target/a.jpg" };
+  const added = { ...photo(3), path: "target/deep/outside.jpg" };
+  let scans = 0;
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "scan_photos") return {
+      photos: ++scans === 1 ? [first, nested, existing] : [moved, existing, added],
+      folders: ["source", "source/nested", "target", "target/deep"], warnings: ["bad.png: invalid PNG"],
+    };
+    if (command === "read_photos") return (args as { paths: string[] }).paths.map((path) => ({ ...first, path }));
+    return "data:image/png;base64,dGVzdA==";
+  });
+  const onSendPhotos = vi.fn(async () => [{ from: first.path, to: moved.path }]);
+  const onCopyPhotos = vi.fn(async () => [{ from: moved.path, to: first.path }]);
+  render(<PhotoBrowser root="D:\\Photos" onSendPhotos={onSendPhotos} onCopyPhotos={onCopyPhotos} />);
+  const folder = (name: string, count: number) => screen.getByRole("button", {
+    name: `Open folder ${name}`, description: `${count} Photos in this Folder and its subfolders`,
+  });
+  const library = () => within(screen.getByRole("navigation", { name: "Photo folders" })).getByRole("button", { name: "Library" });
+
+  await screen.findByRole("button", { name: "Open folder source" });
+  fireEvent.click(folder("source", 2));
+  fireEvent.contextMenu((await screen.findByText("a.jpg")).closest("figure")!);
+  fireEvent.click(screen.getByRole("menuitem", { name: "Move to Folder..." }));
+  fireEvent.click(within(screen.getByRole("menu", { name: "Move to Folder..." })).getByRole("menuitem", { name: "target" }));
+  await screen.findByText('Moved "a.jpg" to target.');
+  fireEvent.click(library());
+  folder("source", 1);
+  fireEvent.click(folder("target", 2));
+  fireEvent.contextMenu((await screen.findByText("a.jpg")).closest("figure")!);
+  fireEvent.click(screen.getByRole("menuitem", { name: "Copy to Folder..." }));
+  fireEvent.click(within(screen.getByRole("menu", { name: "Copy to Folder..." })).getByRole("menuitem", { name: "source" }));
+  await screen.findByText('Copied "a.jpg" to source.');
+  fireEvent.click(library());
+  folder("source", 2);
+  folder("target", 2);
+  expect(scans).toBe(1);
+
+  fireEvent.click(screen.getByRole("button", { name: "Rescan" }));
+  await waitFor(() => folder("source", 0));
+  folder("target", 3);
+  expect(screen.getByText("bad.png: invalid PNG")).toBeTruthy();
+  expect(onSendPhotos).toHaveBeenCalledWith([first.path], "target");
+  expect(onCopyPhotos).toHaveBeenCalledWith([moved.path], "source");
+});
+
 it("browses immediate folders and Photos, including empty folders, with breadcrumbs back to the Library", async () => {
   const photos = [
     { ...photo(0), path: "root.jpg" },
@@ -447,7 +541,7 @@ it("shows the current Folder's subfolders in a Folder area apart from the Photo 
   });
   render(<PhotoBrowser root="D:\\Photos" />);
   const folders = within(await screen.findByRole("list", { name: "Folders" }));
-  expect(folders.getAllByRole("listitem").map((item) => item.textContent)).toEqual(["pets", "trips"]);
+  expect(folders.getAllByRole("button").map((item) => item.getAttribute("aria-label"))).toEqual(["Open folder pets", "Open folder trips"]);
   const grid = within(await screen.findByRole("list", { name: "Photos" }));
   await grid.findByText(photo(0).path);
   expect(grid.getAllByRole("listitem")).toHaveLength(1);

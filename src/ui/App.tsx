@@ -5,7 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
-import { createAlbum, copyPhotosToFolder, deserializeAlbum, clampZoom, renameFolder, sendPhotosToFolder, serializeAlbum, stepZoom, type Album, type ContentIndexStats, type ZoomChange, type HistoryDirection, type LayoutPorts, type Photo, type PhotoIdentity, type PhotoSize, type PlacementRelink } from "../core";
+import { createAlbum, copyPhotosToFolder, DEFAULT_BLEED_MM, DEFAULT_SAFE_ZONE_MM, deserializeAlbum, clampZoom, renameFolder, sendPhotosToFolder, serializeAlbum, stepZoom, type Album, type ContentIndexStats, type ZoomChange, type HistoryDirection, type LayoutPorts, type Photo, type PhotoIdentity, type PhotoSize, type PlacementRelink } from "../core";
 import AlbumWorkspace, { type AlbumCommand, type AlbumCommandName, type CommandBarLink, type HistoryState, type PhotoMoveRunner } from "./AlbumWorkspace";
 import CommandBar, { type BarCommand } from "./CommandBar";
 import LayoutWorkspace, { type LayoutBarLink, type LayoutBarState, type LayoutCommand, type LayoutCommandName } from "./LayoutWorkspace";
@@ -381,7 +381,10 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
     },
     newAlbum: () => void run(async () => {
       const path = await ports.chooseNew();
-      if (path) setDraft(path);
+      if (path) {
+        if (busyRef.current) throw new Error("The current Album has unsaved changes; retry after saving.");
+        setDraft(path);
+      }
     }, "Could not create Album"),
     openAlbum: () => void run(async () => {
       const path = await ports.chooseOpen();
@@ -606,6 +609,7 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
       layoutBarCommand("add-text-slot", "Add Text Slot", { disabled: !layoutState.layoutSelected }),
     ]),
     layoutBarCommand("new-layout", "New Layout", { overflow: 1 }),
+    layoutBarCommand("make-grid-layout", "Make grid layout...", { overflow: 1 }),
     layoutBarCommand("duplicate-layout", "Duplicate Layout", { disabled: !layoutState.layoutSelected, overflow: 3 }),
     layoutBarCommand("delete-layout", "Delete Layout", { disabled: !layoutState.layoutSelected, overflow: 2 }),
   ];
@@ -645,14 +649,14 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
           <h1>Album settings</h1>
           <label>Title<textarea name="title" defaultValue="New Album" autoFocus disabled={busy} rows={2} /></label>
           <label>Page Format<select name="pageFormat" disabled={busy}><option>A4 - landscape (297 x 210 mm)</option></select></label>
-          <label>Bleed (mm)<input name="bleedMm" type="number" min="0" step="any" defaultValue="3" required disabled={busy} /></label>
-          <label>Safe Zone (mm)<input name="safeZoneMm" type="number" min="0" max="104.99" step="any" defaultValue="5" required disabled={busy} /></label>
+          <label>Bleed (mm)<input name="bleedMm" type="number" min="0" step="any" defaultValue={DEFAULT_BLEED_MM} required disabled={busy} /></label>
+          <label>Safe Zone (mm)<input name="safeZoneMm" type="number" min="0" max="104.99" step="any" defaultValue={DEFAULT_SAFE_ZONE_MM} required disabled={busy} /></label>
           <label>Export resolution (DPI)<input name="dpi" type="number" min="1" step="any" defaultValue="300" required disabled={busy} /></label>
           <label>Effective Resolution warning below (DPI)<input name="minEffectiveDpi" type="number" min="1" step="any" defaultValue="150" required disabled={busy} /></label>
           <label>Page count<input name="pageCount" type="number" min="2" max="10000" step="2" defaultValue="2" required disabled={busy} /></label>
           <div className="album-toolbar">
             <button type="submit" className="button-primary" disabled={busy}>Create Album</button>
-            <button type="button" className="button-quiet" disabled={busy} onClick={() => setDraft(null)}>Cancel</button>
+            <button type="button" className="button-quiet" disabled={transitioning} onClick={() => setDraft(null)}>Cancel</button>
           </div>
         </form>
       ) : !document && !restoring && (

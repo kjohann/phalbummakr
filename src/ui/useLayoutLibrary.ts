@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { readLayoutLibrary, serializeLayoutLibrary, type LayoutLibrary, type LayoutPorts, type PageFormat } from "../core";
+import { loadLayoutLibrary, serializeLayoutLibrary, type LayoutLibrary, type LayoutPorts, type PageFormat } from "../core";
 import { tauriLayoutPorts } from "./tauriLayoutPorts";
 
 /** The Library's Layout Library, shared by Album mode and Layout mode so both always see the same Layouts. */
@@ -33,6 +33,7 @@ export function useLayoutLibrary({ root, format, ports = tauriLayoutPorts, onBus
   const [retry, setRetry] = useState(0);
   const savedJson = useRef<string | null>(null);
   const saveInFlight = useRef(false);
+  const hasUserChanges = useRef(false);
   const formatRef = useRef(format);
   formatRef.current = format;
 
@@ -46,9 +47,10 @@ export function useLayoutLibrary({ root, format, ports = tauriLayoutPorts, onBus
     setLoadError(null);
     ports.read(root).then((json) => {
       if (!current) return;
-      const loaded = readLayoutLibrary(json ?? null, formatRef.current);
+      const { library: loaded, migrated } = loadLayoutLibrary(json ?? null, formatRef.current);
       // A seeded Library is only written once it is edited, so `.phalbummakr/` is not created just by looking.
-      savedJson.current = serializeLayoutLibrary(loaded);
+      savedJson.current = migrated ? json : serializeLayoutLibrary(loaded);
+      if (migrated) setSaveStatus("pending");
       setLibrary(loaded);
     }).catch((cause: unknown) => {
       if (current) setLoadError(`Could not load the Layout Library: ${String(cause)}`);
@@ -60,6 +62,7 @@ export function useLayoutLibrary({ root, format, ports = tauriLayoutPorts, onBus
     if (!library || saveInFlight.current || saveStatus === "error") return;
     const json = serializeLayoutLibrary(library);
     if (json === savedJson.current) {
+      hasUserChanges.current = false;
       setSaveStatus("saved");
       return;
     }
@@ -70,7 +73,12 @@ export function useLayoutLibrary({ root, format, ports = tauriLayoutPorts, onBus
         saveInFlight.current = false;
         savedJson.current = json;
         const latest = libraryRef.current;
-        setSaveStatus(latest && serializeLayoutLibrary(latest) === json ? "saved" : "pending");
+        if (latest && serializeLayoutLibrary(latest) === json) {
+          hasUserChanges.current = false;
+          setSaveStatus("saved");
+        } else {
+          setSaveStatus("pending");
+        }
       }).catch((cause: unknown) => {
         saveInFlight.current = false;
         setError(`Could not save the Layout Library: ${String(cause)}`);
@@ -81,7 +89,7 @@ export function useLayoutLibrary({ root, format, ports = tauriLayoutPorts, onBus
   }, [library, root, ports, retry, saveStatus]);
 
   useEffect(() => {
-    onBusyChange?.(saveStatus !== "saved");
+    onBusyChange?.(saveStatus !== "saved" && (saveStatus !== "error" || hasUserChanges.current));
   }, [saveStatus, onBusyChange]);
   useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
 
@@ -96,6 +104,7 @@ export function useLayoutLibrary({ root, format, ports = tauriLayoutPorts, onBus
       const next = update(previous);
       serializeLayoutLibrary(next);
       setError(null);
+      hasUserChanges.current = true;
       setSaveStatus(saveInFlight.current ? "saving" : "pending");
       setLibrary(next);
       return true;
