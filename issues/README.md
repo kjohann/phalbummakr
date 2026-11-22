@@ -89,6 +89,9 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 044 | [Folder Photo counts](044-folder-photo-counts.md) | 033, 042 | done |
 | 045 | [Quick grid layout tool](045-quick-grid-layout.md) | 010, 011, 029 | done |
 | 046 | [Mosaic starter Layouts](046-mosaic-starter-layouts.md) | 045 | done |
+| 047 | [Folder-specific Reviewed Photos](047-folder-specific-reviewed-photos.md) | 037, 042 | todo |
+| 048 | [Protect progress during incomplete scans (bug)](048-incomplete-rescan-safety.md) | 003, 037, 044 | todo |
+| 049 | [Automatic Rescan and manual feedback](049-automatic-rescan.md) | 003, 048 | todo |
 
 Work order for the layout rework: 016, 017, 018, 019, 020, then 011.
 
