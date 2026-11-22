@@ -22,6 +22,10 @@ _Avoid_: Tag, category, label, keyword, collection
 Moving or copying Photos between Folders in the Library. Moving a placed Photo keeps every Album that uses it pointing at the Photo's new location; copying leaves the original Photo and its Placements unchanged.
 _Avoid_: Culling, filing, importing
 
+**Folder Photo count**:
+The number of Photos in a Folder and all its subfolders, regardless of Usage or reviewed state. Identical Photos count separately because they are separate files.
+_Avoid_: Usage, unique Photo count
+
 **Comparison**:
 Any number of Photos shown side by side while Sorting. Photos are added to it from the Photo grid, such as by Ctrl-click, and are marked there as part of it. Sending one of them from the grid to a Folder sends the whole Comparison. Photos start out unselected in the Comparison. A single Photo shown on its own counts as selected.
 _Avoid_: Lightbox, stack
@@ -90,6 +94,14 @@ The Page facing another Page in the same Spread. The first and last Pages face a
 **Layout**:
 A reusable arrangement of Slots on a single Page. Applying a Layout copies it onto the Page, and the two are unlinked from then on.
 _Avoid_: Template, design, arrangement
+
+**Grid Layout**:
+A Layout made of equal-sized Photo Slots arranged in rows and columns, including a single row or column.
+_Avoid_: Table, contact sheet
+
+**Mosaic Layout**:
+A Layout made of differently sized, non-overlapping Photo Slots, mixing larger and smaller regions on a Page.
+_Avoid_: Collage
 
 **Layout Library**:
 The Library's collection of Layouts, shared by every Album stored there. An Album keeps its own copy of every Layout it uses.

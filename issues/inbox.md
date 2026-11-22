@@ -24,6 +24,9 @@ note once it has been sorted. An empty inbox means everything has been sorted.
     - And overview of though of phases might also be handy - maybe have that as a new section in the issues/readme.
     - The backlog remains as a place to track things not directly connected to any phase. Whenever I promote something, they go into a phase.
     - I think there should be support for multiple active phases at any given time. Either that, or I'd always have two: one named something like fixes and tweaks so I have a location for bugs that are discovered without the need to reopen a phase. Closed phases should remain closed.
+- Reviewed photos
+    - Whenever a photo is moved/copied to another folder, it should not be review there - I think that status should follow the folder.
+    - There should probably also be a "Mark all unreviewed" button somewhere.
 - Rescan
     - Might need some more visual loading feedback
     - Unless: can it run (sliently) whenever the user has tabbed out of the app and tabs back?

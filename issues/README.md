@@ -86,6 +86,9 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 041 | [Content-aware Photo Usage](041-content-aware-photo-usage.md) | 008 | done |
 | 042 | [Copy Photos to a Folder](042-copy-photos-to-folder.md) | 026, 028, 034, 037, 041 | done |
 | 043 | [Default Photo drag action](043-default-photo-drag-action.md) | 042 | done |
+| 044 | [Folder Photo counts](044-folder-photo-counts.md) | 033, 042 | todo |
+| 045 | [Quick grid layout tool](045-quick-grid-layout.md) | 010, 011, 029 | todo |
+| 046 | [Mosaic starter Layouts](046-mosaic-starter-layouts.md) | 045 | todo |
 
 Work order for the layout rework: 016, 017, 018, 019, 020, then 011.
 
@@ -95,6 +98,9 @@ Work order for Sort mode feedback: 032 → 033 → 034, then 035, 036 and 037 in
 
 Alt-drag design: 040 is independent; implement 041 together with the 008
 addendum, then 042. File copying requires content-aware Usage before shipping.
+
+Folder counts (044) are independent of the Layout changes. Implement 045 before
+046 so removing starter grids does not remove the ability to make grids.
 
 ## Addenda
 
