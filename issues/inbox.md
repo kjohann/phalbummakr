@@ -26,9 +26,13 @@ note once it has been sorted. An empty inbox means everything has been sorted.
     - I think there should be support for multiple active phases at any given time. Either that, or I'd always have two: one named something like fixes and tweaks so I have a location for bugs that are discovered without the need to reopen a phase. Closed phases should remain closed.
 - Album mode
     - More placement snapping lines, like aligning to the middle of a page, and also when free placing a slot that lines up with another, it would be nice to get help to place it at the same distance from for example the right edge as the aligned slot is from the left (or top/bottom), as well as distances from other slots. Basically snapp help to free place grid like layouts.
+    - Z-index: move slots back, or forwards. Also with "Send to back" and "Bring to front" options.
 - The top bar
     - It is a bit weird that the command bar is shifted all the way to the left (but not undo/redo for some reason). It's left most part should be "anchored" to be aligned with the right most side of the left pane
     - Undo/redo should be moved along side other commands, like slot commands etc
+- Image optimization
+    - Is this a feasible feature? I noticed one of the photo book vendors we use has this. Described (in Norwegian) like this: Automatisk bildeforbedring prøver å justere bilder ved å f.eks. lyse opp skygger, øke kontrast og fargemetning for at motivet skal bli klarere og komme bedre fram på kortet.
+    - It continues to say that if you have profesionally edited photographs you should probably leave the feature off, but I don't see any way of doing it on only some images. 
 - Curious things/possible bugs:
     - I saw 2 scan warnings for PNG files with "Invalid PNG signature". Paths:
         - ~\Documents\2024\Messenger_creation_eb3df000-1357-4298-8665-5351b21fe539.png: Format error decoding Png: Invalid PNG signature.
