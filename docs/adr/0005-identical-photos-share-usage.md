@@ -48,7 +48,7 @@ intended: users want the same Photo in more than one Folder.
 - The index never stores Placement counts. Deleting it forces reindexing and
   loses identities known only for Missing Photos; Albums still open and
   duplicate checking reports the resulting incomplete state explicitly.
-- Reviewed state remains file-specific. An app-created copy inherits it
-  initially, but marking either file later does not mark the other.
+- Reviewed state is specific to a Photo in its Folder. A copy starts unreviewed
+  in its destination, without changing the original's state.
 - File copies are outside Album undo, like file moves. Alt-drag Slot duplication
   is a separate, undoable editing operation and never copies a Photo file.

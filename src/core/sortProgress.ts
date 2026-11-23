@@ -31,6 +31,11 @@ export function setReviewed(progress: SortProgress, photos: readonly string[], r
   return { ...progress, reviewed: next };
 }
 
+/** Clears marks on the Folder's direct Photos, including ones absent from the current scan. */
+export function clearFolderReviewed(progress: SortProgress, folder: string): SortProgress {
+  return setReviewed(progress, [...progress.reviewed].filter((photo) => parentFolder(photo) === folder), false);
+}
+
 /** The grid tile `photo` and every Photo before it, or nothing if it isn't in `grid`. */
 export function photosUpTo(grid: readonly string[], photo: string): string[] {
   const index = grid.indexOf(photo);
@@ -55,22 +60,18 @@ export function rememberScroll(progress: SortProgress, folder: string, scrollTop
   return withPosition(progress, folder, { scrollTop });
 }
 
-/** Reviewed marks follow Photos moved in the app; a moved Photo is no longer its old Folder's shown Photo. */
+/** Moved Photos arrive unreviewed and are no longer their old Folder's shown Photo. */
 export function progressAfterMove(progress: SortProgress, moves: readonly PhotoMove[]): SortProgress {
-  const marked = moves.filter(({ from }) => progress.reviewed.has(from));
-  let next = setReviewed(progress, marked.map(({ from }) => from), false);
-  next = setReviewed(next, marked.map(({ to }) => to), true);
-  const moved = new Set(moves.map(({ from }) => from));
-  for (const [folder, position] of next.positions) {
-    if (position.shown !== null && moved.has(position.shown)) next = withPosition(next, folder, { shown: null });
+  let next = setReviewed(progress, moves.flatMap(({ from, to }) => [from, to]), false);
+  for (const { from } of moves) {
+    const folder = parentFolder(from);
+    if (next.positions.get(folder)?.shown === from) next = withPosition(next, folder, { shown: null });
   }
   return next;
 }
 
 export function progressAfterCopy(progress: SortProgress, copies: readonly PhotoCopy[]): SortProgress {
-  const reviewed = copies.filter(({ from }) => progress.reviewed.has(from)).map(({ to }) => to);
-  const unreviewed = copies.filter(({ from }) => !progress.reviewed.has(from)).map(({ to }) => to);
-  return setReviewed(setReviewed(progress, reviewed, true), unreviewed, false);
+  return setReviewed(progress, copies.map(({ to }) => to), false);
 }
 
 /** Reviewed marks and positions inside a renamed Folder follow it. */

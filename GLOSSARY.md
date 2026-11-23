@@ -35,8 +35,7 @@ A subset of a Comparison picked in the Comparison itself, so that only those Pho
 _Avoid_: Chosen Photos
 
 **Reviewed Photo**:
-A Photo the user has looked at while Sorting, either shown in a Comparison or marked by hand. It stays reviewed until it is unmarked, wherever it is moved in the Library.
-Copying a Photo while Sorting passes on its current reviewed state; thereafter each Photo's state is independent.
+A Photo the user has looked at while Sorting, either shown in a Comparison or marked by hand. Its Reviewed state belongs to the Photo in its current Folder. Moving or copying it to another Folder starts it unreviewed there; a copy leaves the original's state unchanged.
 _Avoid_: Seen, checked, bookmark
 
 **Usage**:

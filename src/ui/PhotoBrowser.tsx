@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
 import {
-  afterMove, canStepFolder, currentFolder, EMPTY_COMPARISON, folderNameProblem, folderRenameProblem,
+  afterMove, canStepFolder, clearFolderReviewed, currentFolder, EMPTY_COMPARISON, folderNameProblem, folderRenameProblem,
   contentPhotoUsage, historyAfterRename, historyAfterRescan, isProtectedFolder, parentFolder, photosUpTo, progressAfterCopy, progressAfterMove, progressAfterRename, progressAfterRescan, usageForPhoto,
   rememberScroll, renamedPath, scanAfterMove, setReviewed, showInProgress, showPhoto, START_FOLDER_HISTORY, stepFolder, stepPhoto,
   photosActedOn, toggleComparison, toggleSelected, visitFolder, withoutPhotos,
@@ -18,6 +18,7 @@ import { usePhotoIdentities } from "./usePhotoIdentities";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
 import SendToFolderDialog from "./SendToFolderDialog";
 import FolderNameDialog from "./FolderNameDialog";
+import ModalDialog from "./ModalDialog";
 
 /** Sort mode's command bar commands that act on the Comparison. */
 export type SortCommandName = "clear-comparison";
@@ -371,6 +372,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
   const [menu, setMenu] = useState<PhotoMenu | null>(null);
   const [folderDialog, setFolderDialog] = useState<{ paths: string[]; parent: string; copy: boolean } | null>(null);
   const [naming, setNaming] = useState<FolderNaming | null>(null);
+  const [resetFolder, setResetFolder] = useState<{ root: string; folder: string } | null>(null);
   const [scan, setScan] = useState(0);
   const [unusedOnly, setUnusedOnly] = useState(false);
   // The Photos a drag from the grid or the work area moves; null when no such drag is running.
@@ -385,7 +387,8 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
   const moving = movingPhotos.length > 0;
   const [moveMessage, setMoveMessage] = useState<{ text: string; failed: boolean } | null>(null);
   const [result, setResult] = useState<(PhotoScan & { generation: number }) | null>(null);
-  const { progress, error: progressError, update: updateProgress } = useSortProgress(root, sort?.active ?? false);
+  const sortActive = sort?.active ?? false;
+  const { progress, error: progressError, update: updateProgress } = useSortProgress(root, sortActive);
   // Each mode keeps its own place, in memory only; a new Library starts both at its root.
   const [places, setPlaces] = useState<FolderPlaces>(START_PLACES);
   const [placesRoot, setPlacesRoot] = useState(root);
@@ -410,8 +413,10 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
         const scanned = new Set(result.photos.map((photo) => photo.path));
         setComparison((current) => withoutPhotos(current, current.shown.filter((path) => !scanned.has(path))));
         setResult({ ...result, generation: scan });
-        // Only a whole scan forgets marks on Photos gone from the Library, not a grid patched after a move.
-        updateProgress((current) => progressAfterRescan(current, [...scanned], result.folders), { ifLoaded: true });
+        // A warning may mean a Photo was omitted, so its saved mark must remain available to reset.
+        if (result.warnings.length === 0) {
+          updateProgress((current) => progressAfterRescan(current, [...scanned], result.folders), { ifLoaded: true });
+        }
         const fit = ({ history }: FolderPlaces[PhotoPaneMode]) => {
           const { history: next, fellBackFrom } = historyAfterRescan(history, result.folders);
           return {
@@ -434,9 +439,14 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
     if (result) onPhotosChange?.(result.photos);
   }, [result, onPhotosChange]);
   const progressLoaded = progress !== null;
+  const previouslyShown = useRef<{ root: string; photos: readonly string[] }>({ root, photos: [] });
   useEffect(() => {
-    if (progressLoaded) updateProgress((current) => showInProgress(current, comparison.shown));
-  }, [comparison.shown, progressLoaded, updateProgress]);
+    if (!progressLoaded || !sortActive || !result) return;
+    const previous = new Set(previouslyShown.current.root === root ? previouslyShown.current.photos : []);
+    const newlyShown = comparison.shown.filter((path) => !previous.has(path));
+    previouslyShown.current = { root, photos: comparison.shown };
+    if (newlyShown.length > 0) updateProgress((current) => showInProgress(current, newlyShown));
+  }, [comparison.shown, progressLoaded, sortActive, root, result, updateProgress]);
 
   const { history, notice } = places[mode];
   const folder = result ? currentFolder(history) : "";
@@ -507,24 +517,26 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
     };
   }, [visible]);
 
-  const sortActive = sort?.active ?? false;
+  useEffect(() => { setResetFolder(null); }, [root, sortActive]);
   const grid = photos.map((photo) => photo.path);
   const gridRef = useRef(grid);
   gridRef.current = grid;
+  const comparisonRef = useRef(comparison);
+  comparisonRef.current = comparison;
 
   // Opening a Folder in Sort mode brings back its last shown Photo, unless a Comparison is being built.
-  const restoredFolder = useRef<string | null>(null);
+  const restoredFolder = useRef<{ root: string; folder: string } | null>(null);
   const hasResult = result !== null;
   useEffect(() => {
     if (!sortActive || !progress || !hasResult) return;
-    const key = `${root}\0${folder}`;
-    if (restoredFolder.current === key) return;
-    restoredFolder.current = key;
+    if (restoredFolder.current?.root === root && restoredFolder.current.folder === folder) return;
+    restoredFolder.current = { root, folder };
     const shown = progress.positions.get(folder)?.shown;
-    if (shown && gridRef.current.includes(shown)) {
-      setComparison((current) => current.shown.length > 1 ? current : showPhoto(shown));
+    if (shown && gridRef.current.includes(shown) && comparisonRef.current.shown.length <= 1) {
+      updateProgress((current) => showInProgress(current, [shown]));
+      setComparison(showPhoto(shown));
     }
-  }, [sortActive, progress, hasResult, root, folder]);
+  }, [sortActive, progress, hasResult, root, folder, updateProgress]);
   const shownCount = comparison.shown.length;
   const onComparisonChange = sort?.onComparisonChange;
   useEffect(() => onComparisonChange?.({ shown: shownCount }), [shownCount, onComparisonChange]);
@@ -544,8 +556,14 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
     return () => window.removeEventListener("keydown", step);
   }, [sortActive]);
 
+  function showSinglePhoto(path: string) {
+    updateProgress((current) => showInProgress(current, [path]));
+    setComparison(showPhoto(path));
+  }
+
   const photoClick: PhotoClick | undefined = sortActive ? (path, event) => {
-    setComparison((current) => event.ctrlKey || event.metaKey ? toggleComparison(current, path) : showPhoto(path));
+    if (event.ctrlKey || event.metaKey) setComparison((current) => toggleComparison(current, path));
+    else showSinglePhoto(path);
   } : undefined;
   const openMenu = (where: PhotoMenu["where"]) => (path: string, event: ReactMouseEvent) =>
     setMenu({ path, where, x: event.clientX, y: event.clientY });
@@ -642,6 +660,12 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
     updateProgress((current) => progressAfterRename(current, rename));
     setNaming(null);
     const follow = (path: string) => renamedPath(path, rename) ?? path;
+    if (previouslyShown.current.root === root) {
+      previouslyShown.current = { root, photos: previouslyShown.current.photos.map(follow) };
+    }
+    if (restoredFolder.current?.root === root) {
+      restoredFolder.current = { root, folder: follow(restoredFolder.current.folder) };
+    }
     setComparison((current) => ({ shown: current.shown.map(follow), selected: current.selected.map(follow) }));
     setPlaces((current) => mapPlaces(current, (place) => ({ ...place, history: historyAfterRename(place.history, rename) })));
     setMoveMessage({ text: `Renamed "${fileName(rename.from)}" to "${fileName(rename.to)}".`, failed: false });
@@ -689,7 +713,7 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
     };
     if (where === "grid") {
       return [
-        { label: "Show", onSelect: () => setComparison(showPhoto(path)) },
+        { label: "Show", onSelect: () => showSinglePhoto(path) },
         inComparison
           ? { label: "Remove from Comparison", onSelect: () => setComparison((current) => toggleComparison(current, path)) }
           : { label: "Add to Comparison", onSelect: () => setComparison((current) => toggleComparison(current, path)) },
@@ -787,6 +811,8 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
           </div>}
           {onCreateFolder && <button type="button" className="button-quiet" disabled={!result}
             onClick={() => setNaming({ kind: "create", parent: folder })}>New Folder…</button>}
+          {sortActive && <button type="button" className="button-quiet" disabled={!result || !progress}
+            onClick={() => setResetFolder({ root, folder })}>Mark all unreviewed</button>}
           <button type="button" className="button-quiet" disabled={loading} onClick={() => setScan(scan + 1)}>
             Rescan
           </button>
@@ -864,6 +890,18 @@ export default function PhotoBrowser({ root, album = null, compact = false, onCo
       {menu && <ContextMenu label="Photo actions" x={menu.x} y={menu.y} items={menuItems(menu)} onClose={() => setMenu(null)} />}
       {folderDialog && <SendToFolderDialog count={folderDialog.paths.length} parent={folderDialog.parent} copy={folderDialog.copy} siblings={siblingNames}
         onSend={(parent, name) => sendToNewFolder(folderDialog.paths, parent, name, folderDialog.copy)} onClose={() => setFolderDialog(null)} />}
+      {resetFolder && resetFolder.root === root && sortActive && <ModalDialog label="Mark all unreviewed" onClose={() => setResetFolder(null)}>
+        <h2>Mark all unreviewed</h2>
+        <p>Mark all Photos in {resetFolder.folder ? `"${resetFolder.folder}"` : "the Library root"} as unreviewed?
+          This clears marks for direct Photos, including those hidden by filters or absent from the scan; subfolders are not affected.</p>
+        <div className="album-toolbar">
+          <button type="button" className="button-quiet" onClick={() => setResetFolder(null)}>Cancel</button>
+          <button type="button" className="button-primary" onClick={() => {
+            updateProgress((current) => clearFolderReviewed(current, resetFolder.folder));
+            setResetFolder(null);
+          }}>Mark all unreviewed</button>
+        </div>
+      </ModalDialog>}
       {naming?.kind === "create" && <FolderNameDialog label="New Folder" submitLabel="Create"
         description={`Creates a Folder inside ${folderName(naming.parent)}.`}
         problem={(name) => folderNameProblem(name, siblingNames(naming.parent))}

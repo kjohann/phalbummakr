@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  EMPTY_SORT_PROGRESS, photosUpTo, progressAfterMove, progressAfterRename, progressAfterRescan, readSortProgress,
+  clearFolderReviewed, EMPTY_SORT_PROGRESS, photosUpTo, progressAfterCopy, progressAfterMove, progressAfterRename, progressAfterRescan, readSortProgress,
   rememberScroll, serializeSortProgress, setReviewed, showInProgress,
 } from "./sortProgress";
 
@@ -30,17 +30,46 @@ describe("Reviewed Photos", () => {
     expect(progress.positions.get("kids")).toEqual({ scrollTop: 480, shown: "kids/a.jpg" });
     expect(rememberScroll(progress, "kids", 480)).toBe(progress);
   });
+
+  it("clears every direct Photo in one Folder without changing positions or subfolders", () => {
+    const saved = readSortProgress(JSON.stringify({
+      reviewed: ["root.jpg", "kids/a.jpg", "kids/unreadable.jpg", "kids/nested/b.jpg", "kids-extra/c.jpg"],
+      folders: { kids: { scrollTop: 480, shown: "kids/a.jpg" } },
+    }));
+    const cleared = clearFolderReviewed(saved, "kids");
+    expect([...cleared.reviewed].sort()).toEqual(["kids-extra/c.jpg", "kids/nested/b.jpg", "root.jpg"]);
+    expect(cleared.positions).toBe(saved.positions);
+    expect(clearFolderReviewed(cleared, "kids")).toBe(cleared);
+    expect([...clearFolderReviewed(cleared, "").reviewed].sort()).toEqual(["kids-extra/c.jpg", "kids/nested/b.jpg"]);
+  });
 });
 
 describe("following the Library", () => {
   const progress = rememberScroll(showInProgress(EMPTY_SORT_PROGRESS, ["kids/a.jpg", "kids/old/b.jpg", "c.jpg"]), "kids/old", 90);
 
-  it("keeps marks on Photos moved in the app and forgets them as a Folder's shown Photo", () => {
-    const moved = progressAfterMove(progress, [{ from: "c.jpg", to: "kids/c (2).jpg" }]);
-    expect(moved.reviewed.has("kids/c (2).jpg")).toBe(true);
+  it("clears both paths of moved Photos without disturbing other Folder positions", () => {
+    const saved = setReviewed(progress, ["kids/c (2).jpg", "kids/unmarked.jpg"], true);
+    const moved = progressAfterMove(saved, [
+      { from: "c.jpg", to: "kids/c (2).jpg" },
+      { from: "unmarked.jpg", to: "kids/unmarked.jpg" },
+    ]);
+    expect(moved.reviewed.has("kids/c (2).jpg")).toBe(false);
+    expect(moved.reviewed.has("kids/unmarked.jpg")).toBe(false);
     expect(moved.reviewed.has("c.jpg")).toBe(false);
     expect(moved.positions.get("")?.shown).toBeNull();
+    expect(moved.positions.get("kids")?.shown).toBe("kids/a.jpg");
+    expect(moved.positions.get("kids/old")).toEqual({ scrollTop: 90, shown: "kids/old/b.jpg" });
     expect(progressAfterMove(progress, [{ from: "unmarked.jpg", to: "kids/unmarked.jpg" }])).toBe(progress);
+  });
+
+  it("leaves originals reviewed and clears any old marks at copy destinations", () => {
+    const saved = setReviewed(progress, ["kids/c.jpg", "kids/unmarked.jpg"], true);
+    const copied = progressAfterCopy(saved, [
+      { from: "c.jpg", to: "kids/c.jpg" },
+      { from: "unmarked.jpg", to: "kids/unmarked.jpg" },
+    ]);
+    expect([...copied.reviewed].sort()).toEqual(["c.jpg", "kids/a.jpg", "kids/old/b.jpg"]);
+    expect(copied.positions).toBe(saved.positions);
   });
 
   it("keeps marks and positions inside a renamed Folder", () => {
@@ -67,6 +96,16 @@ describe("saving", () => {
     expect([...read.reviewed].sort()).toEqual(["b.jpg", "kids/a.jpg"]);
     expect(read.positions.get("")).toEqual({ scrollTop: 32, shown: "b.jpg" });
     expect(read.positions.get("kids")).toEqual({ scrollTop: 0, shown: "kids/a.jpg" });
+  });
+
+  it("keeps existing saved marks, but not a Photo's old mark after a round trip", () => {
+    const saved = readSortProgress(JSON.stringify({ reviewed: ["a/photo.jpg", "other/copy.jpg"], folders: {} }));
+    expect([...saved.reviewed].sort()).toEqual(["a/photo.jpg", "other/copy.jpg"]);
+    const moved = progressAfterMove(saved, [{ from: "a/photo.jpg", to: "b/photo.jpg" }]);
+    expect([...moved.reviewed]).toEqual(["other/copy.jpg"]);
+    const reviewedThere = setReviewed(moved, ["b/photo.jpg"], true);
+    const returned = progressAfterMove(reviewedThere, [{ from: "b/photo.jpg", to: "a/photo.jpg" }]);
+    expect([...readSortProgress(serializeSortProgress(returned)).reviewed]).toEqual(["other/copy.jpg"]);
   });
 
   it("starts empty without a file and skips what it can't read", () => {

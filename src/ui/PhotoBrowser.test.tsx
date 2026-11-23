@@ -927,13 +927,13 @@ describe("Sort mode", () => {
   }
 
   async function browseSort({ photos = [0, 1, 2].map(photo), folders = ["kids", "kids/small", ".hidden"], album = null as Album | null,
-    saved = null as string | null,
+    saved = null as string | null, warnings = [] as string[],
     onSendPhotos = vi.fn(async (): Promise<PhotoMove[]> => []), onCopyPhotos = vi.fn(async (): Promise<PhotoMove[]> => []), copyByDefault = false,
     onCreateFolder = vi.fn(async (parent: string, name: string) => parent ? `${parent}/${name}` : name),
     zoom = 1, onZoomChange = vi.fn() as (change: (zoom: number) => number) => void } = {}) {
     const writes: Array<{ reviewed: string[]; folders: Record<string, { scrollTop: number; shown: string | null }> }> = [];
     vi.mocked(invoke).mockImplementation(async (command, args) => {
-      if (command === "scan_photos") return { photos, folders, warnings: [] };
+      if (command === "scan_photos") return { photos, folders, warnings };
       if (command === "read_photos") return movedRecords(photos, (args as { paths: string[] }).paths);
       if (command === "read_sort_progress") return saved;
       if (command === "write_sort_progress") {
@@ -1101,7 +1101,7 @@ describe("Sort mode", () => {
     expect(onSendPhotos).not.toHaveBeenCalled();
   });
 
-  it("inherits Reviewed only for app-created copies and then keeps original and copy states independent", async () => {
+  it("starts app-created copies unreviewed and keeps original and copy states independent", async () => {
     vi.mocked(tauriPhotoPorts.index).mockImplementation(async (_root, paths) => ({
       identities: paths.map((path) => ({ path, status: "ready", hash: "identical" })),
       hashedFiles: 0, hashedBytes: 0, cacheHits: paths.length, elapsedMs: 0,
@@ -1119,10 +1119,10 @@ describe("Sort mode", () => {
     await screen.findByText(`Copied "${photo(0).path}" to kids.`);
     fireEvent.click(screen.getByRole("button", { name: "Open folder kids" }));
     await screen.findByText(photo(0).path);
-    expect(within(tile(photo(0).path)).getByLabelText("Reviewed")).toBeTruthy();
-    fireEvent.contextMenu(tile(photo(0).path));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Mark as unreviewed" }));
     expect(within(tile(photo(0).path)).queryByLabelText("Reviewed")).toBeNull();
+    fireEvent.contextMenu(tile(photo(0).path));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Mark as reviewed" }));
+    expect(within(tile(photo(0).path)).getByLabelText("Reviewed")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Library" }));
     expect(within(tile(photo(0).path)).getByLabelText("Reviewed")).toBeTruthy();
     copy(photo(1).path);
@@ -1181,20 +1181,33 @@ describe("Sort mode", () => {
     expect(onCopyPhotos).not.toHaveBeenCalled();
   });
 
-  it("copies a mixed-source Comparison, reports same-Folder skips and retains skipped Photos", async () => {
+  it.each([
+    { operation: "copy", verb: "copies" },
+    { operation: "move", verb: "moves" },
+  ] as const)("$verb a mixed-source Comparison without changing a skipped Photo's mark", async ({ operation }) => {
     const nested = { ...photo(1), path: `kids/${photo(1).path}` };
-    const onCopyPhotos = vi.fn(async () => [{ from: photo(0).path, to: `kids/${photo(0).path}` }]);
-    const { work, tile } = await browseSort({ photos: [photo(0), nested], onCopyPhotos });
+    const transfer = vi.fn(async () => [{ from: photo(0).path, to: `kids/${photo(0).path}` }]);
+    const { work, tile, lastWrite } = await browseSort({
+      photos: [photo(0), nested], onCopyPhotos: transfer, onSendPhotos: transfer,
+    });
     fireEvent.click(tile(photo(0).path));
     fireEvent.click(screen.getByRole("button", { name: "Open folder kids" }));
     fireEvent.click(await screen.findByText(photo(1).path), { ctrlKey: true });
     fireEvent.click(screen.getByRole("button", { name: "Library" }));
     fireEvent.contextMenu(tile(photo(0).path));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Copy to Folder..." }));
-    fireEvent.click(within(screen.getByRole("menu", { name: "Copy to Folder..." })).getByRole("menuitem", { name: "kids" }));
-    await screen.findByText(/Copied.*Skipped 1 Photo\(s\) already in kids/);
-    expect(onCopyPhotos).toHaveBeenCalledWith([photo(0).path, nested.path], "kids");
-    expect(work.getByRole("button", { name: `Select ${photo(1).path}` }).title).toBe(nested.path);
+    const menu = operation === "copy" ? "Copy to Folder..." : "Move to Folder...";
+    fireEvent.click(screen.getByRole("menuitem", { name: menu }));
+    fireEvent.click(within(screen.getByRole("menu", { name: menu })).getByRole("menuitem", { name: "kids" }));
+    await screen.findByText(operation === "copy" ? /Copied.*Skipped 1 Photo\(s\) already in kids/ : /Moved.*to kids/);
+    expect(transfer).toHaveBeenCalledWith([photo(0).path, nested.path], "kids");
+    if (operation === "copy") expect(work.getByRole("button", { name: `Select ${photo(1).path}` }).title).toBe(nested.path);
+    else expect(work.getByRole("figure", { name: nested.path })).toBeTruthy();
+    await waitFor(() => expect(lastWrite()?.reviewed).toEqual(
+      operation === "copy" ? [nested.path, photo(0).path].sort() : [nested.path],
+    ));
+    fireEvent.click(screen.getByRole("button", { name: "Open folder kids" }));
+    expect(within(tile(photo(0).path)).queryByLabelText("Reviewed")).toBeNull();
+    expect(within(tile(photo(1).path)).getByLabelText("Reviewed")).toBeTruthy();
   });
 
   it("offers Show and Comparison actions on right-click in the grid and in the Comparison", async () => {
@@ -1568,6 +1581,180 @@ describe("Sort mode", () => {
       for (const index of [0, 1]) expect(reviewedMark(tile(photo(index).path))).toBeTruthy();
     });
 
+    it("keeps manually unreviewed Comparison members unreviewed until explicitly shown again", async () => {
+      const { tile, work } = await browseSort();
+      fireEvent.click(tile(photo(0).path));
+      fireEvent.click(tile(photo(1).path), { ctrlKey: true });
+      await waitFor(() => expect(reviewedMark(tile(photo(1).path))).toBeTruthy());
+      fireEvent.contextMenu(tile(photo(0).path));
+      choose("Mark as unreviewed");
+
+      fireEvent.click(tile(photo(2).path), { ctrlKey: true });
+      expect(work.getByRole("group", { name: "Comparison" })).toBeTruthy();
+      expect(reviewedMark(tile(photo(0).path))).toBeNull();
+      expect(reviewedMark(tile(photo(1).path))).toBeNull();
+      expect(reviewedMark(tile(photo(2).path))).toBeTruthy();
+      fireEvent.click(tile(photo(2).path), { ctrlKey: true });
+      expect(reviewedMark(tile(photo(0).path))).toBeNull();
+      expect(reviewedMark(tile(photo(1).path))).toBeNull();
+
+      fireEvent.click(tile(photo(0).path));
+      expect(reviewedMark(tile(photo(0).path))).toBeTruthy();
+      expect(reviewedMark(tile(photo(1).path))).toBeNull();
+    });
+
+    it("confirms a Folder reset without changing the Comparison or remembered position", async () => {
+      const { tile, work, lastWrite, leaveSort } = await browseSort();
+      fireEvent.click(tile(photo(0).path));
+      fireEvent.click(tile(photo(1).path), { ctrlKey: true });
+      await waitFor(() => expect(reviewedMark(tile(photo(1).path))).toBeTruthy());
+      const grid = screen.getByLabelText("Photo grid");
+      fireEvent.scroll(grid, { target: { scrollTop: 64 } });
+      await waitFor(() => expect(lastWrite()?.folders[""]).toEqual({ scrollTop: 64, shown: photo(1).path }));
+
+      fireEvent.click(screen.getByRole("button", { name: "Mark all unreviewed" }));
+      let dialog = within(screen.getByRole("dialog", { name: "Mark all unreviewed" }));
+      expect(dialog.getByText(/Library.*direct.*subfolders/i)).toBeTruthy();
+      fireEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+      expect(reviewedMark(tile(photo(0).path))).toBeTruthy();
+      expect(reviewedMark(tile(photo(1).path))).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: "Mark all unreviewed" }));
+      dialog = within(screen.getByRole("dialog", { name: "Mark all unreviewed" }));
+      fireEvent.click(dialog.getByRole("button", { name: "Mark all unreviewed" }));
+      expect(reviewedMark(tile(photo(0).path))).toBeNull();
+      expect(reviewedMark(tile(photo(1).path))).toBeNull();
+      expect(work.getByRole("group", { name: "Comparison" })).toBeTruthy();
+      expect(grid.scrollTop).toBe(64);
+      await waitFor(() => expect(lastWrite()?.reviewed).toEqual([]));
+      expect(lastWrite()?.folders[""]).toEqual({ scrollTop: 64, shown: photo(1).path });
+
+      fireEvent.click(tile(photo(2).path), { ctrlKey: true });
+      expect(reviewedMark(tile(photo(0).path))).toBeNull();
+      expect(reviewedMark(tile(photo(1).path))).toBeNull();
+      expect(reviewedMark(tile(photo(2).path))).toBeTruthy();
+      fireEvent.click(tile(photo(2).path), { ctrlKey: true });
+      expect(reviewedMark(tile(photo(0).path))).toBeNull();
+      leaveSort();
+      expect(screen.queryByRole("button", { name: "Mark all unreviewed" })).toBeNull();
+    });
+
+    it("resets filtered and unreadable direct Photos while retaining subfolder marks", async () => {
+      const used = photo(0);
+      const unused = photo(1);
+      const nested = { ...photo(2), path: "kids/nested.jpg" };
+      const album = placePhoto(addPhotoSlot(createAlbum({ name: "Test", pageCount: 2 }), "page-1"), "page-1", "slot-1", used);
+      const saved = JSON.stringify({ reviewed: [used.path, unused.path, "unreadable.jpg", nested.path], folders: {} });
+      const { tile, lastWrite } = await browseSort({
+        photos: [used, unused, nested], folders: ["kids"], album, saved, warnings: ["unreadable.jpg: could not read"],
+      });
+      await waitFor(() => expect(reviewedMark(tile(unused.path))).toBeTruthy());
+      fireEvent.scroll(screen.getByLabelText("Photo grid"), { target: { scrollTop: 1 } });
+      await waitFor(() => expect(lastWrite()?.reviewed).toEqual(["kids/nested.jpg", used.path, unused.path, "unreadable.jpg"].sort()));
+
+      fireEvent.click(screen.getByRole("switch", { name: "All" }));
+      expect(screen.queryByText(used.path)).toBeNull();
+      expect(reviewedMark(tile(unused.path))).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Mark all unreviewed" }));
+      const dialog = within(screen.getByRole("dialog", { name: "Mark all unreviewed" }));
+      expect(dialog.getByText(/hidden by filters or absent from the scan/i)).toBeTruthy();
+      fireEvent.click(dialog.getByRole("button", { name: "Mark all unreviewed" }));
+      await waitFor(() => expect(lastWrite()?.reviewed).toEqual(["kids/nested.jpg"]));
+      expect(reviewedMark(tile(unused.path))).toBeNull();
+      fireEvent.click(screen.getByRole("switch", { name: "Unused" }));
+      expect(reviewedMark(tile(used.path))).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Open folder kids" }));
+      expect(reviewedMark(tile("nested.jpg"))).toBeTruthy();
+      expect(screen.getByText("1 scan warning(s)")).toBeTruthy();
+    });
+
+    it.each(["load", "save"] as const)("keeps progress %s errors visible when resetting", async (failure) => {
+      vi.mocked(invoke).mockImplementation(async (command) => {
+        if (command === "scan_photos") return { photos: [photo(0)], folders: [], warnings: [] };
+        if (command === "read_sort_progress") {
+          if (failure === "load") throw new Error("Read denied");
+          return JSON.stringify({ reviewed: [photo(0).path], folders: {} });
+        }
+        if (command === "write_sort_progress") throw new Error("Write denied");
+        return "data:image/png;base64,dGVzdA==";
+      });
+      render(<PhotoBrowser root="D:\\Photos" sort={{ host: sortHost(), active: true, onComparisonChange: () => undefined }} />);
+      await screen.findByText(photo(0).path);
+      if (failure === "load") {
+        expect((await screen.findByRole("alert")).textContent).toContain("Could not load which Photos are reviewed: Error: Read denied");
+        expect((screen.getByRole("button", { name: "Mark all unreviewed" }) as HTMLButtonElement).disabled).toBe(true);
+        expect(invoke).not.toHaveBeenCalledWith("write_sort_progress", expect.anything());
+      } else {
+        await waitFor(() => expect((screen.getByRole("button", { name: "Mark all unreviewed" }) as HTMLButtonElement).disabled).toBe(false));
+        fireEvent.click(screen.getByRole("button", { name: "Mark all unreviewed" }));
+        fireEvent.click(within(screen.getByRole("dialog", { name: "Mark all unreviewed" })).getByRole("button", { name: "Mark all unreviewed" }));
+        expect((await screen.findByRole("alert")).textContent).toContain("Could not save which Photos are reviewed: Error: Write denied");
+      }
+    });
+
+    it.each((["album", "sort"] as const).flatMap((mode) => ["move", "copy"].map((operation) => ({ mode, operation }))))(
+      "preserves marks after failed $operation batches in $mode mode and reports rollback failures", async ({ mode, operation }) => {
+        const writes: Array<{ reviewed: string[] }> = [];
+        vi.mocked(invoke).mockImplementation(async (command, args) => {
+          if (command === "scan_photos") return { photos: [photo(0)], folders: ["kids"], warnings: [] };
+          if (command === "read_sort_progress") return JSON.stringify({ reviewed: [photo(0).path], folders: {} });
+          if (command === "write_sort_progress") return void writes.push(JSON.parse((args as { json: string }).json));
+          return "data:image/png;base64,dGVzdA==";
+        });
+        let attempts = 0;
+        const transfer = vi.fn(async () => {
+          throw new Error(++attempts === 1 ? "Transfer failed and was rolled back" : "Transfer failed; rollback failed to restore a Photo");
+        });
+        const host = sortHost();
+        const onComparisonChange = () => undefined;
+        const props = { root: "D:\\Photos", onSendPhotos: transfer, onCopyPhotos: transfer };
+        const view = render(<PhotoBrowser {...props} mode={mode} sort={{ host, active: mode === "sort", onComparisonChange }} />);
+        const tile = () => within(screen.getByRole("list", { name: "Photos" })).getByText(photo(0).path).closest("figure")!;
+        await screen.findByText(photo(0).path);
+        const menu = operation === "copy" ? "Copy to Folder..." : "Move to Folder...";
+        for (const message of ["Transfer failed and was rolled back", "rollback failed to restore a Photo"]) {
+          fireEvent.contextMenu(tile());
+          fireEvent.click(screen.getByRole("menuitem", { name: menu }));
+          fireEvent.click(within(screen.getByRole("menu", { name: menu })).getByRole("menuitem", { name: "kids" }));
+          await waitFor(() => expect(screen.getByRole("alert").textContent).toContain(message));
+        }
+        view.rerender(<PhotoBrowser {...props} mode="sort" sort={{ host, active: true, onComparisonChange }} />);
+        await waitFor(() => expect(reviewedMark(tile())).toBeTruthy());
+        fireEvent.scroll(screen.getByLabelText("Photo grid"), { target: { scrollTop: 1 } });
+        await waitFor(() => expect(writes.at(-1)?.reviewed).toEqual([photo(0).path]));
+      },
+    );
+
+    it("does not review a replacement Photo until it is shown in Sort mode", async () => {
+      const photos = [photo(0), photo(1)];
+      const writes: Array<{ reviewed: string[] }> = [];
+      vi.mocked(invoke).mockImplementation(async (command, args) => {
+        if (command === "scan_photos") return { photos, folders: ["kids"], warnings: [] };
+        if (command === "read_photos") return movedRecords(photos, (args as { paths: string[] }).paths);
+        if (command === "read_sort_progress") return null;
+        if (command === "write_sort_progress") return void writes.push(JSON.parse((args as { json: string }).json));
+        return "data:image/png;base64,dGVzdA==";
+      });
+      const onSendPhotos = vi.fn(async () => [{ from: photos[0].path, to: `kids/${photos[0].path}` }]);
+      const host = sortHost();
+      const onComparisonChange = () => undefined;
+      const props = { root: "D:\\Photos", onSendPhotos };
+      const view = render(<PhotoBrowser {...props} mode="sort" sort={{ host, active: true, onComparisonChange }} />);
+      fireEvent.click((await screen.findByText(photos[0].path)).closest("figure")!);
+      await within(host).findByRole("img", { name: photos[0].path });
+      view.rerender(<PhotoBrowser {...props} mode="album" sort={{ host, active: false, onComparisonChange }} />);
+      fireEvent.contextMenu(within(screen.getByRole("list", { name: "Photos" })).getByText(photos[0].path).closest("figure")!);
+      fireEvent.click(screen.getByRole("menuitem", { name: "Move to Folder..." }));
+      fireEvent.click(within(screen.getByRole("menu", { name: "Move to Folder..." })).getByRole("menuitem", { name: "kids" }));
+      await screen.findByText(`Moved "${photos[0].path}" to kids.`);
+      await waitFor(() => expect(writes.at(-1)?.reviewed).toEqual([]));
+
+      view.rerender(<PhotoBrowser {...props} mode="sort" sort={{ host, active: true, onComparisonChange }} />);
+      await within(host).findByRole("img", { name: photos[1].path });
+      await waitFor(() => expect(reviewedMark(within(screen.getByRole("list", { name: "Photos" }))
+        .getByText(photos[1].path).closest("figure")!)).toBeTruthy());
+    });
+
     it("marks a grid tile and every Photo before it", async () => {
       const { tile } = await browseSort({ photos: [0, 1, 2, 3].map(photo) });
       fireEvent.contextMenu(tile(photo(2).path));
@@ -1575,7 +1762,7 @@ describe("Sort mode", () => {
       expect([0, 1, 2, 3].map((index) => reviewedMark(tile(photo(index).path)) !== null)).toEqual([true, true, true, false]);
     });
 
-    it("keeps the mark on a Photo moved to another Folder", async () => {
+    it("starts a Photo moved to another Folder unreviewed", async () => {
       const onSendPhotos = vi.fn(async (paths: string[], target: string) => paths.map((from) => ({ from, to: `${target}/${from}` })));
       const { tile, lastWrite } = await browseSort({ onSendPhotos });
       fireEvent.click(tile(photo(0).path));
@@ -1583,9 +1770,9 @@ describe("Sort mode", () => {
       fireEvent.click(screen.getByRole("menuitem", { name: "Move to Folder..." }));
       fireEvent.click(within(screen.getByRole("menu", { name: "Move to Folder..." })).getByRole("menuitem", { name: "kids" }));
       await screen.findByText(`Moved "${photo(0).path}" to kids.`);
-      await waitFor(() => expect(lastWrite()?.reviewed).toEqual([`kids/${photo(0).path}`, photo(1).path]));
+      await waitFor(() => expect(lastWrite()?.reviewed).toEqual([photo(1).path]));
       fireEvent.click(screen.getByRole("button", { name: "Open folder kids" }));
-      expect(reviewedMark(tile(photo(0).path))).toBeTruthy();
+      expect(reviewedMark(tile(photo(0).path))).toBeNull();
     });
 
     it("restores each Folder's scroll position and last shown Photo, keeping a Comparison", async () => {
@@ -1612,7 +1799,78 @@ describe("Sort mode", () => {
       expect(lastWrite()?.folders.kids.shown).toBe("kids/a.jpg");
     });
 
-    it("keeps marks on Photos moved by dragging before Sort mode was first opened", async () => {
+    it("marks a remembered Photo reviewed when reopening its Folder even if it is still shown", async () => {
+      const nested = { ...photo(1), path: "kids/a.jpg" };
+      const saved = JSON.stringify({ reviewed: [], folders: { kids: { scrollTop: 0, shown: nested.path } } });
+      const { work, tile } = await browseSort({ photos: [photo(0), nested], folders: ["kids"], saved });
+      fireEvent.click(screen.getByRole("button", { name: "Open folder kids" }));
+      await work.findByRole("img", { name: nested.path });
+      expect(reviewedMark(tile("a.jpg"))).toBeTruthy();
+      fireEvent.contextMenu(tile("a.jpg"));
+      choose("Mark as unreviewed");
+      expect(reviewedMark(tile("a.jpg"))).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Library" }));
+      expect(work.getByRole("img", { name: nested.path })).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Open folder kids" }));
+      await waitFor(() => expect(reviewedMark(tile("a.jpg"))).toBeTruthy());
+    });
+
+    it.each([
+      { renameMode: "sort", nestedShown: false },
+      { renameMode: "album", nestedShown: false },
+      { renameMode: "album", nestedShown: true },
+    ] as const)("preserves marks and remembered positions when renaming in $renameMode mode (nested: $nestedShown)", async ({ renameMode, nestedShown }) => {
+      const rootPhoto = photo(0);
+      const first = { ...photo(1), path: "kids/a.jpg" };
+      const nested = { ...photo(2), path: "kids/deep/b.jpg" };
+      const saved = JSON.stringify({
+        reviewed: [nested.path],
+        folders: { kids: { scrollTop: 20, shown: first.path }, "kids/deep": { scrollTop: 90, shown: nested.path } },
+      });
+      const writes: Array<{ reviewed: string[]; folders: Record<string, { scrollTop: number; shown: string | null }> }> = [];
+      let renamed = false;
+      vi.mocked(invoke).mockImplementation(async (command, args) => {
+        if (command === "scan_photos") return renamed
+          ? { photos: [rootPhoto, { ...first, path: "children/a.jpg" }, { ...nested, path: "children/deep/b.jpg" }], folders: ["children", "children/deep"], warnings: [] }
+          : { photos: [rootPhoto, first, nested], folders: ["kids", "kids/deep"], warnings: [] };
+        if (command === "read_sort_progress") return saved;
+        if (command === "write_sort_progress") return void writes.push(JSON.parse((args as { json: string }).json));
+        return "data:image/png;base64,dGVzdA==";
+      });
+      const onRenameFolder = vi.fn(async () => { renamed = true; return "children"; });
+      const host = sortHost();
+      const onComparisonChange = () => undefined;
+      const view = render(<PhotoBrowser root="D:\\Photos" mode="sort" onRenameFolder={onRenameFolder}
+        sort={{ host, active: true, onComparisonChange }} />);
+      fireEvent.click(await screen.findByRole("button", { name: "Open folder kids" }));
+      if (nestedShown) fireEvent.click(await screen.findByRole("button", { name: "Open folder deep" }));
+      const shownName = nestedShown ? "b.jpg" : "a.jpg";
+      await within(host).findByRole("img", { name: nestedShown ? nested.path : first.path });
+      fireEvent.contextMenu(within(screen.getByRole("list", { name: "Photos" })).getByText(shownName).closest("figure")!);
+      choose("Mark as unreviewed");
+      if (renameMode === "sort") fireEvent.click(screen.getByRole("button", { name: "Library" }));
+      else view.rerender(<PhotoBrowser root="D:\\Photos" mode="album" onRenameFolder={onRenameFolder}
+        sort={{ host, active: false, onComparisonChange }} />);
+
+      fireEvent.contextMenu(screen.getByRole("button", { name: "Open folder kids" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
+      const dialog = within(screen.getByRole("dialog", { name: "Rename Folder" }));
+      fireEvent.change(dialog.getByRole("textbox", { name: "Folder name" }), { target: { value: "children" } });
+      fireEvent.click(dialog.getByRole("button", { name: "Rename" }));
+      fireEvent.click(dialog.getByRole("button", { name: "Rename" }));
+      await within(host).findByRole("img", { name: nestedShown ? "children/deep/b.jpg" : "children/a.jpg" });
+      if (renameMode === "album") {
+        view.rerender(<PhotoBrowser root="D:\\Photos" mode="sort" onRenameFolder={onRenameFolder}
+          sort={{ host, active: true, onComparisonChange }} />);
+        expect(reviewedMark(within(screen.getByRole("list", { name: "Photos" })).getByText(shownName).closest("figure")!)).toBeNull();
+      }
+      await waitFor(() => expect(writes.at(-1)?.reviewed).toEqual([nestedShown ? "children/a.jpg" : "children/deep/b.jpg"]));
+      expect(writes.at(-1)?.folders.children).toEqual({ scrollTop: 20, shown: "children/a.jpg" });
+      expect(writes.at(-1)?.folders["children/deep"]).toEqual({ scrollTop: 90, shown: "children/deep/b.jpg" });
+    });
+
+    it("clears marks on Photos moved by dragging before Sort mode was first opened", async () => {
       const writes: string[] = [];
       vi.mocked(invoke).mockImplementation(async (command, args) => {
         if (command === "scan_photos") return { photos: [photo(0)], folders: ["kids"], warnings: [] };
@@ -1631,7 +1889,38 @@ describe("Sort mode", () => {
       fireEvent.dragOver(folder, { dataTransfer: transfer });
       fireEvent.drop(folder, { dataTransfer: transfer });
       await waitFor(() => expect(writes.length).toBeGreaterThan(0));
-      expect(JSON.parse(writes.at(-1)!).reviewed).toEqual([`kids/${photo(0).path}`]);
+      expect(JSON.parse(writes.at(-1)!).reviewed).toEqual([]);
+    });
+
+    it("starts a copy into a New Folder unreviewed before Sort mode was first opened", async () => {
+      const original = photo(0);
+      const copyPath = `best/${original.path}`;
+      const writes: Array<{ reviewed: string[] }> = [];
+      vi.mocked(invoke).mockImplementation(async (command, args) => {
+        if (command === "scan_photos") return { photos: [original], folders: [], warnings: [] };
+        if (command === "read_photos") return movedRecords([original], (args as { paths: string[] }).paths);
+        if (command === "read_sort_progress") return JSON.stringify({ reviewed: [original.path, copyPath], folders: {} });
+        if (command === "write_sort_progress") return void writes.push(JSON.parse((args as { json: string }).json));
+        return "data:image/png;base64,dGVzdA==";
+      });
+      const onCreateFolder = vi.fn(async (_parent: string, name: string) => name);
+      const onCopyPhotos = vi.fn(async () => [{ from: original.path, to: copyPath }]);
+      const host = sortHost();
+      const onComparisonChange = () => undefined;
+      const props = { root: "D:\\Photos", onCreateFolder, onCopyPhotos };
+      const view = render(<PhotoBrowser {...props} mode="album" sort={{ host, active: false, onComparisonChange }} />);
+      fireEvent.contextMenu((await screen.findByText(original.path)).closest("figure")!);
+      fireEvent.click(screen.getByRole("menuitem", { name: "Copy to Folder..." }));
+      fireEvent.click(within(screen.getByRole("menu", { name: "Copy to Folder..." })).getByRole("menuitem", { name: "New Folder…" }));
+      const dialog = within(screen.getByRole("dialog", { name: "New Folder" }));
+      fireEvent.change(dialog.getByRole("textbox", { name: "Folder name" }), { target: { value: "best" } });
+      fireEvent.click(dialog.getByRole("button", { name: "Create and Copy" }));
+      await waitFor(() => expect(writes.at(-1)?.reviewed).toEqual([original.path]));
+
+      view.rerender(<PhotoBrowser {...props} mode="sort" sort={{ host, active: true, onComparisonChange }} />);
+      await waitFor(() => expect(reviewedMark(within(screen.getByRole("list", { name: "Photos" })).getByText(original.path).closest("figure")!)).toBeTruthy());
+      fireEvent.click(screen.getByRole("button", { name: "Open folder best" }));
+      expect(reviewedMark(within(screen.getByRole("list", { name: "Photos" })).getByText(original.path).closest("figure")!)).toBeNull();
     });
 
     it("restores the new Library's last shown Photo after switching Library in Sort mode", async () => {
@@ -1661,7 +1950,44 @@ describe("Sort mode", () => {
       expect(await within(host).findByRole("img", { name: second.path })).toBeTruthy();
     });
 
-    it("keeps a moved Photo's mark when its new record can't be read until the next scan", async () => {
+    it("reviews a Photo shared by path with the previous Library only after the new scan", async () => {
+      const [first, other] = ["D:\\Photos", "E:\\Other"];
+      const shared = photo(0);
+      const oldOnly = photo(1);
+      const writes: Array<{ root: string; reviewed: string[] }> = [];
+      let finishScan!: () => void;
+      vi.mocked(invoke).mockImplementation(async (command, args) => {
+        const { root } = (args ?? {}) as { root: string };
+        if (command === "scan_photos") {
+          if (root === first) return { photos: [shared, oldOnly], folders: [], warnings: [] };
+          await new Promise<void>((resolve) => { finishScan = resolve; });
+          return { photos: [shared], folders: [], warnings: [] };
+        }
+        if (command === "read_sort_progress") return null;
+        if (command === "write_sort_progress") {
+          writes.push({ root, reviewed: JSON.parse((args as { json: string }).json).reviewed });
+          return undefined;
+        }
+        return "data:image/png;base64,dGVzdA==";
+      });
+      const host = sortHost();
+      const sort = { host, active: true, onComparisonChange: () => undefined };
+      const view = render(<PhotoBrowser root={first} sort={sort} />);
+      const grid = within(await screen.findByRole("list", { name: "Photos" }));
+      fireEvent.click(await grid.findByText(shared.path));
+      fireEvent.click(grid.getByText(oldOnly.path), { ctrlKey: true });
+      expect(await within(host).findByRole("group", { name: "Comparison" })).toBeTruthy();
+      view.rerender(<PhotoBrowser root={other} sort={sort} />);
+      await waitFor(() => expect(invoke).toHaveBeenCalledWith("read_sort_progress", { root: other }));
+      await waitFor(() => expect(finishScan).toBeDefined());
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      expect(writes.filter((write) => write.root === other)).toEqual([]);
+      finishScan();
+      expect(await within(host).findByRole("img", { name: shared.path })).toBeTruthy();
+      await waitFor(() => expect(writes.filter((write) => write.root === other).at(-1)?.reviewed).toEqual([shared.path]));
+    });
+
+    it("keeps a moved Photo unreviewed when its new record can't be read until the next scan", async () => {
       const photos = [0, 1].map(photo);
       const moved = { ...photo(0), path: `kids/${photo(0).path}`, revision: "moved" };
       let scans = 0;
@@ -1669,7 +1995,7 @@ describe("Sort mode", () => {
       vi.mocked(invoke).mockImplementation(async (command, args) => {
         if (command === "scan_photos") return { photos: ++scans > 1 ? [moved, photos[1]] : photos, folders: ["kids"], warnings: [] };
         if (command === "read_photos") throw new Error("Photo is locked");
-        if (command === "read_sort_progress") return null;
+        if (command === "read_sort_progress") return JSON.stringify({ reviewed: [photo(0).path], folders: {} });
         if (command === "write_sort_progress") return void writes.push((args as { json: string }).json);
         return "data:image/png;base64,dGVzdA==";
       });
@@ -1677,15 +2003,13 @@ describe("Sort mode", () => {
       render(<PhotoBrowser root="D:\\Photos" onSendPhotos={onSendPhotos} sort={{ host: sortHost(), active: true, onComparisonChange: () => undefined }} />);
       const grid = within(await screen.findByRole("list", { name: "Photos" }));
       fireEvent.contextMenu(await grid.findByText(photo(0).path));
-      choose("Mark as reviewed");
-      fireEvent.contextMenu(grid.getByText(photo(0).path));
       fireEvent.click(screen.getByRole("menuitem", { name: "Move to Folder..." }));
       fireEvent.click(within(screen.getByRole("menu", { name: "Move to Folder..." })).getByRole("menuitem", { name: "kids" }));
       await screen.findByText(`Moved "${photo(0).path}" to kids.`);
       await waitFor(() => expect(scans).toBe(2));
       await waitFor(() => expect(screen.queryByText("Scanning Library...")).toBeNull());
       await new Promise((resolve) => setTimeout(resolve, 400));
-      expect(JSON.parse(writes.at(-1)!).reviewed).toEqual([moved.path]);
+      expect(JSON.parse(writes.at(-1)!).reviewed).toEqual([]);
     });
   });
 });
