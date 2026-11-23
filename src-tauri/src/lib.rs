@@ -9,7 +9,87 @@ mod sorting;
 
 use base64::Engine;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use tauri::Manager;
+
+#[derive(Default)]
+struct SlotClipboard(Mutex<Option<(String, Option<u32>)>>);
+
+#[tauri::command]
+fn write_slot_clipboard(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, SlotClipboard>,
+    text: String,
+) -> Result<(), String> {
+    #[cfg(windows)]
+    let sequence = {
+        use clipboard_win::{formats, Clipboard, Setter};
+        let window = app
+            .get_webview_window("main")
+            .ok_or("Main window is unavailable")?;
+        let hwnd = window.hwnd().map_err(|error| error.to_string())?;
+        let before = clipboard_win::seq_num()
+            .ok_or("Clipboard sequence number is unavailable")?
+            .get();
+        let clipboard =
+            Clipboard::new_attempts_for(hwnd.0 as _, 10).map_err(|error| error.to_string())?;
+        if clipboard_win::seq_num().map(|value| value.get()) != Some(before) {
+            return Err("Clipboard changed before the Slot copy completed".into());
+        }
+        formats::Unicode
+            .write_clipboard(&text)
+            .map_err(|error| error.to_string())?;
+        // Windows updates the sequence when the clipboard is closed.
+        drop(clipboard);
+        let sequence = clipboard_win::seq_num()
+            .ok_or("Clipboard sequence number is unavailable")?
+            .get();
+        let _clipboard =
+            Clipboard::new_attempts_for(hwnd.0 as _, 10).map_err(|error| error.to_string())?;
+        if clipboard_win::get_owner().map(|owner| owner.as_ptr()) != Some(hwnd.0 as _)
+            || clipboard_win::seq_num().map(|value| value.get()) != Some(sequence)
+        {
+            return Err("Clipboard changed before the Slot copy completed".into());
+        }
+        Some(sequence)
+    };
+    #[cfg(not(windows))]
+    let sequence = {
+        use tauri_plugin_clipboard_manager::ClipboardExt;
+        app.clipboard()
+            .write_text(&text)
+            .map_err(|error| error.to_string())?;
+        None
+    };
+    *state.0.lock().map_err(|error| error.to_string())? = Some((text, sequence));
+    Ok(())
+}
+
+#[tauri::command]
+fn is_slot_clipboard_current(
+    state: tauri::State<'_, SlotClipboard>,
+    text: String,
+) -> Result<bool, String> {
+    let state = state.0.lock().map_err(|error| error.to_string())?;
+    let Some((token, sequence)) = state.as_ref() else {
+        return Ok(false);
+    };
+    if token != &text {
+        return Ok(false);
+    }
+    #[cfg(windows)]
+    {
+        let current = clipboard_win::seq_num()
+            .ok_or("Clipboard sequence number is unavailable")?
+            .get();
+        Ok(*sequence == Some(current))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = sequence;
+        Ok(true)
+    }
+}
 
 fn settings_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path()
@@ -343,9 +423,12 @@ async fn write_export_page(request: tauri::ipc::Request<'_>) -> Result<(), Strin
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(SlotClipboard::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
+            write_slot_clipboard,
+            is_slot_clipboard_current,
             album_settings,
             set_side_pane,
             remember_album,

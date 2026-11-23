@@ -64,11 +64,29 @@ separate snapping feedback is outside this issue.
 ## Implementation
 
 - The system clipboard holds an opaque token; the open Album workspace retains
-  the independent Slot snapshot only while that token still matches.
+  the independent Slot snapshot only while that token still matches. On
+  Windows, the clipboard sequence also detects a token restored from history.
 - Pasting appends a cloned Slot, using the existing movement constraints for
   offsets and recording each paste through the existing Album history.
-- Clipboard operations are serialized, and in-flight work is invalidated on
-  mode changes, Album switches and successful Photo moves or Folder renames.
+- Clipboard operations are serialized. Queued work and in-flight results are
+  invalidated on mode changes, Album switches and successful Photo moves or
+  Folder renames, subject to the write-cancellation limitation below.
+
+## Review and remaining work
+
+Review found and fixed ordinary selected text being intercepted by Ctrl+C,
+stale clipboard-read failures discarding a newer copy, and reused Page IDs
+inheriting deleted Pages' paste positions. Windows clipboard sequence checking
+also rejects an old token restored from history.
+
+**Still blocking:** a Slot write already dispatched to native code cannot be
+cancelled by a later invalidation. The Windows implementation detects changes
+while waiting for the clipboard lock, but a delayed IPC request could still
+begin after invalidation and overwrite newer ordinary clipboard content. This
+needs a coordinated cancellation or a synchronous clipboard-write design before
+the issue can be marked done. On non-Windows platforms the token-only fallback
+also cannot detect a restored clipboard-history entry; Windows is the only
+platform currently targeted.
 
 ## Earlier follow-ups and inbox
 
@@ -89,3 +107,7 @@ Album was used. The empty Photo Slot's menu showed Paste disabled before
 copying; menu Copy followed by thumbnail Paste created and selected a Slot on
 the other Page. Ctrl+C and Ctrl+V then copied back across Pages, with a second
 paste advancing its position. The user's existing Album was not opened.
+
+After review fixes, another isolated release build confirmed menu Copy and
+thumbnail Paste with the Windows clipboard sequence check. The full JavaScript
+suite passed (459 tests), as did lint, type-checking and the release build.

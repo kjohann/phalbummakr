@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
-import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { isSlotClipboardCurrent, readText, writeText } from "./slotClipboard";
 import { Layer, Rect, Stage } from "react-konva";
 import {
   addPage, addPhotoSlot, addTextSlot, albumSpreads, applyLayout, contentPhotoUsage, createGridLayout, deletePage, deleteSlot, duplicatePage, lowResolutionPlacements, movePage, pageDimensions,
@@ -97,7 +97,7 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
   const [pageDropId, setPageDropId] = useState<string | null>(null);
   const [layoutMenu, setLayoutMenu] = useState<{ x: number; y: number; layoutId: string } | null>(null);
   const [gridPageId, setGridPageId] = useState<string | null>(null);
-  const copiedSlot = useRef<{ token: string; slot: Slot; pageId: string; positions: Map<string, { x: number; y: number }> } | null>(null);
+  const copiedSlot = useRef<{ token: string; slot: Slot; pageId: string | null; positions: Map<string, { x: number; y: number }> } | null>(null);
   const clipboardGeneration = useRef(0);
   const clipboardPending = useRef<Promise<void> | null>(null);
   const [canPaste, setCanPaste] = useState(false);
@@ -301,6 +301,16 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
 
   useEffect(() => () => { clipboardGeneration.current += 1; copiedSlot.current = null; }, []);
 
+  useEffect(() => {
+    const copy = copiedSlot.current;
+    if (!copy) return;
+    const pageIds = new Set(savedAlbum.pages.map((page) => page.id));
+    if (copy.pageId && !pageIds.has(copy.pageId)) copy.pageId = null;
+    for (const pageId of copy.positions.keys()) {
+      if (!pageIds.has(pageId)) copy.positions.delete(pageId);
+    }
+  }, [savedAlbum]);
+
   function queueClipboard(action: () => Promise<void>) {
     const generation = clipboardGeneration.current;
     const previous = clipboardPending.current;
@@ -343,12 +353,14 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
     try {
       const text = await readText();
       if (generation !== clipboardGeneration.current || copiedSlot.current !== copy) return null;
-      if (text === copy.token) return copy;
+      const current = text === copy.token && await isSlotClipboardCurrent(copy.token);
+      if (generation !== clipboardGeneration.current || copiedSlot.current !== copy) return null;
+      if (current) return copy;
       copiedSlot.current = null;
       setCanPaste(false);
       return null;
     } catch (cause) {
-      if (generation !== clipboardGeneration.current) return null;
+      if (generation !== clipboardGeneration.current || copiedSlot.current !== copy) return null;
       // The native clipboard reports this specific condition for an empty or non-text clipboard.
       if (String(cause) === "The clipboard contents were not available in the requested format or the clipboard is empty.") {
         copiedSlot.current = null;
@@ -406,6 +418,7 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
       if (event.defaultPrevented || event.altKey || event.shiftKey || !(event.ctrlKey || event.metaKey) || keyboardTaken(event)) return;
       const key = event.key.toLowerCase();
       if (key !== "c" && key !== "v") return;
+      if (key === "c" && (window.getSelection()?.toString().length ?? 0) > 0) return;
       event.preventDefault();
       if (key === "c") clipboardActions.current.copy();
       else clipboardActions.current.paste();

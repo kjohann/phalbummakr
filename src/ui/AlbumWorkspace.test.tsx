@@ -9,8 +9,8 @@ import { PhotoSlotTools } from "./SlotTools";
 import type { PageExportPorts } from "./pageExport";
 import { tauriPhotoPorts } from "./tauriPhotoPorts";
 import { useLayoutLibrary } from "./useLayoutLibrary";
-import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
-vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ readText: vi.fn(), writeText: vi.fn() }));
+import { isSlotClipboardCurrent, readText, writeText } from "./slotClipboard";
+vi.mock("./slotClipboard", () => ({ isSlotClipboardCurrent: vi.fn(), readText: vi.fn(), writeText: vi.fn() }));
 vi.mock("react-konva", () => ({
   Stage: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   Layer: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -38,6 +38,7 @@ vi.mock("konva/lib/shapes/Text", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(isSlotClipboardCurrent).mockResolvedValue(true);
   vi.spyOn(tauriPhotoPorts, "index").mockImplementation(async (_root, paths) => ({
     identities: paths.map((path) => ({ path, status: "ready", hash: path })),
     hashedFiles: 0, hashedBytes: 0, cacheHits: paths.length, elapsedMs: 0,
@@ -196,6 +197,95 @@ it("queues a paste requested while copying is still writing the clipboard", asyn
   await waitFor(() => expect((onAlbumChange.mock.lastCall![0] as Album).pages[0].slots).toHaveLength(2));
 });
 
+it("preserves ordinary selected UI text when copying", async () => {
+  const { ports } = disk();
+  const album = addPhotoSlot(createAlbum({ name: "Existing" }), "page-1");
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} document={{ path: "Existing", album }} />);
+  fireEvent.click(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }));
+  const range = document.createRange();
+  range.selectNodeContents(screen.getByText("Trim edge"));
+  window.getSelection()!.removeAllRanges();
+  window.getSelection()!.addRange(range);
+  expect(fireEvent.keyDown(document.body, { key: "c", ctrlKey: true })).toBe(true);
+  expect(writeText).not.toHaveBeenCalled();
+  window.getSelection()!.removeAllRanges();
+});
+
+it("does not discard a newer Slot copy when an older menu clipboard read fails late", async () => {
+  let clipboard = "";
+  let failRead: (error: string) => void = () => { throw new Error("Read did not start"); };
+  vi.mocked(writeText).mockImplementation(async (text) => { clipboard = text; });
+  vi.mocked(readText).mockImplementationOnce(() => new Promise((_resolve, reject) => { failRead = reject; }))
+    .mockImplementation(async () => clipboard);
+  const { ports } = disk();
+  const album = addPhotoSlot(addPhotoSlot(createAlbum({ name: "Existing" }), "page-1"), "page-1");
+  const onAlbumChange = vi.fn();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} onAlbumChange={onAlbumChange}
+    document={{ path: "Existing", album }} />);
+  const first = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  const second = screen.getByRole("button", { name: "Page 1 Photo Slot 2" });
+  fireEvent.click(first);
+  fireEvent.keyDown(document.body, { key: "c", ctrlKey: true });
+  await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
+  fireEvent.contextMenu(first);
+  fireEvent.click(second);
+  fireEvent.keyDown(document.body, { key: "c", ctrlKey: true });
+  await waitFor(() => expect(writeText).toHaveBeenCalledTimes(2));
+  await act(async () => failRead("The clipboard contents were not available in the requested format or the clipboard is empty."));
+  fireEvent.keyDown(document.body, { key: "v", ctrlKey: true });
+  await waitFor(() => expect((onAlbumChange.mock.lastCall![0] as Album).pages[0].slots).toHaveLength(3));
+});
+
+it("starts a fresh sequence when a deleted Page's identifier is reused", async () => {
+  let clipboard = "";
+  vi.mocked(writeText).mockImplementation(async (text) => { clipboard = text; });
+  vi.mocked(readText).mockImplementation(async () => clipboard);
+  const { ports } = disk();
+  const album = addPhotoSlot(createAlbum({ name: "Existing", pageCount: 4 }), "page-1");
+  const onAlbumChange = vi.fn();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} onAlbumChange={onAlbumChange}
+    document={{ path: "Existing", album }} />);
+  fireEvent.click(screen.getByRole("button", { name: "Page 1 Photo Slot 1" }));
+  fireEvent.keyDown(document.body, { key: "c", ctrlKey: true });
+  await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
+  const strip = within(screen.getByRole("navigation", { name: "Spreads" }));
+  fireEvent.click(strip.getByRole("button", { name: "Select Page 2" }));
+  fireEvent.keyDown(document.body, { key: "v", ctrlKey: true });
+  await waitFor(() => expect((onAlbumChange.mock.lastCall![0] as Album).pages[1].slots).toHaveLength(1));
+  fireEvent.click(strip.getByRole("button", { name: "Delete Spread 2" }));
+  fireEvent.click(strip.getByRole("button", { name: "Insert Spread before Spread 2" }));
+  fireEvent.click(strip.getByRole("button", { name: "Select Page 2" }));
+  fireEvent.keyDown(document.body, { key: "v", ctrlKey: true });
+  await waitFor(() => expect((onAlbumChange.mock.lastCall![0] as Album).pages[1].slots).toHaveLength(1));
+  const slot = (onAlbumChange.mock.lastCall![0] as Album).pages[1].slots[0];
+  expect(slot.x).toBeCloseTo(0.3);
+  expect(slot.y).toBeCloseTo(0.3);
+});
+
+it("does not treat a replacement Page as the deleted source Page", async () => {
+  let clipboard = "";
+  vi.mocked(writeText).mockImplementation(async (text) => { clipboard = text; });
+  vi.mocked(readText).mockImplementation(async () => clipboard);
+  const { ports } = disk();
+  const album = addPhotoSlot(createAlbum({ name: "Existing", pageCount: 4 }), "page-2");
+  const onAlbumChange = vi.fn();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} onAlbumChange={onAlbumChange}
+    document={{ path: "Existing", album }} />);
+  const strip = within(screen.getByRole("navigation", { name: "Spreads" }));
+  fireEvent.click(strip.getByRole("button", { name: "Select Page 2" }));
+  fireEvent.click(screen.getByRole("button", { name: "Page 2 Photo Slot 1" }));
+  fireEvent.keyDown(document.body, { key: "c", ctrlKey: true });
+  await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
+  fireEvent.click(strip.getByRole("button", { name: "Delete Spread 2" }));
+  fireEvent.click(strip.getByRole("button", { name: "Insert Spread before Spread 2" }));
+  fireEvent.click(strip.getByRole("button", { name: "Select Page 2" }));
+  fireEvent.keyDown(document.body, { key: "v", ctrlKey: true });
+  await waitFor(() => expect((onAlbumChange.mock.lastCall![0] as Album).pages[1].slots).toHaveLength(1));
+  const slot = (onAlbumChange.mock.lastCall![0] as Album).pages[1].slots[0];
+  expect(slot.x).toBeCloseTo(0.3);
+  expect(slot.y).toBeCloseTo(0.3);
+});
+
 it("replaces a Slot copy when ordinary clipboard data is copied and disables menu paste", async () => {
   let clipboard = "";
   vi.mocked(writeText).mockImplementation(async (text) => { clipboard = text; });
@@ -217,6 +307,35 @@ it("replaces a Slot copy when ordinary clipboard data is copied and disables men
   await act(async () => {});
   expect((onAlbumChange.mock.lastCall![0] as Album).pages[0].slots).toHaveLength(1);
   expect(clipboard).toBe("ordinary text");
+});
+
+it("does not restore a Slot copy when clipboard history restores its old token", async () => {
+  let clipboard = "";
+  let sequence = 0;
+  let copySequence = 0;
+  vi.mocked(writeText).mockImplementation(async (text) => { clipboard = text; copySequence = ++sequence; });
+  vi.mocked(readText).mockImplementation(async () => clipboard);
+  vi.mocked(isSlotClipboardCurrent).mockImplementation(async () => sequence === copySequence);
+  const { ports } = disk();
+  const album = addPhotoSlot(createAlbum({ name: "Existing" }), "page-1");
+  const onAlbumChange = vi.fn();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} onAlbumChange={onAlbumChange}
+    document={{ path: "Existing", album }} />);
+  const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  fireEvent.click(slot);
+  fireEvent.keyDown(document.body, { key: "c", ctrlKey: true });
+  await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
+  const savedToken = clipboard;
+  clipboard = "ordinary text";
+  sequence += 1;
+  clipboard = savedToken;
+  sequence += 1;
+  fireEvent.contextMenu(slot);
+  await waitFor(() => expect(isSlotClipboardCurrent).toHaveBeenCalled());
+  await waitFor(() => expect((screen.getByRole("menuitem", { name: "Paste Slot" }) as HTMLButtonElement).disabled).toBe(true));
+  onAlbumChange.mockClear();
+  await act(async () => fireEvent.keyDown(document.body, { key: "v", ctrlKey: true }));
+  expect(onAlbumChange).not.toHaveBeenCalled();
 });
 
 it("reports clipboard failures without changing the Album or its undo history", async () => {
