@@ -115,6 +115,15 @@ export function duplicateSlot(album: Album, pageId: string, slotId: string): Alb
   });
 }
 
+export function pasteSlot(album: Album, pageId: string, snapshot: Slot, position?: { x: number; y: number }): Album {
+  let slotId = "";
+  const added = editPage(album, pageId, (page) => {
+    slotId = unusedSlotId(page);
+    return { ...page, slots: [...page.slots, { ...structuredClone(snapshot), id: slotId }] };
+  });
+  return position ? moveSlot(added, pageId, slotId, position.x, position.y) : added;
+}
+
 function editSlot(album: Album, pageId: string, slotId: string, edit: (slot: Slot) => Slot): Album {
   return editPage(album, pageId, (page) => {
     const index = page.slots.findIndex((slot) => slot.id === slotId);

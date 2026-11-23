@@ -1,6 +1,6 @@
 # 050 - Copy and paste Slots in Album mode
 
-Status: todo · Type: feature · Depends on: 011, 018, 019, 030, 040, 041
+Status: doing · Type: feature · Depends on: 011, 018, 019, 030, 040, 041
 
 ## What
 
@@ -60,3 +60,32 @@ No multi-Slot copying, cross-Album Slot pasting, Slot copying or pasting in
 Layout mode, importing ordinary clipboard text as a Slot, or moving an
 existing Slot between Pages. Do not change snapping or its guides; the
 separate snapping feedback is outside this issue.
+
+## Implementation
+
+- The system clipboard holds an opaque token; the open Album workspace retains
+  the independent Slot snapshot only while that token still matches.
+- Pasting appends a cloned Slot, using the existing movement constraints for
+  offsets and recording each paste through the existing Album history.
+- Clipboard operations are serialized, and in-flight work is invalidated on
+  mode changes, Album switches and successful Photo moves or Folder renames.
+
+## Earlier follow-ups and inbox
+
+Reviewed the earlier low-priority considerations. The native Page-thumbnail
+and Slot context-menu checks in 018 and 019 were exercised for this feature.
+Their broader drag, toolbar and menu checks remain open. The editor extraction
+in 009/010/019 and shared history wiring in 011 remain deferred: neither is
+necessary to implement Slot clipboard behavior. The snapping performance and
+gesture lifecycle points in 013/040 remain unrelated to clipboard placement.
+Other earlier follow-ups concern separate workflows and remain deferred.
+
+No inbox notes are resolved; the snapping feedback is explicitly out of scope.
+
+## Native verification
+
+An isolated release build with a separate application identifier and test
+Album was used. The empty Photo Slot's menu showed Paste disabled before
+copying; menu Copy followed by thumbnail Paste created and selected a Slot on
+the other Page. Ctrl+C and Ctrl+V then copied back across Pages, with a second
+paste advancing its position. The user's existing Album was not opened.

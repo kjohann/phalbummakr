@@ -1,9 +1,10 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
+import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { Layer, Rect, Stage } from "react-konva";
 import {
   addPage, addPhotoSlot, addTextSlot, albumSpreads, applyLayout, contentPhotoUsage, createGridLayout, deletePage, deleteSlot, duplicatePage, lowResolutionPlacements, movePage, pageDimensions,
-  panCrop, placePhoto, placePhotoOnPage, placementDisplayCrop, photoUsage, rotateSlot, saveLayoutFromPage, setPlacementCrop,
+  panCrop, pasteSlot, placePhoto, placePhotoOnPage, placementDisplayCrop, photoUsage, rotateSlot, saveLayoutFromPage, setPlacementCrop,
   setPlacementFit, setSlotText, setTextStyle, swapPlacements, usageForPhoto, zoomCrop, POINTS_PER_MM, TEXT_LINE_HEIGHT,
   type Album, type AppliedLayout, type HistoryDirection, type Crop, type Layout, type Page, type PageFormat, type PhotoIdentity, type PhotoPreviewPorts, type PhotoSize, type Slot, type SlotAddress, type TextStyle,
 } from "../core";
@@ -17,7 +18,7 @@ import { fitTextSlots } from "./textLayout";
 import TextSlotTools from "./TextSlotTools";
 import { PhotoSlotTools, SlotActions } from "./SlotTools";
 import { createRequestQueue } from "./requestQueue";
-import { useSlotShortcuts } from "./slotShortcuts";
+import { keyboardTaken, useSlotShortcuts } from "./slotShortcuts";
 import type { AlbumHistory, AlbumLayouts, CommandBarLink } from "./AlbumWorkspace";
 
 const PLACEMENT_DRAG_TYPE = "application/x-phalbummakr-placement";
@@ -47,6 +48,9 @@ interface Props {
   /** Scanned pixel sizes of the Library's Photos by path, for Effective Resolution warnings. */
   photoSizes: ReadonlyMap<string, PhotoSize>;
   photoIdentities?: ReadonlyMap<string, PhotoIdentity>;
+  clipboardVersion: number;
+  clipboardActive: boolean;
+  onClipboardError: (message: string | null) => void;
 }
 
 /** Tells the user what applying a Layout dropped, and when it was made for another Page shape. */
@@ -62,7 +66,7 @@ function appliedLayoutNotice({ dropped, aspectMismatch }: AppliedLayout, pageNum
   return messages.length ? messages.join(" ") : null;
 }
 
-export default function AlbumView({ album: savedAlbum, onChange, history, disabled, textDisabled, root, photoPorts, fontPorts, onDuplicatePhoto, onCropPendingChange, bar, active = true, layouts, onNotice, photoSizes, photoIdentities }: Props) {
+export default function AlbumView({ album: savedAlbum, onChange, history, disabled, textDisabled, root, photoPorts, fontPorts, onDuplicatePhoto, onCropPendingChange, bar, active = true, layouts, onNotice, photoSizes, photoIdentities, clipboardVersion, clipboardActive, onClipboardError }: Props) {
   const { command, toolsHost, onSlotSelectedChange } = bar;
   const viewportRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLElement>(null);
@@ -93,6 +97,10 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
   const [pageDropId, setPageDropId] = useState<string | null>(null);
   const [layoutMenu, setLayoutMenu] = useState<{ x: number; y: number; layoutId: string } | null>(null);
   const [gridPageId, setGridPageId] = useState<string | null>(null);
+  const copiedSlot = useRef<{ token: string; slot: Slot; pageId: string; positions: Map<string, { x: number; y: number }> } | null>(null);
+  const clipboardGeneration = useRef(0);
+  const clipboardPending = useRef<Promise<void> | null>(null);
+  const [canPaste, setCanPaste] = useState(false);
   /** The Page a dragged Layout would be applied to. */
   const [layoutDropPageId, setLayoutDropPageId] = useState<string | null>(null);
   const handledCommand = useRef(command?.serial);
@@ -275,6 +283,136 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
   }
 
   const selectedSlot = selectedPage.slots.find((slot) => slot.id === selectedSlotId) ?? null;
+  const clipboardContext = useRef({ active, disabled, changeAlbum });
+  clipboardContext.current = { active, disabled, changeAlbum };
+
+  useEffect(() => {
+    if (clipboardActive) return;
+    clipboardGeneration.current += 1;
+    copiedSlot.current = null;
+    setCanPaste(false);
+  }, [clipboardActive]);
+
+  useEffect(() => {
+    clipboardGeneration.current += 1;
+    copiedSlot.current = null;
+    setCanPaste(false);
+  }, [clipboardVersion]);
+
+  useEffect(() => () => { clipboardGeneration.current += 1; copiedSlot.current = null; }, []);
+
+  function queueClipboard(action: () => Promise<void>) {
+    const generation = clipboardGeneration.current;
+    const previous = clipboardPending.current;
+    const pending = (async () => {
+      if (previous) await previous;
+      if (generation !== clipboardGeneration.current) return;
+      try {
+        await action();
+      } catch (cause) {
+        onClipboardError(`Could not access clipboard: ${String(cause)}`);
+      }
+    })();
+    clipboardPending.current = pending;
+    void pending.then(() => {
+      if (clipboardPending.current === pending) clipboardPending.current = null;
+    });
+  }
+
+  function copySlot(pageId: string, slot: Slot) {
+    const generation = clipboardGeneration.current;
+    const copy = { token: `phalbummakr-slot:${crypto.randomUUID()}`, slot: structuredClone(slot), pageId, positions: new Map<string, { x: number; y: number }>() };
+    queueClipboard(async () => {
+      if (!clipboardContext.current.active || clipboardContext.current.disabled) return;
+      try {
+        await writeText(copy.token);
+        if (generation !== clipboardGeneration.current) return;
+        copiedSlot.current = copy;
+        setCanPaste(true);
+        onClipboardError(null);
+      } catch (cause) {
+        if (generation === clipboardGeneration.current) onClipboardError(`Could not copy Slot: ${String(cause)}`);
+      }
+    });
+  }
+
+  async function validCopy() {
+    const copy = copiedSlot.current;
+    if (!copy) return null;
+    const generation = clipboardGeneration.current;
+    try {
+      const text = await readText();
+      if (generation !== clipboardGeneration.current || copiedSlot.current !== copy) return null;
+      if (text === copy.token) return copy;
+      copiedSlot.current = null;
+      setCanPaste(false);
+      return null;
+    } catch (cause) {
+      if (generation !== clipboardGeneration.current) return null;
+      // The native clipboard reports this specific condition for an empty or non-text clipboard.
+      if (String(cause) === "The clipboard contents were not available in the requested format or the clipboard is empty.") {
+        copiedSlot.current = null;
+        setCanPaste(false);
+      } else {
+        setCanPaste(false);
+        onClipboardError(`Could not read clipboard: ${String(cause)}`);
+      }
+      return null;
+    }
+  }
+
+  async function refreshPaste() {
+    setCanPaste(false);
+    const copy = await validCopy();
+    if (copy && copiedSlot.current === copy) setCanPaste(true);
+  }
+
+  useEffect(() => {
+    if (!active || (!stripMenu?.pageId && !canvasMenu)) return;
+    const refresh = () => { void refreshPaste(); };
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  });
+
+  function pasteOnPage(pageId: string) {
+    if (disabled) return;
+    queueClipboard(async () => {
+      const copy = await validCopy();
+      if (!copy || !clipboardContext.current.active || clipboardContext.current.disabled) return;
+      const previous = copy.positions.get(pageId);
+      const base = previous ?? copy.slot;
+      const offset = previous !== undefined || pageId === copy.pageId;
+      clipboardContext.current.changeAlbum((current) => {
+        const { widthMm, heightMm } = pageDimensions(current.pageFormat);
+        const position = offset ? { x: base.x + 5 / widthMm, y: base.y + 5 / heightMm } : undefined;
+        const result = pasteSlot(current, pageId, copy.slot, position);
+        const pasted = result.pages.find((page) => page.id === pageId)!.slots.at(-1)!;
+        copy.positions.set(pageId, { x: pasted.x, y: pasted.y });
+        selectSlot(pageId, pasted.id);
+        return result;
+      });
+      setCanPaste(true);
+    });
+  }
+
+  const clipboardActions = useRef({ copy: () => {}, paste: () => {} });
+  clipboardActions.current = {
+    copy: () => { if (!disabled && selectedSlot) void copySlot(selectedPage.id, selectedSlot); },
+    paste: () => { if (!disabled) void pasteOnPage(selectedPage.id); },
+  };
+  useEffect(() => {
+    if (!active) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.shiftKey || !(event.ctrlKey || event.metaKey) || keyboardTaken(event)) return;
+      const key = event.key.toLowerCase();
+      if (key !== "c" && key !== "v") return;
+      event.preventDefault();
+      if (key === "c") clipboardActions.current.copy();
+      else clipboardActions.current.paste();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [active]);
 
   useEffect(() => {
     if (selectedSlot?.type !== "text" || fonts !== null) return;
@@ -677,6 +815,7 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
                 event.stopPropagation();
                 selectPage(page.id);
                 if (disabled || scale <= 0) return;
+                void refreshPaste();
                 const bounds = event.currentTarget.getBoundingClientRect();
                 setStripMenu(null);
                 setCanvasMenu({
@@ -724,7 +863,10 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
                 event.stopPropagation();
                 selectSlot(page.id, slot.id);
                 setStripMenu(null);
-                if (!disabled) setCanvasMenu({ x: event.clientX, y: event.clientY, pageId: page.id, kind: "slot", slotId: slot.id });
+                if (!disabled) {
+                  void refreshPaste();
+                  setCanvasMenu({ x: event.clientX, y: event.clientY, pageId: page.id, kind: "slot", slotId: slot.id });
+                }
               }}
               onDoubleClick={() => { if (!disabled && slot.type === "text") setEditingText(targetId); }}
               onKeyDown={(event) => {
@@ -968,7 +1110,10 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
                   event.preventDefault();
                   event.stopPropagation();
                   setCanvasMenu(null);
-                  if (!disabled) setStripMenu({ x: event.clientX, y: event.clientY, pageId: page.id });
+                  if (!disabled) {
+                    void refreshPaste();
+                    setStripMenu({ x: event.clientX, y: event.clientY, pageId: page.id });
+                  }
                 }}
                 onDragStart={(event) => {
                   if (disabled) { event.preventDefault(); return; }
@@ -1027,6 +1172,8 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
               }}>Duplicate Page onto New Spread</button>
             <button role="menuitem" type="button"
               onClick={() => { setGridPageId(stripMenu.pageId); close(); }}>Apply grid layout...</button>
+            <button role="menuitem" type="button" disabled={!canPaste}
+              onClick={() => { void pasteOnPage(stripMenu.pageId!); close(); }}>Paste Slot</button>
           </>}
         </div>;
       })()}
@@ -1038,6 +1185,8 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
           onClick={() => { addSlot("text", canvasMenu.pageId, canvasMenu.centre); setCanvasMenu(null); }}>Add Text Slot</button>
         <button role="menuitem" type="button"
           onClick={() => { setGridPageId(canvasMenu.pageId); setCanvasMenu(null); }}>Apply grid layout...</button>
+        <button role="menuitem" type="button" disabled={!canPaste}
+          onClick={() => { void pasteOnPage(canvasMenu.pageId); setCanvasMenu(null); }}>Paste Slot</button>
       </div>}
       {canvasMenu?.kind === "slot" && (() => {
         const { pageId, slotId } = canvasMenu;
@@ -1046,6 +1195,9 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
         const close = () => setCanvasMenu(null);
         return <div role="menu" className="strip-menu" aria-label="Slot actions"
           style={{ left: Math.min(canvasMenu.x, window.innerWidth - 220), top: Math.min(canvasMenu.y, window.innerHeight - 160) }}>
+          <button role="menuitem" type="button" onClick={() => { void copySlot(pageId, slot); close(); }}>Copy Slot</button>
+          <button role="menuitem" type="button" disabled={!canPaste}
+            onClick={() => { void pasteOnPage(pageId); close(); }}>Paste Slot</button>
           {slot.placement && <button role="menuitemcheckbox" type="button" aria-checked={slot.placement.fit}
             onClick={() => { changeAlbum((current) => setPlacementFit(current, pageId, slotId, !slot.placement!.fit)); close(); }}>
             Fit</button>}

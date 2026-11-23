@@ -70,6 +70,8 @@ interface Props {
   bar?: CommandBarLink;
   /** False while another mode is shown; the hidden workspace then leaves keyboard shortcuts alone. */
   active?: boolean;
+  /** Whether Album mode is selected, even if a temporary form hides the workspace. */
+  clipboardActive?: boolean;
   layouts?: AlbumLayouts;
   photoMoves?: PhotoMoveLink;
   exportPorts?: PageExportPorts;
@@ -88,7 +90,7 @@ export interface AlbumLayouts {
 
 const NO_PHOTO_SIZES: ReadonlyMap<string, PhotoSize> = new Map();
 
-export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document, suspended = false, bar = {}, active = true, layouts, photoMoves, exportPorts = tauriPageExportPorts, photoSizes = NO_PHOTO_SIZES, photoIdentities, contentIndexStats }: Props) {
+export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPorts = tauriPhotoPorts, fontPorts = tauriFontPorts, onBusyChange, onAlbumChange, document, suspended = false, bar = {}, active = true, clipboardActive = active, layouts, photoMoves, exportPorts = tauriPageExportPorts, photoSizes = NO_PHOTO_SIZES, photoIdentities, contentIndexStats }: Props) {
   const { command, onEditableChange, onHistoryChange } = bar;
   const [names, setNames] = useState<string[]>([]);
   const [current, setCurrent] = useState<{ filename: string; album: Album } | null>(
@@ -102,6 +104,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
   const [error, setError] = useState<string | null>(null);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [clipboardVersion, setClipboardVersion] = useState(0);
   // A failed Layout Library save makes "Saved … as a new Layout" untrue.
   const layoutSaveFailed = layouts?.state.saveStatus === "error";
   useEffect(() => {
@@ -215,6 +218,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
       if (!await savePromise.current) throw new Error("The open Album could not be saved. Retry saving it first.");
       const present = currentRef.current;
       const moves = await move(present.album);
+      setClipboardVersion((version) => version + 1);
       const relinked = relinkPlacements(present.album, moves);
       // The move wrote the relinked Album to its file, so it is already saved.
       if (relinked !== present.album) savedJson.current = serializeAlbum(relinked);
@@ -445,7 +449,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
           )}
           <AlbumView key={current.filename} album={current.album} onChange={changeAlbum} history={history} photoIdentities={photoIdentities}
             root={root} photoPorts={photoPorts} fontPorts={fontPorts} photoSizes={photoSizes}
-            bar={bar} active={active} layouts={layouts} onNotice={setNotice}
+            bar={bar} active={active} clipboardActive={clipboardActive} layouts={layouts} onNotice={setNotice} clipboardVersion={clipboardVersion} onClipboardError={setError}
             onDuplicatePhoto={setDuplicateWarning}
             onCropPendingChange={setCropPending}
             textDisabled={suspended || busy || saveStatus === "error"}

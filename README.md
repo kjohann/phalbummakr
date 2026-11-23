@@ -215,6 +215,16 @@ Alt+Ctrl duplicates without snapping. Escape or focus loss cancels the duplicate
 preview; a click without movement creates nothing. Album duplication is one
 undoable edit. Alt during resizing has no special effect.
 
+In Album mode, copy a selected Slot with **Ctrl+C** (Cmd+C on macOS) or its
+right-click menu, then paste with **Ctrl+V** onto the Selected Page. Page, Slot
+and Page-thumbnail menus can paste onto their Page. A paste is an independent,
+undoable copy above existing Slots; it never copies the Photo file. The first
+paste onto another Page keeps the original position; same-Page and subsequent
+pastes advance 5 mm down and right, bounded by the Bleed. Each Page has its own
+sequence. Copying anything else replaces the Slot on the system clipboard.
+Slot copies do not cross Albums and expire when leaving Album mode or moving
+Photos or renaming Folders. Copy and paste in text fields remains unchanged.
+
 The selected Text Slot's tools are in the command bar. They offer installed Windows
 fonts, size presets (12, 18, 24, 36, 48 and 72 pt), **Custom...** for an exact point
 size, colour, **B**, **I** and **U** buttons and left, centre and right alignment

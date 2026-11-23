@@ -1,13 +1,40 @@
 import { expect, it } from "vitest";
 import { createAlbum, deserializeAlbum, serializeAlbum } from "./album";
 import {
-  addPhotoSlot, addTextSlot, deleteSlot, duplicateSlot, fitPhotoRect, moveSlot, panCrop, placePhoto, placePhotoOnPage,
+  addPhotoSlot, addTextSlot, deleteSlot, duplicateSlot, pasteSlot, fitPhotoRect, moveSlot, panCrop, placePhoto, placePhotoOnPage,
   placementDisplayCrop, resizeSlot, rotateSlot, setPlacementCrop, setPlacementFit, swapPlacements, zoomCrop,
 } from "./slots";
 
 function slotOf(album: ReturnType<typeof createAlbum>, page = 0) {
   return album.pages[page].slots[0];
 }
+
+it("pastes an independent Slot on another Page using the movement Bleed limits", () => {
+  let album = addPhotoSlot(createAlbum({ name: "Trip", bleedMm: 3 }), "page-1");
+  album = placePhoto(album, "page-1", "slot-1", { path: "a.jpg", width: 6000, height: 4000, orientation: 1 });
+  const snapshot = structuredClone(slotOf(album));
+  album = deleteSlot(album, "page-1", "slot-1");
+  const pasted = pasteSlot(album, "page-2", snapshot, { x: 2, y: 2 });
+  const copy = slotOf(pasted, 1);
+  expect(copy).toMatchObject({ type: "photo", placement: snapshot.placement });
+  expect(copy.x).toBeCloseTo(1 + 3 / 297 - copy.width);
+  expect(copy.y).toBeCloseTo(1 + 3 / 210 - copy.height);
+  copy.placement!.crop.x = 0.123;
+  expect(snapshot.placement!.crop.x).not.toBe(0.123);
+});
+
+it("preserves Text Slot content, placeholder, formatting and out-of-Bleed position on a first cross-Page paste", () => {
+  const album = addTextSlot(createAlbum({ name: "Trip" }), "page-1");
+  const original = album.pages[0].slots[0];
+  if (original.type !== "text") throw new Error("Expected Text Slot.");
+  const snapshot = { ...original, x: -0.1, rotation: 90 as const, text: "Trip", placeholder: "Caption",
+    style: { ...original.style, bold: true, color: "#123456" } };
+  const copy = slotOf(pasteSlot(album, "page-2", snapshot), 1);
+  expect(copy).toEqual({ ...snapshot, id: "slot-1" });
+  if (copy.type !== "text") throw new Error("Expected Text Slot.");
+  copy.style.color = "#ffffff";
+  expect(snapshot.style.color).toBe("#123456");
+});
 
 it("adds a Slot centred on a point, keeping it inside the Bleed", () => {
   const album = createAlbum({ name: "Trip", bleedMm: 3 });

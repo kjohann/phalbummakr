@@ -186,6 +186,7 @@ function DocumentWorkspace({ document, onBusyChange, onTitleChange, hidden, susp
       {/* Hidden rather than unmounted, so Album mode keeps its Spread and Slot selection. */}
       <div className="mode-view" hidden={mode !== "album"}>
         <AlbumWorkspace root={document.root} document={document} suspended={suspended} active={mode === "album" && !hidden}
+          clipboardActive={mode === "album"}
           onBusyChange={reportAlbumBusy} onAlbumChange={reportAlbum} bar={bar} photoMoves={photoMoves} photoSizes={photoSizes} photoIdentities={photoIdentities}
           contentIndexStats={contentIndexStats}
           layouts={{ state: layouts, paneHost: albumLayoutsHost }} />
