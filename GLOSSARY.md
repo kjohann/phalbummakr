@@ -60,6 +60,9 @@ _Avoid_: Book, project, photobook, solution
 One printed side of a leaf in an Album, and the unit that gets designed and exported. It always has a white background.
 _Avoid_: Sheet, side
 
+**Selected Page**:
+The Page chosen as the current target for editing in Album mode. A Spread can show two Pages, but only one Page is selected at a time.
+
 **Page Format**:
 The page size, bleed, safe-zone margin, export resolution and Effective Resolution threshold shared by every Page in an Album. It is chosen when the Album is created and adjusted to match the Print Provider.
 _Avoid_: Page size, paper size
