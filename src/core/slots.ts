@@ -64,6 +64,20 @@ export interface TextSlot {
 
 export type Slot = PhotoSlot | TextSlot;
 
+export type ResizeHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
+export interface ResizeEdges {
+  x: -1 | 0 | 1;
+  y: -1 | 0 | 1;
+}
+
+export function slotResizeEdges(slot: Slot, handle: ResizeHandle): ResizeEdges {
+  const sidewaysText = slot.type === "text" && (slot.rotation === 90 || slot.rotation === 270);
+  return {
+    x: sidewaysText ? 0 : handle.includes("w") ? -1 : handle.includes("e") ? 1 : 0,
+    y: slot.type === "text" && !sidewaysText ? 0 : handle.includes("n") ? -1 : handle.includes("s") ? 1 : 0,
+  };
+}
+
 function editPage(album: Album, pageId: string, edit: (page: Page) => Page): Album {
   const index = album.pages.findIndex((page) => page.id === pageId);
   if (index === -1) throw new Error("Page not found in Album.");
@@ -209,16 +223,23 @@ export function deleteSlot(album: Album, pageId: string, slotId: string): Album 
   });
 }
 
-export function resizeSlot(album: Album, pageId: string, slotId: string, width: number, height: number): Album {
+export function resizeSlot(album: Album, pageId: string, slotId: string, width: number, height: number, handle: ResizeHandle = "se"): Album {
   if (!Number.isFinite(width) || !Number.isFinite(height)) throw new Error("Slot size must be a finite number.");
   const box = bleedBox(album);
   return editSlot(album, pageId, slotId, (slot) => {
-    const sidewaysText = slot.type === "text" && (slot.rotation === 90 || slot.rotation === 270);
+    const edges = slotResizeEdges(slot, handle);
+    const right = slot.x + slot.width;
+    const bottom = slot.y + slot.height;
+    const nextWidth = edges.x === 0 ? slot.width
+      : clamp(width, MIN_SLOT_SIZE, Math.max(MIN_SLOT_SIZE, edges.x === -1 ? right - box.left : box.right - slot.x));
+    const nextHeight = edges.y === 0 ? slot.height
+      : clamp(height, MIN_SLOT_SIZE, Math.max(MIN_SLOT_SIZE, edges.y === -1 ? bottom - box.top : box.bottom - slot.y));
     const resized = {
       ...slot,
-      width: sidewaysText ? slot.width : clamp(width, MIN_SLOT_SIZE, Math.max(MIN_SLOT_SIZE, box.right - slot.x)),
-      height: slot.type === "text" && !sidewaysText ? slot.height
-        : clamp(height, MIN_SLOT_SIZE, Math.max(MIN_SLOT_SIZE, box.bottom - slot.y)),
+      x: edges.x === -1 ? right - nextWidth : slot.x,
+      y: edges.y === -1 ? bottom - nextHeight : slot.y,
+      width: nextWidth,
+      height: nextHeight,
     };
     if (slot.type !== "photo" || resized.type !== "photo" || !slot.placement) return resized;
     return { ...resized, placement: refitPlacement(album, slot.placement, slot, resized) };

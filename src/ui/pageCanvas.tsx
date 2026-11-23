@@ -1,8 +1,8 @@
-import { useEffect, useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Group, Image as KonvaImage, Rect, Text } from "react-konva";
 import {
-  duplicateSlot, fitPhotoRect, moveSlot, pageDimensions, resizeSlot, POINTS_PER_MM, TEXT_LINE_HEIGHT,
-  type Album, type Crop, type PageFormat, type Rectangle, type Slot, type TextSlot,
+  duplicateSlot, fitPhotoRect, moveSlot, pageDimensions, resizeSlot, slotResizeEdges, POINTS_PER_MM, TEXT_LINE_HEIGHT,
+  type Album, type Crop, type PageFormat, type Rectangle, type ResizeHandle, type Slot, type TextSlot,
 } from "../core";
 import { snapSlot, type SnapGuide } from "./slotSnapping";
 import { fitTextSlots, measureTextSlot, textFontStyle } from "./textLayout";
@@ -16,6 +16,7 @@ export interface SlotDrag {
   dy: number;
   bypass: boolean;
   duplicate?: boolean;
+  handle?: ResizeHandle;
 }
 
 export function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, trimHeight: number, measurePlaceholders = false): {
@@ -28,19 +29,25 @@ export function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, t
   }
   const slot = album.pages.find((page) => page.id === drag.pageId)?.slots.find((item) => item.id === drag.slotId);
   if (!slot) return { album, guides: [] };
+  const handle = drag.handle ?? "se";
+  const edges = slotResizeEdges(slot, handle);
   const unclamped = drag.kind === "move"
     ? { ...slot, x: slot.x + drag.dx / trimWidth, y: slot.y + drag.dy / trimHeight }
-    : { ...slot, width: slot.width + drag.dx / trimWidth, height: slot.height + drag.dy / trimHeight };
+    : {
+      ...slot,
+      x: slot.x + (edges.x === -1 ? drag.dx / trimWidth : 0),
+      y: slot.y + (edges.y === -1 ? drag.dy / trimHeight : 0),
+      width: slot.width + edges.x * drag.dx / trimWidth,
+      height: slot.height + edges.y * drag.dy / trimHeight,
+    };
   const apply = (rect: Rectangle) => drag.kind === "move"
     ? moveSlot(album, drag.pageId, drag.slotId, rect.x, rect.y)
-    : resizeSlot(album, drag.pageId, drag.slotId, rect.width, rect.height);
+    : resizeSlot(album, drag.pageId, drag.slotId, rect.width, rect.height, handle);
   const updated = fitTextSlots(apply(unclamped), album, measurePlaceholders);
   if (drag.bypass) return { album: updated, guides: [] };
   const page = updated.pages.find((item) => item.id === drag.pageId)!;
   const proposed = page.slots.find((item) => item.id === drag.slotId)!;
   const dimensions = pageDimensions(album.pageFormat);
-  const sidewaysText = slot.type === "text" && (slot.rotation === 90 || slot.rotation === 270);
-  const property = (axis: "x" | "y") => drag.kind === "move" ? axis : axis === "x" ? "width" : "height";
   const snapped = snapSlot({
     rect: proposed,
     unclamped,
@@ -48,8 +55,9 @@ export function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, t
     safeZone: { x: album.pageFormat.safeZoneMm / dimensions.widthMm, y: album.pageFormat.safeZoneMm / dimensions.heightMm },
     otherSlots: page.slots.filter((item) => item.id !== drag.slotId),
     kind: drag.kind,
-    resizeWidth: !sidewaysText,
-    resizeHeight: slot.type === "photo" || sidewaysText,
+    resizeEdges: edges,
+    resizeWidth: edges.x !== 0,
+    resizeHeight: edges.y !== 0,
     project: (rect) => {
       const candidate = fitTextSlots(apply(rect), album, measurePlaceholders);
       return candidate.pages.find((item) => item.id === drag.pageId)!.slots.find((item) => item.id === drag.slotId)!;
@@ -60,10 +68,42 @@ export function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, t
   return {
     album: result,
     guides: snapped.guides.filter((guide) => {
-      const key = property(guide.axis);
-      return Math.abs(actual[key] - snapped.rect[key]) < 1e-9;
+      const dimension = guide.axis === "x" ? "width" : "height";
+      return Math.abs(actual[guide.axis] - snapped.rect[guide.axis]) < 1e-9
+        && Math.abs(actual[dimension] - snapped.rect[dimension]) < 1e-9;
     }),
   };
+}
+
+const resizeHandles: { handle: ResizeHandle; label: string; left: string; top: string; cursor: string }[] = [
+  { handle: "nw", label: "top left", left: "0%", top: "0%", cursor: "nwse-resize" },
+  { handle: "n", label: "top", left: "50%", top: "0%", cursor: "ns-resize" },
+  { handle: "ne", label: "top right", left: "100%", top: "0%", cursor: "nesw-resize" },
+  { handle: "e", label: "right", left: "100%", top: "50%", cursor: "ew-resize" },
+  { handle: "se", label: "bottom right", left: "100%", top: "100%", cursor: "nwse-resize" },
+  { handle: "s", label: "bottom", left: "50%", top: "100%", cursor: "ns-resize" },
+  { handle: "sw", label: "bottom left", left: "0%", top: "100%", cursor: "nesw-resize" },
+  { handle: "w", label: "left", left: "0%", top: "50%", cursor: "ew-resize" },
+];
+
+export function SlotResizeHandles({ slot, name, onMouseDown }: {
+  slot: Slot; name: string; onMouseDown: (event: ReactMouseEvent, handle: ResizeHandle) => void;
+}) {
+  const sidewaysText = slot.type === "text" && (slot.rotation === 90 || slot.rotation === 270);
+  const primary = slot.type === "photo" ? "se" : sidewaysText ? "s" : "e";
+  return resizeHandles.map(({ handle, label, left, top, cursor }) => {
+    const edges = slotResizeEdges(slot, handle);
+    if (edges.x === 0 && edges.y === 0) return null;
+    const corner = handle.length === 2;
+    return (
+      <span key={handle}
+        className={`slot-resize-handle${corner ? " slot-resize-handle--corner" : ""}${slot.type === "text" ? sidewaysText ? " slot-resize-handle--text-sideways" : " slot-resize-handle--text" : ""}`}
+        role="button" aria-label={handle === primary ? `Resize ${name}` : `Resize ${name} from ${label}`}
+        title={`Resize ${name} from ${label}`}
+        style={{ left, top, cursor: slot.type === "text" ? sidewaysText ? "ns-resize" : "ew-resize" : cursor }}
+        onMouseDown={(event) => onMouseDown(event, handle)} />
+    );
+  });
 }
 
 /** Positions a Slot on the canvas and turns it by its Slot rotation; `children` draw in the Slot's own upright box. */

@@ -5,14 +5,14 @@ import { Layer, Rect, Stage } from "react-konva";
 import {
   addPage, addPhotoSlot, addTextSlot, albumSpreads, applyLayout, contentPhotoUsage, createGridLayout, deletePage, deleteSlot, duplicatePage, lowResolutionPlacements, movePage, pageDimensions,
   panCrop, pasteSlot, placePhoto, placePhotoOnPage, placementDisplayCrop, photoUsage, rotateSlot, saveLayoutFromPage, setPlacementCrop,
-  setPlacementFit, setSlotText, setTextStyle, swapPlacements, usageForPhoto, zoomCrop, POINTS_PER_MM, TEXT_LINE_HEIGHT,
-  type Album, type AppliedLayout, type HistoryDirection, type Crop, type Layout, type Page, type PageFormat, type PhotoIdentity, type PhotoPreviewPorts, type PhotoSize, type Slot, type SlotAddress, type TextStyle,
+  setPlacementFit, setSlotText, setTextStyle, slotResizeEdges, swapPlacements, usageForPhoto, zoomCrop, POINTS_PER_MM, TEXT_LINE_HEIGHT,
+  type Album, type AppliedLayout, type HistoryDirection, type Crop, type Layout, type Page, type PageFormat, type PhotoIdentity, type PhotoPreviewPorts, type PhotoSize, type ResizeHandle, type Slot, type SlotAddress, type TextStyle,
 } from "../core";
 import { hasLayoutDrag, hasPhotoDrag, readLayoutDrag, readPhotoDrag, writeLayoutDrag } from "./photoDrag";
 import { historyShortcut } from "./historyShortcut";
 import LayoutLibraryPane, { plural } from "./LayoutLibraryPane";
 import GridLayoutDialog from "./GridLayoutDialog";
-import { applySlotDrag, LayerPage, PhotoImage, SlotFrame, SnapGuides, TextContent, type SlotDrag } from "./pageCanvas";
+import { applySlotDrag, LayerPage, PhotoImage, SlotFrame, SlotResizeHandles, SnapGuides, TextContent, type SlotDrag } from "./pageCanvas";
 import type { FontPorts } from "./tauriFontPorts";
 import { fitTextSlots } from "./textLayout";
 import TextSlotTools from "./TextSlotTools";
@@ -541,7 +541,7 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
     stopSlotDrag.current = stop;
   }
 
-  function startSlotDrag(event: ReactMouseEvent, pageId: string, slotId: string, kind: SlotDrag["kind"]) {
+  function startSlotDrag(event: ReactMouseEvent, pageId: string, slotId: string, kind: SlotDrag["kind"], handle?: ResizeHandle) {
     if (event.button !== 0) return;
     event.stopPropagation();
     selectSlot(pageId, slotId);
@@ -552,13 +552,13 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
     const slot = album.pages.find((page) => page.id === pageId)?.slots.find((item) => item.id === slotId);
     const startX = event.clientX;
     const startY = event.clientY;
-    const sidewaysText = slot?.type === "text" && (slot.rotation === 90 || slot.rotation === 270);
+    const edges = kind === "resize" && slot ? slotResizeEdges(slot, handle ?? "se") : null;
     const duplicate = kind === "move" && event.altKey;
-    let latest: SlotDrag = { pageId, slotId, kind, dx: 0, dy: 0, bypass: event.ctrlKey, duplicate };
+    let latest: SlotDrag = { pageId, slotId, kind, dx: 0, dy: 0, bypass: event.ctrlKey, duplicate, handle };
     const offset = (moved: MouseEvent): SlotDrag => ({
-      pageId, slotId, kind, dx: kind === "resize" && sidewaysText ? 0 : moved.clientX - startX,
-      dy: kind === "resize" && slot?.type === "text" && !sidewaysText ? 0 : moved.clientY - startY,
-      bypass: moved.ctrlKey, duplicate,
+      pageId, slotId, kind, dx: edges?.x === 0 ? 0 : moved.clientX - startX,
+      dy: edges?.y === 0 ? 0 : moved.clientY - startY,
+      bypass: moved.ctrlKey, duplicate, handle,
     });
     const move = (moved: MouseEvent) => {
       latest = offset(moved);
@@ -1019,8 +1019,8 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
                   onMouseDown={(event) => startSlotDrag(event, page.id, slot.id, "move")}>Move</span>
               )}
               {!disabled && (
-                <span className={`slot-resize-handle${slot.type === "text" ? slot.rotation === 90 || slot.rotation === 270 ? " slot-resize-handle--text-sideways" : " slot-resize-handle--text" : ""}`} aria-label={`Resize ${name}`} role="button"
-                  onMouseDown={(event) => startSlotDrag(event, page.id, slot.id, "resize")} />
+                <SlotResizeHandles slot={slot} name={name}
+                  onMouseDown={(event, handle) => startSlotDrag(event, page.id, slot.id, "resize", handle)} />
               )}
             </div>
             {slot.placement && previewStatus !== "ready" && (

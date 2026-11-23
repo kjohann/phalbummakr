@@ -1,4 +1,4 @@
-import type { Rectangle } from "../core";
+import type { Rectangle, ResizeEdges } from "../core";
 
 interface AlignmentGuide {
   axis: "x" | "y";
@@ -26,6 +26,7 @@ interface SnapOptions {
   kind: "move" | "resize";
   resizeWidth?: boolean;
   resizeHeight: boolean;
+  resizeEdges?: ResizeEdges;
   project?: (rect: Rectangle) => Rectangle;
 }
 
@@ -78,7 +79,8 @@ function guideForRect(candidate: Candidate, rect: Rectangle, otherSlots: Rectang
   return { ...candidate.guide, cross: (start + finish) / 2 };
 }
 
-export function snapSlot({ rect, unclamped = rect, pageSize, safeZone, otherSlots, kind, resizeWidth = true, resizeHeight, project }: SnapOptions): {
+export function snapSlot({ rect, unclamped = rect, pageSize, safeZone, otherSlots, kind, resizeWidth = true, resizeHeight,
+  resizeEdges = { x: 1, y: 1 }, project }: SnapOptions): {
   rect: Rectangle;
   guides: SnapGuide[];
 } {
@@ -88,15 +90,18 @@ export function snapSlot({ rect, unclamped = rect, pageSize, safeZone, otherSlot
   for (const axis of ["x", "y"] as const) {
     if (kind === "resize" && axis === "x" && !resizeWidth) continue;
     if (kind === "resize" && axis === "y" && !resizeHeight) continue;
+    if (kind === "resize" && resizeEdges[axis] === 0) continue;
     const current = snapped;
     const length = size(current, axis);
     const pixels = axis === "x" ? pageSize.width : pageSize.height;
-    const anchors = kind === "move" ? [0, 0.5, 1] : [1];
+    const fromStart = kind === "resize" && resizeEdges[axis] === -1;
+    const anchors = kind === "move" ? [0, 0.5, 1] : [fromStart ? 0 : 1];
     const candidates: Candidate[] = [];
     for (const { position, target } of alignmentTargets(axis, safeZone, otherSlots)) {
       for (const anchor of anchors) {
         const offset = position - (current[axis] + length * anchor);
-        const pointerAnchor = kind === "move" ? unclamped[axis] + length * anchor : end(unclamped, axis);
+        const pointerAnchor = kind === "move" ? unclamped[axis] + length * anchor
+          : fromStart ? unclamped[axis] : end(unclamped, axis);
         const distance = Math.abs(position - pointerAnchor) * pixels;
         if (distance <= SNAP_DISTANCE_PX) {
           candidates.push({ offset, distance, guide: { axis, position, target }, crossRange: null });
@@ -121,8 +126,8 @@ export function snapSlot({ rect, unclamped = rect, pageSize, safeZone, otherSlot
           const existingGap = second[axis] - end(first, axis);
           if (crossStart >= crossEnd || existingGap <= 0) continue;
           const offer = (edge: number, gaps: GapGuide["gaps"], ranges: GapGuide["gaps"]) => {
-            const offset = edge - (kind === "move" ? current[axis] : current[axis] + length);
-            const pointerEdge = kind === "move" ? unclamped[axis] : end(unclamped, axis);
+            const offset = edge - (kind === "move" || fromStart ? current[axis] : current[axis] + length);
+            const pointerEdge = kind === "move" || fromStart ? unclamped[axis] : end(unclamped, axis);
             const distance = Math.abs(edge - pointerEdge) * pixels;
             if (distance > SNAP_DISTANCE_PX) return;
             candidates.push({
@@ -145,6 +150,17 @@ export function snapSlot({ rect, unclamped = rect, pageSize, safeZone, otherSlot
               [existing, { start: end(second, axis), end: after + length }]);
             const before = first[axis] - existingGap - length;
             offer(before, [{ start: before + length, end: first[axis] }, existing], [existing, { start: before, end: first[axis] }]);
+          } else if (fromStart) {
+            const secondGap = second[axis] - end(current, axis);
+            const betweenStart = end(first, axis) + secondGap;
+            if (secondGap > 0 && betweenStart < end(current, axis)) {
+              offer(betweenStart, [{ start: end(first, axis), end: betweenStart }, { start: end(current, axis), end: second[axis] }], [existing]);
+            }
+            const afterStart = end(second, axis) + existingGap;
+            if (afterStart < end(current, axis)) {
+              offer(afterStart, [existing, { start: end(second, axis), end: afterStart }],
+                [existing, { start: end(second, axis), end: end(current, axis) }]);
+            }
           } else {
             const firstGap = current[axis] - end(first, axis);
             const betweenEnd = second[axis] - firstGap;
@@ -163,11 +179,17 @@ export function snapSlot({ rect, unclamped = rect, pageSize, safeZone, otherSlot
     for (const candidate of candidates.sort((a, b) => a.distance - b.distance)) {
       const next = { ...snapped };
       if (kind === "move") next[axis] += candidate.offset;
+      else if (fromStart) {
+        next[axis] += candidate.offset;
+        if (axis === "x") next.width -= candidate.offset;
+        else next.height -= candidate.offset;
+      }
       else if (axis === "x") next.width += candidate.offset;
       else next.height += candidate.offset;
       const projected = project ? project(next) : next;
       const property = kind === "move" ? axis : axis === "x" ? "width" : "height";
       if (Math.abs(projected[property] - next[property]) >= 1e-9
+        || Math.abs(projected[axis] - next[axis]) >= 1e-9
         || !guideForRect(candidate, projected, otherSlots)
         || chosen.some((previous) => !guideForRect(previous, projected, otherSlots))) continue;
       snapped = projected;

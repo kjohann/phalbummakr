@@ -138,7 +138,11 @@ in-progress Crop gesture to finish and save.
 ## Photo Slots, Crop and Usage
 
 Use **Add Photo Slot** to add a Slot to the selected Page. Drag a Slot to move it,
-use its bottom-right handle to resize it, and select **Delete Slot** to remove it.
+use its corner or side-midpoint handles to resize it, and select **Delete Slot**
+to remove it. A corner drag keeps the opposite corner fixed; a side drag keeps
+the opposite side fixed and changes only that dimension. Handles appear on
+hover or selection in Album and Layout modes. Resizing stops at the minimum
+size and Bleed limits rather than flipping the Slot.
 Drag a Photo from the grid onto a Slot to place or replace it, or onto an empty
 part of a Page to create a Slot. The editor uses cached thumbnails and previews,
 not original files.
@@ -193,8 +197,10 @@ can work on Windows. The app does not currently accept file drops from Explorer.
 Use **Add Text Slot** to place a caption or title on the selected Page. Type in
 place; double-click a Text Slot or select it and press Enter to edit it again.
 Escape finishes editing. Drag its outline (or the **Move** handle while editing)
-and use the edge handle to change its writing width (the bottom edge for a
-sideways Slot). Height automatically fits
+and use either writing-width side handle or a corner handle to change its
+writing width (top/bottom sides for a sideways Slot). The opposite edge along
+the writing-width axis stays fixed. Corner handles also change only writing
+width; there are no handles that resize the automatic height. Height automatically fits
 the content, growing and shrinking as text, font or width changes.
 **Delete Slot** removes it.
 

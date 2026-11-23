@@ -807,6 +807,110 @@ it("resizes the writing width of a sideways Text Slot using its vertical handle"
   await waitFor(() => expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].height * 420).toBeCloseTo(before + 42));
 });
 
+it.each([
+  { direction: "top left", dx: 59.4, dy: 42, x: 0.4, y: 0.4, width: 0.3, height: 0.3 },
+  { direction: "top", dx: 59.4, dy: 42, x: 0.3, y: 0.4, width: 0.4, height: 0.3 },
+  { direction: "top right", dx: 59.4, dy: 42, x: 0.3, y: 0.4, width: 0.5, height: 0.3 },
+  { direction: "right", dx: 59.4, dy: 42, x: 0.3, y: 0.3, width: 0.5, height: 0.4 },
+  { direction: "bottom right", dx: 59.4, dy: 42, x: 0.3, y: 0.3, width: 0.5, height: 0.5 },
+  { direction: "bottom", dx: 59.4, dy: 42, x: 0.3, y: 0.3, width: 0.4, height: 0.5 },
+  { direction: "bottom left", dx: 59.4, dy: 42, x: 0.4, y: 0.3, width: 0.3, height: 0.5 },
+  { direction: "left", dx: 59.4, dy: 42, x: 0.4, y: 0.3, width: 0.3, height: 0.4 },
+])("previews and persists a Photo Slot resize from $direction", async ({ direction, dx, dy, ...expected }) => {
+  const { ports, files } = disk();
+  const album = addPhotoSlot(createAlbum({ name: "Existing", pageCount: 2 }), "page-1");
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} document={{ path: "Existing", album }} />);
+  const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  const handles = within(slot).getAllByRole("button", { name: /^Resize / });
+  expect(handles).toHaveLength(8);
+  const label = direction === "bottom right" ? "Resize Page 1 Photo Slot 1" : `Resize Page 1 Photo Slot 1 from ${direction}`;
+  fireEvent.mouseDown(screen.getByRole("button", { name: label }), { button: 0, clientX: 100, clientY: 100, ctrlKey: true });
+  fireEvent.mouseMove(window, { clientX: 100 + dx / 2, clientY: 100 + dy / 2, ctrlKey: true });
+  fireEvent.mouseMove(window, { clientX: 100 + dx, clientY: 100 + dy, ctrlKey: true });
+  expect(parseFloat(slot.style.width)).toBeCloseTo(expected.width * 594, 9);
+  expect(parseFloat(slot.style.height)).toBeCloseTo(expected.height * 420, 9);
+  fireEvent.mouseUp(window, { clientX: 100 + dx, clientY: 100 + dy, ctrlKey: true });
+  await waitFor(() => {
+    const saved = deserializeAlbum(files.get("Existing")!).pages[0].slots[0];
+    for (const key of ["x", "y", "width", "height"] as const) expect(saved[key]).toBeCloseTo(expected[key], 9);
+  });
+  fireEvent.click(bar().getByRole("button", { name: "Bar undo" }));
+  expect(parseFloat(slot.style.width)).toBeCloseTo(0.4 * 594, 9);
+  expect(parseFloat(slot.style.height)).toBeCloseTo(0.4 * 420, 9);
+  fireEvent.click(bar().getByRole("button", { name: "Bar redo" }));
+  expect(parseFloat(slot.style.width)).toBeCloseTo(expected.width * 594, 9);
+});
+
+it.each([0, 90, 180, 270] as const)("resizes a %d-degree Text Slot from a corner while preserving its reflow anchor", async (rotation) => {
+  const { ports, files } = disk();
+  let album = setSlotText(addTextSlot(createAlbum({ name: "Existing", pageCount: 2 }), "page-1"),
+    "page-1", "slot-1", "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+  for (let turn = 0; turn < rotation; turn += 90) album = rotateSlot(album, "page-1", "slot-1", 90);
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} fontPorts={{ list: async () => ["Arial"] }}
+    document={{ path: "Existing", album }} />);
+  const slot = screen.getByRole("button", { name: "Page 1 Text Slot 1" });
+  const sideways = rotation === 90 || rotation === 270;
+  expect(within(slot).getAllByRole("button", { name: /^Resize / })).toHaveLength(6);
+  expect(within(slot).queryByRole("button", { name: `Resize Page 1 Text Slot 1 from ${sideways ? "left" : "top"}` })).toBeNull();
+  const before = {
+    left: parseFloat(slot.style.left), top: parseFloat(slot.style.top),
+    width: parseFloat(slot.style.width), height: parseFloat(slot.style.height),
+  };
+  const dx = sideways ? 80 : before.width / 2;
+  const dy = sideways ? before.height / 2 : 80;
+  fireEvent.mouseDown(screen.getByRole("button", { name: "Resize Page 1 Text Slot 1 from top left" }),
+    { button: 0, clientX: 100, clientY: 100, ctrlKey: true });
+  fireEvent.mouseMove(window, { clientX: 100 + dx, clientY: 100 + dy, ctrlKey: true });
+  fireEvent.mouseUp(window, { clientX: 100 + dx, clientY: 100 + dy, ctrlKey: true });
+  const after = {
+    left: parseFloat(slot.style.left), top: parseFloat(slot.style.top),
+    width: parseFloat(slot.style.width), height: parseFloat(slot.style.height),
+  };
+  expect(sideways ? after.height : after.width).toBeCloseTo((sideways ? before.height : before.width) / 2, 9);
+  expect(sideways ? after.top + after.height : after.left + after.width)
+    .toBeCloseTo(sideways ? before.top + before.height : before.left + before.width, 9);
+  expect(sideways ? after.width : after.height).toBeCloseTo((sideways ? before.width : before.height) * 2, 9);
+  if (rotation === 90) expect(after.left + after.width).toBeCloseTo(before.left + before.width, 9);
+  else if (rotation === 180) expect(after.top + after.height).toBeCloseTo(before.top + before.height, 9);
+  else expect(sideways ? after.left : after.top).toBeCloseTo(sideways ? before.left : before.top, 9);
+  await waitFor(() => {
+    const saved = deserializeAlbum(files.get("Existing")!).pages[0].slots[0];
+    expect(saved.width * 594).toBeCloseTo(after.width, 9);
+    expect(saved.height * 420).toBeCloseTo(after.height, 9);
+  });
+});
+
+it("snaps a top-left resize on both axes, toggles Ctrl and cancels without changing the Album", () => {
+  const { ports } = disk();
+  const album = addPhotoSlot(createAlbum({ name: "Existing", pageCount: 2 }), "page-1");
+  const onAlbumChange = vi.fn();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} onAlbumChange={onAlbumChange}
+    document={{ path: "Existing", album }} />);
+  onAlbumChange.mockClear();
+  const slot = screen.getByRole("button", { name: "Page 1 Photo Slot 1" });
+  const before = { left: slot.style.left, top: slot.style.top, width: slot.style.width, height: slot.style.height };
+  const dx = (5 / 297 - 0.3) * 594 + 3;
+  const dy = (5 / 210 - 0.3) * 420 + 3;
+  fireEvent.mouseDown(screen.getByRole("button", { name: "Resize Page 1 Photo Slot 1 from top left" }),
+    { button: 0, clientX: 100, clientY: 100 });
+  fireEvent.mouseMove(window, { clientX: 100 + dx, clientY: 100 + dy });
+  expect(screen.getAllByLabelText("Snap to Safe Zone")).toHaveLength(2);
+  expect(parseFloat(slot.style.width)).toBeCloseTo((0.7 - 5 / 297) * 594, 9);
+  expect(parseFloat(slot.style.height)).toBeCloseTo((0.7 - 5 / 210) * 420, 9);
+  fireEvent.keyDown(window, { key: "Control", ctrlKey: true });
+  expect(screen.queryByLabelText("Snap to Safe Zone")).toBeNull();
+  expect(parseFloat(slot.style.width)).toBeCloseTo((0.7 - 5 / 297) * 594 - 3, 9);
+  fireEvent.keyUp(window, { key: "Control" });
+  expect(screen.getAllByLabelText("Snap to Safe Zone")).toHaveLength(2);
+  fireEvent.keyDown(window, { key: "Escape" });
+  fireEvent.mouseUp(window, { clientX: 100 + dx, clientY: 100 + dy });
+  expect(slot.style.left).toBe(before.left);
+  expect(slot.style.top).toBe(before.top);
+  expect(slot.style.width).toBe(before.width);
+  expect(slot.style.height).toBe(before.height);
+  expect(onAlbumChange).not.toHaveBeenCalled();
+});
+
 it("fits Text Slot height to its content and persists growth and shrinkage", async () => {
   const { ports, files } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);

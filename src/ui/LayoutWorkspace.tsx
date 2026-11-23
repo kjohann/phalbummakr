@@ -3,14 +3,14 @@ import { createPortal } from "react-dom";
 import { Group, Layer, Rect, Stage } from "react-konva";
 import {
   addPhotoSlot, addTextSlot, createGridLayout, deleteLayout, deleteSlot, duplicateLayout, madeForOtherAspectRatio, newLayout, pageAspectRatio, pageDimensions,
-  canRedo, canUndo, emptyHistory, endGroup, recordChange, rotateSlot, setLayoutSlots, setSlotPlaceholder, setTextStyle, stepHistory,
-  POINTS_PER_MM, TEXT_LINE_HEIGHT, type Album, type Layout, type PageFormat, type Slot, type HistoryDirection, type TextStyle, type UndoHistory,
+  canRedo, canUndo, emptyHistory, endGroup, recordChange, rotateSlot, setLayoutSlots, setSlotPlaceholder, setTextStyle, slotResizeEdges, stepHistory,
+  POINTS_PER_MM, TEXT_LINE_HEIGHT, type Album, type Layout, type PageFormat, type ResizeHandle, type Slot, type HistoryDirection, type TextStyle, type UndoHistory,
 } from "../core";
 import LayoutLibraryPane from "./LayoutLibraryPane";
 import GridLayoutDialog from "./GridLayoutDialog";
 import ModalDialog from "./ModalDialog";
 import { historyShortcut } from "./historyShortcut";
-import { applySlotDrag, LayerPage, SnapGuides, TextContent, type SlotDrag } from "./pageCanvas";
+import { applySlotDrag, LayerPage, SlotResizeHandles, SnapGuides, TextContent, type SlotDrag } from "./pageCanvas";
 import { PhotoSlotTools, SlotActions } from "./SlotTools";
 import { useSlotShortcuts } from "./slotShortcuts";
 import { tauriFontPorts, type FontPorts } from "./tauriFontPorts";
@@ -274,7 +274,7 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
     return true;
   }
 
-  function startSlotDrag(event: ReactMouseEvent, slotId: string, kind: SlotDrag["kind"]) {
+  function startSlotDrag(event: ReactMouseEvent, slotId: string, kind: SlotDrag["kind"], handle?: ResizeHandle) {
     if (event.button !== 0) return;
     event.stopPropagation();
     selectSlot(slotId);
@@ -285,13 +285,13 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
     const slot = slots.find((item) => item.id === slotId);
     const startX = event.clientX;
     const startY = event.clientY;
-    const sidewaysText = slot?.type === "text" && (slot.rotation === 90 || slot.rotation === 270);
+    const edges = kind === "resize" && slot ? slotResizeEdges(slot, handle ?? "se") : null;
     const duplicate = kind === "move" && event.altKey;
-    let latest: SlotDrag = { pageId: LAYOUT_PAGE, slotId, kind, dx: 0, dy: 0, bypass: event.ctrlKey, duplicate };
+    let latest: SlotDrag = { pageId: LAYOUT_PAGE, slotId, kind, dx: 0, dy: 0, bypass: event.ctrlKey, duplicate, handle };
     const offset = (moved: MouseEvent): SlotDrag => ({
-      pageId: LAYOUT_PAGE, slotId, kind, dx: kind === "resize" && sidewaysText ? 0 : moved.clientX - startX,
-      dy: kind === "resize" && slot?.type === "text" && !sidewaysText ? 0 : moved.clientY - startY,
-      bypass: moved.ctrlKey, duplicate,
+      pageId: LAYOUT_PAGE, slotId, kind, dx: edges?.x === 0 ? 0 : moved.clientX - startX,
+      dy: edges?.y === 0 ? 0 : moved.clientY - startY,
+      bypass: moved.ctrlKey, duplicate, handle,
     });
     const move = (moved: MouseEvent) => {
       latest = offset(moved);
@@ -485,9 +485,8 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
                     }} />
                 )}
                 {!disabled && (
-                  <span className={`slot-resize-handle${slot.type === "text" ? slot.rotation === 90 || slot.rotation === 270 ? " slot-resize-handle--text-sideways" : " slot-resize-handle--text" : ""}`}
-                    aria-label={`Resize ${name}`} role="button"
-                    onMouseDown={(event) => startSlotDrag(event, slot.id, "resize")} />
+                  <SlotResizeHandles slot={slot} name={name}
+                    onMouseDown={(event, handle) => startSlotDrag(event, slot.id, "resize", handle)} />
                 )}
               </div>
             );

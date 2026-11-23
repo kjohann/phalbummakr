@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import { createAlbum, deserializeAlbum, serializeAlbum } from "./album";
 import {
   addPhotoSlot, addTextSlot, deleteSlot, duplicateSlot, pasteSlot, fitPhotoRect, moveSlot, panCrop, placePhoto, placePhotoOnPage,
-  placementDisplayCrop, resizeSlot, rotateSlot, setPlacementCrop, setPlacementFit, swapPlacements, zoomCrop,
+  placementDisplayCrop, resizeSlot, rotateSlot, setPlacementCrop, setPlacementFit, swapPlacements, zoomCrop, type ResizeHandle,
 } from "./slots";
 
 function slotOf(album: ReturnType<typeof createAlbum>, page = 0) {
@@ -202,6 +202,48 @@ it("resizes a Slot from its bottom-right corner, keeping a minimum size and stop
   expect(huge.height).toBeCloseTo(0.8, 6);
   expect(slotOf(resizeSlot(album, "page-1", "slot-1", 0, -1))).toMatchObject({ width: 0.02, height: 0.02 });
   expect(() => resizeSlot(album, "page-1", "slot-1", 0.5, Infinity)).toThrow(/size/i);
+});
+
+it.each<{ handle: ResizeHandle; x: number; y: number; width: number; height: number }>([
+  { handle: "nw", x: 0.2, y: 0.45, width: 0.5, height: 0.25 },
+  { handle: "n", x: 0.3, y: 0.45, width: 0.4, height: 0.25 },
+  { handle: "ne", x: 0.3, y: 0.45, width: 0.5, height: 0.25 },
+  { handle: "e", x: 0.3, y: 0.3, width: 0.5, height: 0.4 },
+  { handle: "se", x: 0.3, y: 0.3, width: 0.5, height: 0.25 },
+  { handle: "s", x: 0.3, y: 0.3, width: 0.4, height: 0.25 },
+  { handle: "sw", x: 0.2, y: 0.3, width: 0.5, height: 0.25 },
+  { handle: "w", x: 0.2, y: 0.3, width: 0.5, height: 0.4 },
+])("anchors the opposite edges when resizing from $handle", ({ handle, ...expected }) => {
+  const album = addPhotoSlot(createAlbum({ name: "Trip" }), "page-1");
+  const resized = slotOf(resizeSlot(album, "page-1", "slot-1", 0.5, 0.25, handle));
+  for (const key of ["x", "y", "width", "height"] as const) expect(resized[key]).toBeCloseTo(expected[key], 9);
+});
+
+it("clamps top-left resizing at the Bleed and minimum size without moving the opposite corner", () => {
+  const album = addPhotoSlot(createAlbum({ name: "Trip", bleedMm: 21 }), "page-1");
+  const large = slotOf(resizeSlot(album, "page-1", "slot-1", 10, 10, "nw"));
+  expect(large.x).toBeCloseTo(-21 / 297, 9);
+  expect(large.y).toBeCloseTo(-0.1, 9);
+  expect(large.x + large.width).toBeCloseTo(0.7, 9);
+  expect(large.y + large.height).toBeCloseTo(0.7, 9);
+  const small = slotOf(resizeSlot(album, "page-1", "slot-1", -1, -1, "nw"));
+  expect(small.width).toBe(0.02);
+  expect(small.height).toBe(0.02);
+  expect(small.x).toBeCloseTo(0.68, 9);
+  expect(small.y).toBeCloseTo(0.68, 9);
+});
+
+it("refits a rotated Photo's Crop identically regardless of which corner resizes it", () => {
+  let album = addPhotoSlot(createAlbum({ name: "Trip" }), "page-1");
+  album = placePhoto(album, "page-1", "slot-1", { path: "trip.jpg", width: 6000, height: 4000, orientation: 1 });
+  album = rotateSlot(album, "page-1", "slot-1", 90);
+  const original = slotOf(album);
+  const fromStart = slotOf(resizeSlot(album, "page-1", "slot-1", 0.3, 0.2, "nw"));
+  const fromEnd = slotOf(resizeSlot(album, "page-1", "slot-1", 0.3, 0.2, "se"));
+  expect(fromStart.placement).toEqual(fromEnd.placement);
+  expect(fromStart.rotation).toBe(90);
+  expect(fromStart.x + fromStart.width).toBeCloseTo(original.x + original.width, 9);
+  expect(fromStart.y + fromStart.height).toBeCloseTo(original.y + original.height, 9);
 });
 
 it("places a Photo with a centred Crop that fills the Slot, for landscape, portrait and rotated Photos", () => {

@@ -54,6 +54,62 @@ it("snaps a Photo Slot's resized edges without moving its fixed corner", () => {
   ]);
 });
 
+it("snaps the moving top and left edges without moving the opposite corner", () => {
+  const result = snapSlot({
+    rect: { x: 0.023, y: 0.026, width: 0.677, height: 0.674 },
+    pageSize: { width: 600, height: 400 },
+    safeZone: { x: 0.02, y: 0.03 }, otherSlots: [],
+    kind: "resize", resizeHeight: true, resizeEdges: { x: -1, y: -1 },
+  });
+  expect(result.rect.x).toBeCloseTo(0.02, 9);
+  expect(result.rect.y).toBeCloseTo(0.03, 9);
+  expect(result.rect.x + result.rect.width).toBeCloseTo(0.7, 9);
+  expect(result.rect.y + result.rect.height).toBeCloseTo(0.7, 9);
+  expect(result.guides).toEqual([
+    { axis: "x", position: 0.02, target: "Safe Zone" },
+    { axis: "y", position: 0.03, target: "Safe Zone" },
+  ]);
+});
+
+it.each(["between", "after"] as const)("matches equal gaps when resizing a left edge %s other Slots", (position) => {
+  const rect = position === "between"
+    ? { x: 0.379, y: 0.25, width: 0.246, height: 0.25 }
+    : { x: 0.629, y: 0.25, width: 0.246, height: 0.25 };
+  const otherSlots = position === "between"
+    ? [{ x: 0.125, y: 0.25, width: 0.125, height: 0.25 }, { x: 0.75, y: 0.25, width: 0.125, height: 0.25 }]
+    : [{ x: 0.125, y: 0.25, width: 0.125, height: 0.25 }, { x: 0.375, y: 0.25, width: 0.125, height: 0.25 }];
+  const result = snapSlot({
+    rect, pageSize: { width: 600, height: 400 }, safeZone: { x: 0.02, y: 0.03 }, otherSlots,
+    kind: "resize", resizeHeight: false, resizeEdges: { x: -1, y: 0 },
+  });
+  expect(result.rect.x).toBeCloseTo(position === "between" ? 0.375 : 0.625, 9);
+  expect(result.rect.x + result.rect.width).toBeCloseTo(rect.x + rect.width, 9);
+  expect(result.guides).toContainEqual({
+    axis: "x", target: "Equal gap", cross: 0.375,
+    gaps: position === "between"
+      ? [{ start: 0.25, end: 0.375 }, { start: 0.625, end: 0.75 }]
+      : [{ start: 0.25, end: 0.375 }, { start: 0.5, end: 0.625 }],
+  });
+});
+
+it("rejects unreachable left-edge targets using the unclamped pointer rather than the minimum-size edge", () => {
+  const options = {
+    rect: { x: 0.68, y: 0.2, width: 0.02, height: 0.2 },
+    pageSize: { width: 600, height: 400 }, safeZone: { x: 0.02, y: 0.03 },
+    otherSlots: [{ x: 0.684, y: 0.5, width: 0.1, height: 0.1 }, { x: 0.676, y: 0.8, width: 0.1, height: 0.1 }],
+    kind: "resize" as const, resizeHeight: false, resizeEdges: { x: -1 as const, y: 0 as const },
+    project: (rect: { x: number; y: number; width: number; height: number }) => {
+      const width = Math.max(0.02, rect.width);
+      return { ...rect, x: 0.7 - width, width };
+    },
+  };
+  const result = snapSlot({ ...options, unclamped: { ...options.rect, x: 0.685, width: 0.015 } });
+  expect(result.rect.x).toBeCloseTo(0.676, 9);
+  expect(result.rect.width).toBeCloseTo(0.024, 9);
+  expect(result.guides).toContainEqual({ axis: "x", position: 0.676, target: "Slot" });
+  expect(snapSlot({ ...options, unclamped: { ...options.rect, x: 2, width: -1.3 } }).guides).toEqual([]);
+});
+
 it("shows matching top, center and bottom guides for equal-height Slots", () => {
   const result = snapSlot({
     rect: { x: 0.125, y: 0.254, width: 0.125, height: 0.25 },

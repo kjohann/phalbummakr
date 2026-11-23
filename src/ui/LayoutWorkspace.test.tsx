@@ -308,6 +308,59 @@ it("moves a Slot with the mouse, as in Album mode", async () => {
   expect(saved(store).layouts[1].slots[0].x * 297).toBeCloseTo(before.x * 297 + 10);
 });
 
+it("resizes a Photo Slot from its left side in Layout mode and persists one undoable change", async () => {
+  const { ports, store } = disk();
+  render(<Harness ports={ports} />);
+  fireEvent.click((await cards())[1]);
+  const slot = screen.getByRole("button", { name: "Photo Slot 1" });
+  const original = readLayoutLibrary(null, format).layouts[1].slots[0];
+  const before = { left: parseFloat(slot.style.left), width: parseFloat(slot.style.width), height: slot.style.height };
+  expect(within(slot).getAllByRole("button", { name: /^Resize / })).toHaveLength(8);
+  fireEvent.mouseDown(screen.getByRole("button", { name: "Resize Photo Slot 1 from left" }),
+    { button: 0, clientX: 100, clientY: 100, ctrlKey: true });
+  fireEvent.mouseMove(window, { clientX: 110, clientY: 140, ctrlKey: true });
+  fireEvent.mouseMove(window, { clientX: 120, clientY: 180, ctrlKey: true });
+  expect(parseFloat(slot.style.left)).toBeCloseTo(before.left + 20, 9);
+  expect(parseFloat(slot.style.width)).toBeCloseTo(before.width - 20, 9);
+  expect(slot.style.height).toBe(before.height);
+  fireEvent.mouseUp(window, { clientX: 120, clientY: 180, ctrlKey: true });
+  await waitFor(() => {
+    const resized = saved(store).layouts[1].slots[0];
+    expect(resized.x).toBeCloseTo(original.x + 20 / 594, 9);
+    expect(resized.width).toBeCloseTo(original.width - 20 / 594, 9);
+    expect(resized.height).toBe(original.height);
+  });
+  fireEvent.click(bar().getByRole("button", { name: "Bar undo" }));
+  expect(parseFloat(slot.style.left)).toBeCloseTo(before.left, 9);
+  expect(parseFloat(slot.style.width)).toBeCloseTo(before.width, 9);
+  fireEvent.click(bar().getByRole("button", { name: "Bar redo" }));
+  expect(parseFloat(slot.style.width)).toBeCloseTo(before.width - 20, 9);
+});
+
+it("resizes a rotated placeholder from the top in Layout mode without manually changing its fitted height", async () => {
+  const { ports, store } = disk();
+  render(<Harness ports={ports} />);
+  fireEvent.click((await cards())[captionIndex]);
+  const slot = screen.getByRole("button", { name: "Text Slot 2" });
+  fireEvent.click(slot);
+  fireEvent.click(screen.getByRole("button", { name: "Rotate Slot clockwise" }));
+  const before = { top: parseFloat(slot.style.top), height: parseFloat(slot.style.height), width: slot.style.width };
+  expect(within(slot).getAllByRole("button", { name: /^Resize / })).toHaveLength(6);
+  expect(within(slot).queryByRole("button", { name: "Resize Text Slot 2 from right" })).toBeNull();
+  fireEvent.mouseDown(screen.getByRole("button", { name: "Resize Text Slot 2 from top" }),
+    { button: 0, clientX: 100, clientY: 100, ctrlKey: true });
+  fireEvent.mouseMove(window, { clientX: 180, clientY: 120, ctrlKey: true });
+  fireEvent.mouseUp(window, { clientX: 180, clientY: 120, ctrlKey: true });
+  expect(parseFloat(slot.style.top)).toBeCloseTo(before.top + 20, 9);
+  expect(parseFloat(slot.style.height)).toBeCloseTo(before.height - 20, 9);
+  expect(slot.style.width).toBe(before.width);
+  await waitFor(() => {
+    const resized = saved(store).layouts[captionIndex].slots[1];
+    expect(resized.rotation).toBe(90);
+    expect(resized.height * 420).toBeCloseTo(before.height - 20, 9);
+  });
+});
+
 it("offers the Slot tools without content commands, and saves style, rotation and deletion", async () => {
   const { ports, store } = disk();
   render(<Harness ports={ports} />);
