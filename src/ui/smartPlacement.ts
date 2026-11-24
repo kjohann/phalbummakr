@@ -11,19 +11,20 @@ interface Options {
 }
 
 export function smartPlacement({ slots, photoAspect, pageMm, pagePixels, bleedMm, pointer, previous }: Options): { rect: Rectangle } | null {
-  const candidates: { rect: Rectangle; pattern: boolean }[] = [];
+  const candidates: { rect: Rectangle; pattern: boolean; member?: string }[] = [];
+  const patternMembers = new Set<string>();
   for (const slot of slots) {
     if (slot.type !== "photo") continue;
     const width = slot.height * pageMm.height * photoAspect / pageMm.width;
     const height = slot.width * pageMm.width / photoAspect / pageMm.height;
     const gapX = 3 / pageMm.width;
     const gapY = 3 / pageMm.height;
-    candidates.push(...[
-      { x: slot.x + slot.width + gapX, y: slot.y, width, height: slot.height },
-      { x: slot.x - gapX - width, y: slot.y, width, height: slot.height },
-      { x: slot.x, y: slot.y + slot.height + gapY, width: slot.width, height },
-      { x: slot.x, y: slot.y - gapY - height, width: slot.width, height },
-    ].map((rect) => ({ rect, pattern: false })));
+    candidates.push(
+      { rect: { x: slot.x + slot.width + gapX, y: slot.y, width, height: slot.height }, pattern: false, member: `x:${slot.id}` },
+      { rect: { x: slot.x - gapX - width, y: slot.y, width, height: slot.height }, pattern: false, member: `x:${slot.id}` },
+      { rect: { x: slot.x, y: slot.y + slot.height + gapY, width: slot.width, height }, pattern: false, member: `y:${slot.id}` },
+      { rect: { x: slot.x, y: slot.y - gapY - height, width: slot.width, height }, pattern: false, member: `y:${slot.id}` },
+    );
   }
   for (const axis of ["x", "y"] as const) {
     const cross = axis === "x" ? "y" : "x";
@@ -39,9 +40,8 @@ export function smartPlacement({ slots, photoAspect, pageMm, pagePixels, bleedMm
       if (!second) continue;
       const gap = second[axis] - first[axis] - first[length];
       if (gap < -1e-9) continue;
-      if (aligned.some((slot, position) => position > 0
-        && Math.abs(slot[axis] - aligned[position - 1][axis] - aligned[position - 1][length] - gap)
-          * pagePixels[length] > 2)) continue;
+      patternMembers.add(`${axis}:${first.id}`);
+      patternMembers.add(`${axis}:${second.id}`);
       const add = (anchor: Slot, before: boolean) => {
         const width = axis === "x" ? anchor.height * pageMm.height * photoAspect / pageMm.width : anchor.width;
         const height = axis === "y" ? anchor.width * pageMm.width / photoAspect / pageMm.height : anchor.height;
@@ -53,7 +53,8 @@ export function smartPlacement({ slots, photoAspect, pageMm, pagePixels, bleedMm
       if (index + 2 === aligned.length) add(second, false);
     }
   }
-  const valid = candidates.filter(({ rect }) => rect.x >= -bleedMm / pageMm.width - 1e-9
+  const valid = candidates.filter(({ rect, member }) => (!member || !patternMembers.has(member))
+    && rect.x >= -bleedMm / pageMm.width - 1e-9
     && rect.y >= -bleedMm / pageMm.height - 1e-9
     && rect.x + rect.width <= 1 + bleedMm / pageMm.width + 1e-9
     && rect.y + rect.height <= 1 + bleedMm / pageMm.height + 1e-9

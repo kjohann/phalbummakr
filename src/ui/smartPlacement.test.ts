@@ -32,7 +32,7 @@ describe("smart placement", () => {
     expect(smartPlacement({ ...options, pointer: { x: 0.23, y: 0.4 } })?.rect.x).toBeCloseTo(0.18);
   });
 
-  it("does not treat an inconsistent three-Slot row as an equal-gap pattern", () => {
+  it("extends a locally established pair even when a third aligned Slot has a different gap", () => {
     const slots = [
       { ...anchor, x: 0.1, width: 0.1 },
       { ...anchor, id: "b", x: 0.22, width: 0.1 },
@@ -43,7 +43,7 @@ describe("smart placement", () => {
       pagePixels: { width: 400, height: 400 }, bleedMm: 0,
       pointer: { x: 0.53, y: 0.4 },
     });
-    expect(result?.rect.x).toBeCloseTo(0.475, 6);
+    expect(result?.rect.x).toBeCloseTo(0.5, 6);
   });
 
   it("keeps the previous equally ranked suggestion when distances nearly tie", () => {
@@ -126,6 +126,19 @@ describe("smart placement", () => {
     expect(smartPlacement({ ...options, pagePixels: { width: 800, height: 800 } })?.rect.x).toBeCloseTo(0.335, 6);
   });
 
+  it("extends a three-Slot row with gaps differing by less than two screen pixels", () => {
+    const slots = [
+      { ...anchor, x: 0.1, y: 0.2, width: 0.1, height: 0.1 },
+      { ...anchor, id: "b", x: 0.22, y: 0.2, width: 0.1, height: 0.1 },
+      { ...anchor, id: "c", x: 0.344, y: 0.2, width: 0.1, height: 0.1 },
+    ];
+    const result = smartPlacement({
+      slots, photoAspect: 1, pageMm: { width: 200, height: 200 }, bleedMm: 0,
+      pagePixels: { width: 400, height: 400 }, pointer: { x: 0.518, y: 0.25 },
+    });
+    expect(result?.rect.x).toBeCloseTo(0.468, 6);
+  });
+
   it("chooses the closer valid direction for a diagonal approach", () => {
     const options = {
       slots: [{ ...anchor, width: 0.02, height: 0.02 }], photoAspect: 1,
@@ -133,5 +146,49 @@ describe("smart placement", () => {
     };
     expect(smartPlacement({ ...options, pointer: { x: 0.24, y: 0.32 } })?.rect.x).toBeCloseTo(0.235);
     expect(smartPlacement({ ...options, pointer: { x: 0.22, y: 0.34 } })?.rect.y).toBeCloseTo(0.335);
+  });
+
+  it("preserves each outer pair's spacing when separate pairs share an alignment", () => {
+    const slots = [
+      { ...anchor, x: 0.15, width: 0.1, height: 0.1 },
+      { ...anchor, id: "b", x: 0.27, width: 0.1, height: 0.1 },
+      { ...anchor, id: "c", x: 0.6, width: 0.1, height: 0.1 },
+      { ...anchor, id: "d", x: 0.73, width: 0.1, height: 0.1 },
+    ];
+    const options = {
+      slots, photoAspect: 1, pageMm: { width: 200, height: 200 },
+      pagePixels: { width: 400, height: 400 }, bleedMm: 0,
+    };
+    expect(smartPlacement({ ...options, pointer: { x: 0.08, y: 0.35 } })?.rect.x).toBeCloseTo(0.03, 6);
+    expect(smartPlacement({ ...options, pointer: { x: 0.91, y: 0.35 } })?.rect.x).toBeCloseTo(0.86, 6);
+  });
+
+  it("does not offer a 3 mm single-neighbour match within or instead of a widely spaced row", () => {
+    const slots = [
+      { ...anchor, x: 0.1, width: 0.1, height: 0.1 },
+      { ...anchor, id: "b", x: 0.4, width: 0.1, height: 0.1 },
+    ];
+    const options = {
+      slots, photoAspect: 1, pageMm: { width: 200, height: 200 },
+      pagePixels: { width: 400, height: 400 }, bleedMm: 0,
+    };
+    expect(smartPlacement({ ...options, pointer: { x: 0.265, y: 0.35 } })).toBeNull();
+    expect(smartPlacement({ ...options, pointer: { x: 0.565, y: 0.35 } })).toBeNull();
+    expect(smartPlacement({ ...options, pointer: { x: 0.75, y: 0.35 } })?.rect.x).toBeCloseTo(0.7);
+  });
+
+  it("uses a valid alternative when another direction is blocked", () => {
+    const small = { ...anchor, width: 0.02, height: 0.02 };
+    const blocker: TextSlot = {
+      id: "blocker", type: "text", x: 0.235, y: 0.3, width: 0.02, height: 0.02,
+      text: "", placeholder: "Text",
+      style: { fontFamily: "Arial", fontSize: 12, color: "#000000", bold: false, italic: false, underline: false, align: "left" },
+    };
+    const result = smartPlacement({
+      slots: [small, blocker], photoAspect: 1, pageMm: { width: 200, height: 200 },
+      pagePixels: { width: 400, height: 400 }, bleedMm: 0, pointer: { x: 0.23, y: 0.33 },
+    });
+    expect(result?.rect.x).toBeCloseTo(0.2);
+    expect(result?.rect.y).toBeCloseTo(0.335);
   });
 });

@@ -2657,6 +2657,29 @@ it("clears the Smart placement preview when replacing a Photo in an existing Slo
   expect(slots[0]).toMatchObject({ x: 0.3, y: 0.3, width: 0.2, height: 0.2, placement: { photoPath: "new.jpg" } });
 });
 
+it("uses ordinary Page-drop geometry when Ctrl is held at drop", () => {
+  vi.stubGlobal("DragEvent", MouseEvent);
+  const { ports } = disk();
+  const album = addPhotoSlot(createAlbum({ name: "Existing", pageCount: 2 }), "page-1");
+  album.pages[0].slots[0] = { ...album.pages[0].slots[0], x: 0.3, y: 0.3, width: 0.2, height: 0.2 };
+  const onAlbumChange = vi.fn();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()} onAlbumChange={onAlbumChange}
+    document={{ path: "Existing", album }} />);
+  const page = within(screen.getByRole("group", { name: "Spread editor" })).getByRole("button", { name: "Select Page 1" });
+  vi.spyOn(page, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 50, 606, 432));
+  const transfer = photoDrop({ path: "new.jpg", width: 100, height: 100, orientation: 1 }).dataTransfer;
+  const start = new Event("dragstart", { bubbles: true });
+  Object.defineProperty(start, "dataTransfer", { value: transfer });
+  fireEvent(window, start);
+  const pointer = { dataTransfer: transfer, clientX: 106 + (0.5 + 3 / 297 + 0.2 * 210 / 297 / 2) * 594, clientY: 224 };
+  fireEvent.dragOver(page, pointer);
+  expect(screen.getByRole("img", { name: "Smart placement preview" })).toBeTruthy();
+  fireEvent.drop(page, { ...pointer, ctrlKey: true });
+  const placed = (onAlbumChange.mock.lastCall![0] as Album).pages[0].slots[1];
+  expect(placed.width).toBeCloseTo(0.4);
+  expect(placed.height).toBeCloseTo(0.4 * 297 / 210);
+});
+
 it("ignores Photo drops on blocked Pages, the Spread strip, and the area around Pages", async () => {
   const { ports } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);
