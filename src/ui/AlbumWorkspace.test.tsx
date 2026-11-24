@@ -2961,11 +2961,36 @@ it("previews grid dimensions for a real Page without applying them when cancelle
   expect(library.ports.write).not.toHaveBeenCalled();
 });
 
+it("preserves edge text while applying a grid as one undoable change", () => {
+  const { ports } = disk();
+  const onAlbumChange = vi.fn();
+  let album = addTextSlot(createAlbum({ name: "Existing" }), "page-1");
+  album = setSlotText(album, "page-1", "slot-1", "Title");
+  album.pages[0].slots = [{ ...album.pages[0].slots[0], x: 0.1, y: 20 / 210, width: 0.4, height: 10 / 210 }];
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()}
+    onAlbumChange={onAlbumChange} document={{ path: "Existing", album }} />);
+  const current = () => onAlbumChange.mock.lastCall![0] as Album;
+  const original = structuredClone(current());
+  fireEvent.contextMenu(screen.getByRole("button", { name: "Page 1 Text Slot 1" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Apply grid layout..." }));
+  const dialog = within(screen.getByRole("dialog", { name: "Apply grid layout" }));
+  expect(dialog.getByText("Text preserved - space reserved at top.")).toBeTruthy();
+  fireEvent.click(dialog.getByRole("button", { name: "Apply" }));
+  const applied = structuredClone(current());
+  expect(applied.pages[0].slots.filter((slot) => slot.type === "text")).toEqual(original.pages[0].slots);
+  expect(applied.pages[0].slots.filter((slot) => slot.type === "photo")).toHaveLength(4);
+  fireEvent.click(bar().getByRole("button", { name: "Bar undo" }));
+  expect(current().pages).toEqual(original.pages);
+  fireEvent.click(bar().getByRole("button", { name: "Bar redo" }));
+  expect(current().pages).toEqual(applied.pages);
+});
+
 it("applies a grid to only its Page, reports removed content, and supports undo and redo", async () => {
   const { ports } = disk();
   const library = layoutDisk([onePhotoLayout]);
   const onAlbumChange = vi.fn();
-  const album = albumWithContent();
+  const album = addTextSlot(albumWithContent(), "page-1");
+  album.pages[0].slots[3] = { ...album.pages[0].slots[3], y: 20 / 210, height: 10 / 210 };
   render(<WithLayouts root="D:\\Photos" ports={ports} photoPorts={previews()} layoutPorts={library.ports}
     onAlbumChange={onAlbumChange} document={{ path: "Existing", album }} />);
   await waitFor(() => expect(layoutCards().getAllByRole("button")).toHaveLength(1));
@@ -2976,7 +3001,17 @@ it("applies a grid to only its Page, reports removed content, and supports undo 
   const dialog = within(screen.getByRole("dialog", { name: "Apply grid layout" }));
   fireEvent.change(dialog.getByLabelText("Columns"), { target: { value: "1" } });
   fireEvent.change(dialog.getByLabelText("Rows"), { target: { value: "1" } });
-  fireEvent.click(dialog.getByRole("button", { name: "Apply" }));
+  expect(dialog.getByText(/cannot preserve the current text arrangement/)).toBeTruthy();
+  fireEvent.submit(dialog.getByRole("button", { name: "Remove text and apply full-page grid" }).closest("form")!);
+  expect(current().pages).toEqual(original.pages);
+  fireEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+  expect(current().pages).toEqual(original.pages);
+  fireEvent.contextMenu(canvasPage(1));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Apply grid layout..." }));
+  const replacement = within(screen.getByRole("dialog", { name: "Apply grid layout" }));
+  fireEvent.change(replacement.getByLabelText("Columns"), { target: { value: "1" } });
+  fireEvent.change(replacement.getByLabelText("Rows"), { target: { value: "1" } });
+  fireEvent.click(replacement.getByRole("button", { name: "Remove text and apply full-page grid" }));
 
   expect(screen.getByText("1 Photo and 1 text did not fit the Layout on Page 1 and were removed.")).toBeTruthy();
   const page = current().pages[0];
@@ -2995,6 +3030,41 @@ it("applies a grid to only its Page, reports removed content, and supports undo 
   fireEvent.click(bar().getByRole("button", { name: "Bar save-as-layout" }));
   expect(layoutCards().getAllByRole("button")).toHaveLength(2);
   expect(screen.getByText("Saved Page 1 as a new Layout.")).toBeTruthy();
+});
+
+it("offers full-page replacement when the chosen grid does not fit around text", () => {
+  const { ports } = disk();
+  const onAlbumChange = vi.fn();
+  let album = addTextSlot(createAlbum({ name: "Existing", safeZoneMm: 30 }), "page-1");
+  album = addTextSlot(album, "page-1");
+  album.pages[0].slots = [
+    { ...album.pages[0].slots[0], y: 57.5 / 210, height: 10 / 210 },
+    { ...album.pages[0].slots[1], y: 142.5 / 210, height: 10 / 210 },
+  ];
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()}
+    onAlbumChange={onAlbumChange} document={{ path: "Existing", album }} />);
+  const current = () => onAlbumChange.mock.lastCall![0] as Album;
+  const original = structuredClone(current());
+  fireEvent.contextMenu(canvasPage(1));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Apply grid layout..." }));
+  const dialog = within(screen.getByRole("dialog", { name: "Apply grid layout" }));
+  expect(dialog.getByText("Text preserved - space reserved at top and bottom.")).toBeTruthy();
+  fireEvent.change(dialog.getByLabelText("Rows"), { target: { value: "12" } });
+  expect(dialog.getByText(/selected grid does not fit around the text/)).toBeTruthy();
+  fireEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+  expect(current().pages).toEqual(original.pages);
+  fireEvent.contextMenu(canvasPage(1));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Apply grid layout..." }));
+  const replacement = within(screen.getByRole("dialog", { name: "Apply grid layout" }));
+  fireEvent.change(replacement.getByLabelText("Rows"), { target: { value: "12" } });
+  fireEvent.click(replacement.getByRole("button", { name: "Remove text and apply full-page grid" }));
+  const applied = structuredClone(current());
+  expect(applied.pages[0].slots).toHaveLength(24);
+  expect(applied.pages[0].slots.every((slot) => slot.type === "photo")).toBe(true);
+  fireEvent.click(bar().getByRole("button", { name: "Bar undo" }));
+  expect(current().pages).toEqual(original.pages);
+  fireEvent.click(bar().getByRole("button", { name: "Bar redo" }));
+  expect(current().pages).toEqual(applied.pages);
 });
 
 it("targets the right-clicked Page in the strip, not its Spread sibling", async () => {

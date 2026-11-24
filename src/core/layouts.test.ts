@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createAlbum } from "./album";
-import { applyLayout, createGridLayout, deleteLayout, duplicateLayout, newLayout, predefinedLayoutLibrary, readLayoutLibrary, saveLayoutFromPage, serializeLayoutLibrary, setLayoutSlots, type Layout, type LayoutSlot } from "./layouts";
-import { addPhotoSlot, addTextSlot, placePhoto, rotateSlot, setSlotText } from "./slots";
+import { applyGridToPage, applyLayout, createGridLayout, deleteLayout, duplicateLayout, newLayout, planPageGrid, predefinedLayoutLibrary, readLayoutLibrary, saveLayoutFromPage, serializeLayoutLibrary, setLayoutSlots, type Layout, type LayoutSlot } from "./layouts";
+import { addPhotoSlot, addTextSlot, moveSlot, placePhoto, rotateSlot, setSlotText, type SlotRotation, type TextSlot } from "./slots";
 
 const format = createAlbum({ name: "Summer" }).pageFormat;
 
@@ -49,6 +49,126 @@ it("uses the larger Safe Zone and rejects grids with no positive Slot area", () 
     .toThrow("These dimensions leave no positive Slot width or height on this Page Format.");
   expect(() => createGridLayout({ ...format, safeZoneMm: 104 }, 1, 2))
     .toThrow("These dimensions leave no positive Slot width or height on this Page Format.");
+});
+
+it("preserves a short top title and fills the remaining rectangle with equal Photo Slots", () => {
+  let album = addTextSlot(createAlbum({ name: "A" }), "page-1");
+  album = setSlotText(album, "page-1", "slot-1", "Summer");
+  const title = { ...album.pages[0].slots[0], x: 30 / 297, y: 20 / 210, width: 40 / 297, height: 10 / 210 };
+  album.pages[0].slots = [title];
+  const result = applyGridToPage(album, "page-1", 2, 2);
+  const slots = result.album.pages[0].slots;
+  expect(slots.filter((slot) => slot.type === "text")).toEqual([title]);
+  const photos = slots.filter((slot) => slot.type === "photo");
+  expect(photos).toHaveLength(4);
+  const expected = [[15, 36, 130.5, 76.5], [151.5, 36, 130.5, 76.5],
+    [15, 118.5, 130.5, 76.5], [151.5, 118.5, 130.5, 76.5]];
+  photos.forEach((slot, index) => {
+    [slot.x * 297, slot.y * 210, slot.width * 297, slot.height * 210]
+      .forEach((value, dimension) => expect(value).toBeCloseTo(expected[index][dimension]));
+  });
+  expect(new Set(slots.map((slot) => slot.id)).size).toBe(5);
+  expect(result.dropped).toEqual({ placements: [], texts: [] });
+});
+
+function edgeText(id: string, x: number, y: number, width: number, height: number, rotation: SlotRotation = 0): TextSlot {
+  const slot = addTextSlot(createAlbum({ name: "A" }), "page-1").pages[0].slots[0];
+  if (slot.type !== "text") throw new Error("Expected Text Slot.");
+  return { ...slot, id, x: x / 297, y: y / 210, width: width / 297, height: height / 210, rotation };
+}
+
+it.each([
+  ["top", edgeText("t", 20, 20, 80, 10, 0), [15, 36, 267, 159]],
+  ["top reversed", edgeText("t", 20, 20, 80, 10, 180), [15, 36, 267, 159]],
+  ["bottom", edgeText("t", 20, 180, 80, 10, 0), [15, 15, 267, 159]],
+  ["bottom reversed", edgeText("t", 20, 180, 80, 10, 180), [15, 15, 267, 159]],
+  ["left", edgeText("t", 20, 20, 10, 80, 90), [36, 15, 246, 180]],
+  ["left reversed", edgeText("t", 20, 20, 10, 80, 270), [36, 15, 246, 180]],
+  ["right", edgeText("t", 267, 20, 10, 80, 90), [15, 15, 246, 180]],
+  ["right reversed", edgeText("t", 267, 20, 10, 80, 270), [15, 15, 246, 180]],
+])("reserves the %s edge using the visible Text Slot bounds", (_label, title, expected) => {
+  const album = createAlbum({ name: "A" });
+  album.pages[0].slots = [title];
+  const slots = applyGridToPage(album, "page-1", 1, 1).album.pages[0].slots;
+  expect(slots[1]).toEqual(title);
+  const slot = slots[0];
+  [slot.x * 297, slot.y * 210, slot.width * 297, slot.height * 210]
+    .forEach((value, dimension) => expect(value).toBeCloseTo(expected[dimension]));
+});
+
+it("combines the deepest text on each edge into one rectangle without expanding the inset", () => {
+  const album = createAlbum({ name: "A" });
+  album.pages[0].slots = [
+    edgeText("top-1", 40, 0, 30, 8),
+    edgeText("top-2", 40, 20, 30, 20),
+    edgeText("top-3", 40, 18, 30, 5),
+    edgeText("left", 25, 60, 10, 80, 270),
+  ];
+  const plan = planPageGrid(format, album.pages[0], 2, 2);
+  expect(plan.kind).toBe("ready");
+  if (plan.kind !== "ready") throw new Error("Expected preserving grid.");
+  expect(plan.edges).toEqual(["top", "left"]);
+  expect(plan.bounds.x).toBeCloseTo(41);
+  expect(plan.bounds.y).toBeCloseTo(46);
+  expect(plan.bounds.width).toBeCloseTo(241);
+  expect(plan.bounds.height).toBeCloseTo(149);
+
+  album.pages[0].slots = [edgeText("outside", 40, 0, 30, 9)];
+  const outside = planPageGrid(format, album.pages[0], 1, 1);
+  expect(outside.kind).toBe("ready");
+  if (outside.kind !== "ready") throw new Error("Expected preserving grid.");
+  expect(outside.bounds).toEqual({ x: 15, y: 15, width: 267, height: 180 });
+});
+
+it("recognizes empty text exactly at the outer-quarter boundary, but rejects text just beyond it", () => {
+  const album = createAlbum({ name: "A" });
+  album.pages[0].slots = [edgeText("boundary", 30, 50, 30, 10)];
+  expect(planPageGrid(format, album.pages[0], 1, 1)).toMatchObject({ kind: "ready", edges: ["top"] });
+  album.pages[0].slots.push(edgeText("central", 30, 50.001, 30, 10));
+  expect(planPageGrid(format, album.pages[0], 1, 1)).toEqual({ kind: "replace", reason: "arrangement" });
+  expect(() => applyGridToPage(album, "page-1", 1, 1)).toThrow("cannot preserve");
+  expect(applyGridToPage(album, "page-1", 1, 1, true).album.pages[0].slots.map((slot) => slot.type)).toEqual(["photo"]);
+});
+
+it("distinguishes a grid that cannot fit around text from one that cannot fit the Page", () => {
+  const album = createAlbum({ name: "A", safeZoneMm: 30 });
+  album.pages[0].slots = [edgeText("top", 30, 57.5, 30, 10), edgeText("bottom", 30, 142.5, 30, 10)];
+  expect(planPageGrid(album.pageFormat, album.pages[0], 1, 12)).toEqual({ kind: "replace", reason: "space" });
+  expect(() => applyGridToPage(album, "page-1", 1, 12)).toThrow("cannot preserve");
+  expect(applyGridToPage(album, "page-1", 1, 12, true).album.pages[0].slots).toHaveLength(12);
+  const small = { ...album.pageFormat, safeZoneMm: 102 };
+  expect(planPageGrid(small, album.pages[0], 1, 2)).toMatchObject({ kind: "invalid" });
+  expect(() => applyGridToPage({ ...album, pageFormat: small }, "page-1", 1, 2, true)).toThrow("no positive Slot");
+});
+
+it("transfers Photos in order and reports overflow while retaining the edge text", () => {
+  let album = createAlbum({ name: "A" });
+  for (const path of ["a.jpg", "b.jpg", "c.jpg"]) {
+    album = addPhotoSlot(album, "page-1");
+    album = placePhoto(album, "page-1", album.pages[0].slots.at(-1)!.id, { path, width: 300, height: 200, orientation: 1 });
+  }
+  album.pages[0].slots = album.pages[0].slots.map((slot, index) => ({ ...slot, id: `photo-${index}` }));
+  const title = { ...edgeText("slot-1", 20, 20, 100, 10), text: "Title" };
+  album.pages[0].slots.push(title);
+  const result = applyGridToPage(album, "page-1", 2, 1);
+  expect(result.album.pages[0].slots.map((slot) => slot.type === "photo" ? slot.placement?.photoPath : slot.text))
+    .toEqual(["a.jpg", "b.jpg", "Title"]);
+  expect(result.album.pages[0].slots[2]).toEqual(title);
+  expect(new Set(result.album.pages[0].slots.map((slot) => slot.id)).size).toBe(3);
+  expect(result.dropped.placements.map((placement) => placement.photoPath)).toEqual(["c.jpg"]);
+  expect(result.dropped.texts).toEqual([]);
+});
+
+it("recalculates only when the grid is applied again after moving or editing text", () => {
+  const album = createAlbum({ name: "A" });
+  album.pages[0].slots = [edgeText("title", 30, 20, 70, 10)];
+  const applied = applyGridToPage(album, "page-1", 1, 1).album;
+  const photo = applied.pages[0].slots[0];
+  const moved = moveSlot(setSlotText(applied, "page-1", "title", "New title"), "page-1", "title", 30 / 297, 40 / 210);
+  expect(moved.pages[0].slots[0]).toEqual(photo);
+  const reapplied = applyGridToPage(moved, "page-1", 1, 1).album;
+  expect(reapplied.pages[0].slots[0].y * 210).toBeCloseTo(56);
+  expect(reapplied.pages[0].slots[1]).toEqual(moved.pages[0].slots[1]);
 });
 
 describe("applying a Layout to a Page", () => {

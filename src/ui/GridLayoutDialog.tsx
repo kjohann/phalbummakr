@@ -1,16 +1,17 @@
 import { useId, useState, type FormEvent, type KeyboardEvent } from "react";
-import { gridLayoutProblem, type PageFormat } from "../core";
+import { gridLayoutProblem, planPageGrid, type Page, type PageFormat } from "../core";
 import ModalDialog from "./ModalDialog";
 
 function dimensionsLabel(columns: number, rows: number) {
   return `${columns} ${columns === 1 ? "column" : "columns"} x ${rows} ${rows === 1 ? "row" : "rows"}`;
 }
 
-export default function GridLayoutDialog({ format, action, disabled = false, onSubmit, onClose }: {
+export default function GridLayoutDialog({ format, action, page, disabled = false, onSubmit, onClose }: {
   format: PageFormat;
   action: "Apply" | "Create";
+  page?: Page;
   disabled?: boolean;
-  onSubmit: (columns: number, rows: number) => void;
+  onSubmit: (columns: number, rows: number, removeText: boolean) => void;
   onClose: () => void;
 }) {
   const [columns, setColumns] = useState("2");
@@ -20,6 +21,7 @@ export default function GridLayoutDialog({ format, action, disabled = false, onS
   const columnCount = Number(columns);
   const rowCount = Number(rows);
   const problem = gridLayoutProblem(format, columnCount, rowCount);
+  const plan = page ? planPageGrid(format, page, columnCount, rowCount) : null;
   const shown = preview ?? { columns: columnCount, rows: rowCount };
   const selectedCell = columnCount >= 1 && columnCount <= 6 && rowCount >= 1 && rowCount <= 6
     && Number.isInteger(columnCount) && Number.isInteger(rowCount) ? `${id}-${columnCount}-${rowCount}` : undefined;
@@ -44,7 +46,7 @@ export default function GridLayoutDialog({ format, action, disabled = false, onS
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (!problem && !disabled) onSubmit(columnCount, rowCount);
+    if (!problem && !disabled && plan?.kind !== "replace") onSubmit(columnCount, rowCount, false);
   }
 
   return <ModalDialog label={`${action} grid layout`} onClose={onClose}>
@@ -76,8 +78,21 @@ export default function GridLayoutDialog({ format, action, disabled = false, onS
           aria-describedby={problem ? `${id}-problem` : undefined} onChange={(event) => { setRows(event.target.value); setPreview(null); }} /></label>
       </div>
       {problem && <p id={`${id}-problem`} className="error-banner" role="alert">{problem}</p>}
+      {plan?.kind === "ready" && plan.edges.length > 0 && <p aria-live="polite">
+        Text preserved - space reserved at {plan.edges.length === 1 ? plan.edges[0]
+          : `${plan.edges.slice(0, -1).join(", ")} and ${plan.edges.at(-1)}`}.
+      </p>}
+      {plan?.kind === "replace" && <p className="error-banner" role="alert">
+        {plan.reason === "arrangement"
+          ? "The grid cannot preserve the current text arrangement."
+          : "The selected grid does not fit around the text."}
+        {" "}Remove all text and apply a full-page grid, or cancel.
+      </p>}
       <div className="album-toolbar">
-        <button type="submit" className="button-primary" disabled={!!problem || disabled}>{action}</button>
+        {plan?.kind === "replace"
+          ? <button type="button" className="button-quiet" disabled={disabled}
+            onClick={() => onSubmit(columnCount, rowCount, true)}>Remove text and apply full-page grid</button>
+          : <button type="submit" className="button-primary" disabled={!!problem || disabled}>{action}</button>}
         <button type="button" className="button-quiet" onClick={onClose}>Cancel</button>
       </div>
     </form>

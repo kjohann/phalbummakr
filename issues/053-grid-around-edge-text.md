@@ -1,6 +1,6 @@
 # 053 - Apply grid around edge text
 
-Status: todo · Type: feature · Depends on: 045
+Status: doing · Type: feature · Depends on: 045
 
 ## What
 

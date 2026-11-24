@@ -1,7 +1,7 @@
-import { DEFAULT_BLEED_MM, DEFAULT_SAFE_ZONE_MM, pageDimensions, type Album, type PageFormat } from "./album";
+import { DEFAULT_BLEED_MM, DEFAULT_SAFE_ZONE_MM, pageDimensions, type Album, type Page, type PageFormat } from "./album";
 import {
   DEFAULT_PLACEHOLDER, POINTS_PER_MM, refitPlacement, TEXT_LINE_HEIGHT, validateSlots,
-  type PhotoSlot, type Placement, type Slot, type TextSlot, type TextStyle,
+  type PhotoSlot, type Placement, type Rectangle, type Slot, type TextSlot, type TextStyle,
 } from "./slots";
 
 /** A Slot in a Layout. It never holds content: Photo Slots are empty and Text Slots carry only a style. */
@@ -44,6 +44,17 @@ function newLayoutId(): string {
 const LAYOUT_MIN_INSET_MM = 15;
 const LAYOUT_GAP_MM = 6;
 
+function gridBounds(format: PageFormat): Rectangle {
+  const { widthMm, heightMm } = pageDimensions(format);
+  const inset = Math.max(LAYOUT_MIN_INSET_MM, format.safeZoneMm);
+  return { x: inset, y: inset, width: widthMm - 2 * inset, height: heightMm - 2 * inset };
+}
+
+function gridFits(bounds: Rectangle, columns: number, rows: number): boolean {
+  return bounds.width - (columns - 1) * LAYOUT_GAP_MM > 0
+    && bounds.height - (rows - 1) * LAYOUT_GAP_MM > 0;
+}
+
 function photoGrid(columns: number, rows: number, bounds: { x: number; y: number; width: number; height: number }, gap: number,
   photo: (x: number, y: number, width: number, height: number) => LayoutSlot): LayoutSlot[] {
   const columnWidth = (bounds.width - (columns - 1) * gap) / columns;
@@ -57,10 +68,7 @@ export function gridLayoutProblem(format: PageFormat, columns: number, rows: num
   if (![columns, rows].every((value) => Number.isInteger(value) && value >= 1 && value <= 12)) {
     return "Columns and rows must be whole numbers from 1 to 12.";
   }
-  const { widthMm, heightMm } = pageDimensions(format);
-  const inset = Math.max(LAYOUT_MIN_INSET_MM, format.safeZoneMm);
-  if (widthMm - 2 * inset - (columns - 1) * LAYOUT_GAP_MM <= 0
-    || heightMm - 2 * inset - (rows - 1) * LAYOUT_GAP_MM <= 0) {
+  if (!gridFits(gridBounds(format), columns, rows)) {
     return "These dimensions leave no positive Slot width or height on this Page Format.";
   }
   return null;
@@ -70,16 +78,80 @@ export function gridLayoutProblem(format: PageFormat, columns: number, rows: num
 export function createGridLayout(format: PageFormat, columns: number, rows: number): Layout {
   const problem = gridLayoutProblem(format, columns, rows);
   if (problem) throw new Error(problem);
+  return gridLayoutInBounds(format, columns, rows, gridBounds(format));
+}
+
+function gridLayoutInBounds(format: PageFormat, columns: number, rows: number, bounds: Rectangle): Layout {
   const { widthMm, heightMm } = pageDimensions(format);
-  const inset = Math.max(LAYOUT_MIN_INSET_MM, format.safeZoneMm);
   let slotNumber = 0;
-  const slots = photoGrid(columns, rows, {
-    x: inset, y: inset, width: widthMm - 2 * inset, height: heightMm - 2 * inset,
-  }, LAYOUT_GAP_MM, (x, y, width, height) => ({
+  const slots = photoGrid(columns, rows, bounds, LAYOUT_GAP_MM, (x, y, width, height) => ({
     id: `slot-${++slotNumber}`, type: "photo", x: x / widthMm, y: y / heightMm,
     width: width / widthMm, height: height / heightMm, placement: null,
   }));
   return { id: newLayoutId(), aspectRatio: pageAspectRatio(format), slots };
+}
+
+type GridEdge = "top" | "bottom" | "left" | "right";
+export type PageGridPlan =
+  | { kind: "ready"; edges: GridEdge[]; bounds: Rectangle }
+  | { kind: "replace"; reason: "arrangement" | "space" }
+  | { kind: "invalid"; reason: string };
+
+/** Plans a grid without changing the Page or its text. Bounds are in millimetres. */
+export function planPageGrid(format: PageFormat, page: Page, columns: number, rows: number): PageGridPlan {
+  const problem = gridLayoutProblem(format, columns, rows);
+  if (problem) return { kind: "invalid", reason: problem };
+  const normal = gridBounds(format);
+  const { widthMm, heightMm } = pageDimensions(format);
+  let left = normal.x, right = normal.x + normal.width;
+  let top = normal.y, bottom = normal.y + normal.height;
+  const edges = new Set<GridEdge>();
+  const epsilon = 1e-9;
+  for (const slot of page.slots) {
+    if (slot.type !== "text") continue;
+    const x = slot.x * widthMm, y = slot.y * heightMm;
+    const farX = (slot.x + slot.width) * widthMm, farY = (slot.y + slot.height) * heightMm;
+    if (slot.rotation === 90 || slot.rotation === 270) {
+      if (farX <= normal.x + normal.width / 4 + epsilon) {
+        edges.add("left"); left = Math.max(left, farX + LAYOUT_GAP_MM);
+      } else if (x >= normal.x + normal.width * 3 / 4 - epsilon) {
+        edges.add("right"); right = Math.min(right, x - LAYOUT_GAP_MM);
+      } else return { kind: "replace", reason: "arrangement" };
+    } else {
+      if (farY <= normal.y + normal.height / 4 + epsilon) {
+        edges.add("top"); top = Math.max(top, farY + LAYOUT_GAP_MM);
+      } else if (y >= normal.y + normal.height * 3 / 4 - epsilon) {
+        edges.add("bottom"); bottom = Math.min(bottom, y - LAYOUT_GAP_MM);
+      } else return { kind: "replace", reason: "arrangement" };
+    }
+  }
+  const bounds = { x: left, y: top, width: right - left, height: bottom - top };
+  if (!gridFits(bounds, columns, rows)) return { kind: "replace", reason: "space" };
+  return { kind: "ready", edges: (["top", "bottom", "left", "right"] as GridEdge[]).filter((edge) => edges.has(edge)), bounds };
+}
+
+/** Applies one grid, preserving edge text unless all text is explicitly removed. */
+export function applyGridToPage(album: Album, pageId: string, columns: number, rows: number, removeText = false): AppliedLayout {
+  const page = album.pages.find((item) => item.id === pageId);
+  if (!page) throw new Error("Page not found in Album.");
+  const plan = planPageGrid(album.pageFormat, page, columns, rows);
+  if (plan.kind === "invalid") throw new Error(plan.reason);
+  if (plan.kind === "replace" && !removeText) throw new Error("The grid cannot preserve the current text.");
+  const preserved = removeText ? [] : page.slots.filter((slot): slot is TextSlot => slot.type === "text");
+  const bounds = removeText ? gridBounds(album.pageFormat) : plan.kind === "ready" ? plan.bounds : gridBounds(album.pageFormat);
+  const layout = gridLayoutInBounds(album.pageFormat, columns, rows, bounds);
+  const ids = new Set(preserved.map((slot) => slot.id));
+  let number = 0;
+  layout.slots = layout.slots.map((slot) => {
+    let id: string;
+    do { id = `slot-${++number}`; } while (ids.has(id));
+    return { ...slot, id };
+  });
+  const result = applyLayout(album, pageId, layout);
+  const index = result.album.pages.findIndex((item) => item.id === pageId);
+  result.album.pages[index] = { ...result.album.pages[index], slots: [...result.album.pages[index].slots, ...preserved] };
+  if (!removeText) result.dropped.texts = [];
+  return result;
 }
 
 export function newLayout(library: LayoutLibrary, aspectRatio: number): { library: LayoutLibrary; id: string } {

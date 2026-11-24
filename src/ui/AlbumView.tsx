@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { isSlotClipboardCurrent, readText, writeText } from "./slotClipboard";
 import { Layer, Rect, Stage } from "react-konva";
 import {
-  addPage, addPhotoSlot, addTextSlot, albumSpreads, applyLayout, contentPhotoUsage, createGridLayout, deletePage, deleteSlot, duplicatePage, lowResolutionPlacements, movePage, pageDimensions,
+  addPage, addPhotoSlot, addTextSlot, albumSpreads, applyGridToPage, applyLayout, contentPhotoUsage, deletePage, deleteSlot, duplicatePage, lowResolutionPlacements, movePage, pageDimensions,
   panCrop, pasteSlot, placePhoto, placePhotoOnPage, placementDisplayCrop, photoUsage, rotateSlot, saveLayoutFromPage, setPlacementCrop,
   setPlacementFit, setSlotText, setTextStyle, slotResizeEdges, swapPlacements, uprightPhotoSize, usageForPhoto, zoomCrop, POINTS_PER_MM, TEXT_LINE_HEIGHT,
   type Album, type AppliedLayout, type HistoryDirection, type Crop, type Layout, type Page, type PageFormat, type PhotoIdentity, type PhotoPreviewPorts, type PhotoSize, type PlaceablePhoto, type Rectangle, type ResizeHandle, type Slot, type SlotAddress, type TextStyle,
@@ -699,6 +699,16 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
     onNotice?.(appliedLayoutNotice(result, pageNumbers.get(pageId)));
   }
 
+  function applyGridOnPage(pageId: string, columns: number, rows: number, removeText: boolean) {
+    if (disabled) return;
+    const result = applyGridToPage(savedAlbum, pageId, columns, rows, removeText);
+    changeAlbum((current) => applyGridToPage(current, pageId, columns, rows, removeText).album);
+    setSelectedId(pageId);
+    setSelectedSlotId(null);
+    setEditingText(null);
+    onNotice?.(appliedLayoutNotice(result, pageNumbers.get(pageId)));
+  }
+
   function applyLayoutTo(pageId: string, layoutId: string) {
     const layout = layouts?.state.library?.layouts.find((item) => item.id === layoutId);
     if (layout) applyLayoutOnPage(pageId, layout);
@@ -1320,8 +1330,9 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
         ))}
       </div>, document.body)}
       {gridPageId && <GridLayoutDialog format={savedAlbum.pageFormat} action="Apply" disabled={disabled}
-        onSubmit={(columns, rows) => {
-          applyLayoutOnPage(gridPageId, createGridLayout(savedAlbum.pageFormat, columns, rows));
+        page={savedAlbum.pages.find((page) => page.id === gridPageId)}
+        onSubmit={(columns, rows, removeText) => {
+          applyGridOnPage(gridPageId, columns, rows, removeText);
           setGridPageId(null);
         }} onClose={() => setGridPageId(null)} />}
     </section>
