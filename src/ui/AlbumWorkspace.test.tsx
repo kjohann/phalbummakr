@@ -2035,17 +2035,105 @@ it("shows every aligned Slot edge and center during a drag and clears them with 
   });
   fireEvent.mouseDown(slot, { button: 0, clientX: 100, clientY: 100 });
   fireEvent.mouseMove(window, { clientX: 100, clientY: endY });
-  expect(guidePositions()).toEqual([trimTop + 105, trimTop + 157.5, trimTop + 210]);
+  expect(guidePositions()).toEqual([trimTop + 105, trimTop + 157.5]);
+  // The aligned bottom edge is at the Page centre, which labels that guide.
+  expect(screen.getAllByLabelText("Snap to Page centre")).toHaveLength(1);
 
   fireEvent.keyDown(window, { key: "Control", ctrlKey: true });
   expect(screen.queryByLabelText("Snap to Slot")).toBeNull();
   fireEvent.keyUp(window, { key: "Control", ctrlKey: false });
-  expect(guidePositions()).toEqual([trimTop + 105, trimTop + 157.5, trimTop + 210]);
+  expect(guidePositions()).toEqual([trimTop + 105, trimTop + 157.5]);
   fireEvent.mouseUp(window, { clientX: 100, clientY: endY });
   expect(screen.queryByLabelText("Snap to Slot")).toBeNull();
   await waitFor(() => {
     expect(deserializeAlbum(files.get("Existing")!).pages[0].slots[0].y).toBeCloseTo(0.25, 9);
   });
+});
+
+function ctrlClick(element: Element) {
+  fireEvent.mouseDown(element, { button: 0, clientX: 100, clientY: 100, ctrlKey: true });
+  fireEvent.mouseUp(window, { clientX: 100, clientY: 100, ctrlKey: true });
+  fireEvent.click(element, { ctrlKey: true });
+}
+
+async function openSelectedSlotsAlbum() {
+  const { ports, files } = disk();
+  const album = createAlbum({ name: "Existing", pageCount: 2 });
+  album.pages[0].slots = [
+    { id: "a", type: "photo", x: 0.1, y: 0.1, width: 0.2, height: 0.2, placement: null },
+    { id: "b", type: "photo", x: 0.4, y: 0.1, width: 0.2, height: 0.2, placement: null },
+    { id: "c", type: "photo", x: 0.7, y: 0.7, width: 0.1, height: 0.1, placement: null },
+  ];
+  files.set("Existing", serializeAlbum(album));
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  const slots = await Promise.all([1, 2, 3].map((number) => screen.findByRole("button", { name: `Page 1 Photo Slot ${number}` })));
+  const saved = () => deserializeAlbum(files.get("Existing")!).pages[0].slots;
+  return { slots, saved };
+}
+
+it("hides the Photo drag handle on Selected Slots while more than one is selected", async () => {
+  const { slots: [a, b, c] } = await openSelectedSlotsAlbum();
+  fireEvent.drop(a, photoDrop({ path: "a.jpg", width: 6000, height: 4000, orientation: 1 }));
+  fireEvent.drop(b, photoDrop({ path: "b.jpg", width: 6000, height: 4000, orientation: 1 }));
+  fireEvent.drop(c, photoDrop({ path: "c.jpg", width: 6000, height: 4000, orientation: 1 }));
+  const handle = (number: number) => screen.queryByLabelText(`Drag Photo from Page 1 Photo Slot ${number}`);
+  fireEvent.click(a);
+  ctrlClick(b);
+  expect([handle(1), handle(2), handle(3)].map(Boolean)).toEqual([false, false, true]);
+  ctrlClick(b);
+  expect(handle(1)).not.toBeNull();
+});
+
+it("Ctrl-clicks Selected Slots and moves them together as one undo step, snapping to the Page centre", async () => {
+  const { slots: [a, b, c], saved } = await openSelectedSlotsAlbum();
+  ctrlClick(a);
+  ctrlClick(b);
+  expect([a, b, c].map((slot) => slot.getAttribute("aria-pressed"))).toEqual(["true", "true", "false"]);
+  expect(screen.queryByRole("button", { name: "Delete Slot" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^Resize Page 1/ })).toBeNull();
+
+  // A plain drag of one Selected Slot moves both; their joint centre lands on the Page centre.
+  fireEvent.mouseDown(b, { button: 0, clientX: 100, clientY: 100 });
+  fireEvent.mouseMove(window, { clientX: 129.7, clientY: 100 + 0.297 * 420 });
+  expect(screen.getAllByLabelText("Snap to Page centre")).toHaveLength(1);
+  fireEvent.mouseUp(window, { clientX: 129.7, clientY: 100 + 0.297 * 420 });
+  fireEvent.click(b);
+  await waitFor(() => expect(saved()[1].y).toBeCloseTo(0.4, 9));
+  expect(saved()[0]).toMatchObject({ x: expect.closeTo(0.15, 9), y: expect.closeTo(0.4, 9) });
+  expect(saved()[1].x).toBeCloseTo(0.45, 9);
+  expect(saved()[2]).toMatchObject({ x: 0.7, y: 0.7 });
+  expect([a, b].map((slot) => slot.getAttribute("aria-pressed"))).toEqual(["true", "true"]);
+
+  fireEvent.click(screen.getByRole("button", { name: "Bar undo" }));
+  await waitFor(() => expect(saved()[0]).toMatchObject({ x: 0.1, y: 0.1 }));
+  expect(saved()[1]).toMatchObject({ x: 0.4, y: 0.1 });
+
+  // A plain click selects only that Slot; Ctrl-click adds and removes.
+  fireEvent.click(a);
+  expect([a, b].map((slot) => slot.getAttribute("aria-pressed"))).toEqual(["true", "false"]);
+  ctrlClick(b);
+  ctrlClick(b);
+  expect([a, b].map((slot) => slot.getAttribute("aria-pressed"))).toEqual(["true", "false"]);
+
+  // Delete removes every Selected Slot in one undo step.
+  ctrlClick(c);
+  fireEvent.keyDown(window, { key: "Delete" });
+  await waitFor(() => expect(saved().map((slot) => slot.id)).toEqual(["b"]));
+  fireEvent.click(screen.getByRole("button", { name: "Bar undo" }));
+  await waitFor(() => expect(saved().map((slot) => slot.id)).toEqual(["a", "b", "c"]));
+});
+
+it("keeps the spacing of Selected Slots when the drag stops at the Bleed, and clears them from the Page", async () => {
+  const { slots: [a, b], saved } = await openSelectedSlotsAlbum();
+  fireEvent.click(a);
+  ctrlClick(b);
+  drag(a, -1000, 0);
+  await waitFor(() => expect(saved()[0].x).toBeLessThan(0));
+  expect(saved()[1].x - saved()[0].x).toBeCloseTo(0.3, 9);
+
+  fireEvent.click(canvasPage(1));
+  expect([a, b].map((slot) => slot.getAttribute("aria-pressed"))).toEqual(["false", "false"]);
 });
 
 it("finishes a snapped Slot drag and clears guides on window focus loss", async () => {

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Group, Image as KonvaImage, Rect, Text } from "react-konva";
 import {
-  duplicateSlot, fitPhotoRect, moveSlot, pageDimensions, resizeSlot, slotResizeEdges, POINTS_PER_MM, TEXT_LINE_HEIGHT,
+  duplicateSlot, fitPhotoRect, moveSlot, moveSlots, pageDimensions, resizeSlot, slotResizeEdges, POINTS_PER_MM, TEXT_LINE_HEIGHT,
   type Album, type Crop, type PageFormat, type Rectangle, type ResizeHandle, type Slot, type TextSlot,
 } from "../core";
 import { snapSlot, type SnapGuide } from "./slotSnapping";
@@ -17,12 +17,59 @@ export interface SlotDrag {
   bypass: boolean;
   duplicate?: boolean;
   handle?: ResizeHandle;
+  /** Selected Slots moved together with `slotId`, which is one of them. */
+  slotIds?: string[];
+}
+
+function boundsOf(rects: Rectangle[]): Rectangle {
+  const x = Math.min(...rects.map((rect) => rect.x));
+  const y = Math.min(...rects.map((rect) => rect.y));
+  return {
+    x, y,
+    width: Math.max(...rects.map((rect) => rect.x + rect.width)) - x,
+    height: Math.max(...rects.map((rect) => rect.y + rect.height)) - y,
+  };
+}
+
+/** Moves Selected Slots as one rigid unit, snapping their outer bounds. */
+function applyGroupDrag(album: Album, drag: SlotDrag & { slotIds: string[] }, trimWidth: number, trimHeight: number): {
+  album: Album;
+  guides: SnapGuide[];
+} {
+  const page = album.pages.find((item) => item.id === drag.pageId);
+  const ids = new Set(drag.slotIds);
+  const moving = page?.slots.filter((slot) => ids.has(slot.id)) ?? [];
+  if (!page || moving.length !== ids.size) return { album, guides: [] };
+  const bounds = boundsOf(moving);
+  const apply = (dx: number, dy: number) => moveSlots(album, drag.pageId, drag.slotIds, dx, dy);
+  const boundsAfter = (moved: Album) => boundsOf(moved.pages.find((item) => item.id === drag.pageId)!.slots
+    .filter((slot) => ids.has(slot.id)));
+  const dx = drag.dx / trimWidth;
+  const dy = drag.dy / trimHeight;
+  const updated = apply(dx, dy);
+  if (drag.bypass) return { album: updated, guides: [] };
+  const dimensions = pageDimensions(album.pageFormat);
+  const snapped = snapSlot({
+    rect: boundsAfter(updated),
+    unclamped: { ...bounds, x: bounds.x + dx, y: bounds.y + dy },
+    pageSize: { width: trimWidth, height: trimHeight },
+    safeZone: { x: album.pageFormat.safeZoneMm / dimensions.widthMm, y: album.pageFormat.safeZoneMm / dimensions.heightMm },
+    otherSlots: page.slots.filter((slot) => !ids.has(slot.id)),
+    kind: "move",
+    resizeHeight: false,
+    project: (rect) => boundsAfter(apply(rect.x - bounds.x, rect.y - bounds.y)),
+    members: moving.map((slot) => ({ x: slot.x - bounds.x, y: slot.y - bounds.y, width: slot.width, height: slot.height })),
+  });
+  return { album: apply(snapped.rect.x - bounds.x, snapped.rect.y - bounds.y), guides: snapped.guides };
 }
 
 export function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, trimHeight: number, measurePlaceholders = false): {
   album: Album;
   guides: SnapGuide[];
 } {
+  if (drag.kind === "move" && !drag.duplicate && drag.slotIds && drag.slotIds.length > 1) {
+    return applyGroupDrag(album, { ...drag, slotIds: drag.slotIds }, trimWidth, trimHeight);
+  }
   if (drag.duplicate && drag.kind === "move") {
     album = duplicateSlot(album, drag.pageId, drag.slotId);
     drag = { ...drag, slotId: album.pages.find((page) => page.id === drag.pageId)!.slots.at(-1)!.id };

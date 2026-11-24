@@ -3,7 +3,7 @@ import type { Rectangle, ResizeEdges } from "../core";
 interface AlignmentGuide {
   axis: "x" | "y";
   position: number;
-  target: "Page edge" | "Safe Zone" | "Slot";
+  target: "Page edge" | "Page centre" | "Safe Zone" | "Slot";
 }
 
 interface GapGuide {
@@ -28,6 +28,8 @@ interface SnapOptions {
   resizeHeight: boolean;
   resizeEdges?: ResizeEdges;
   project?: (rect: Rectangle) => Rectangle;
+  /** For Selected Slots moved together as `rect`: each Slot relative to the top-left of `rect`. */
+  members?: Rectangle[];
 }
 
 type Candidate = {
@@ -58,6 +60,7 @@ function alignmentTargets(axis: "x" | "y", safeZone: SnapOptions["safeZone"], ot
   return [
     { position: 0, target: "Page edge" },
     { position: 1, target: "Page edge" },
+    { position: 0.5, target: "Page centre" },
     { position: safeZone[axis], target: "Safe Zone" },
     { position: 1 - safeZone[axis], target: "Safe Zone" },
     ...otherSlots.flatMap((slot) => [0, 0.5, 1].map((anchor) => ({
@@ -67,11 +70,25 @@ function alignmentTargets(axis: "x" | "y", safeZone: SnapOptions["safeZone"], ot
   ];
 }
 
-function guideForRect(candidate: Candidate, rect: Rectangle, otherSlots: Rectangle[]): SnapGuide | null {
+function guideForRect(candidate: Candidate, rect: Rectangle, otherSlots: Rectangle[], members?: Rectangle[]): SnapGuide | null {
   if (!candidate.crossRange) return candidate.guide;
-  const crossAxis = candidate.guide.axis === "x" ? "y" : "x";
-  const start = Math.max(candidate.crossRange.start, rect[crossAxis]);
-  const finish = Math.min(candidate.crossRange.end, end(rect, crossAxis));
+  const axis = candidate.guide.axis;
+  const crossAxis = axis === "x" ? "y" : "x";
+  let start = Math.max(candidate.crossRange.start, rect[crossAxis]);
+  let finish = Math.min(candidate.crossRange.end, end(rect, crossAxis));
+  if (members) {
+    // An edge of a group's bounds only borders a gap where one of its Slots has that edge.
+    const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+    for (const edge of [rect[axis], end(rect, axis)]) {
+      if (!candidate.guide.gaps.some((gap) => near(gap.start, edge) || near(gap.end, edge))) continue;
+      const member = members.map((item) => ({ ...item, x: rect.x + item.x, y: rect.y + item.y }))
+        .find((item) => near(edge === rect[axis] ? item[axis] : end(item, axis), edge)
+          && item[crossAxis] < finish && end(item, crossAxis) > start);
+      if (!member) return null;
+      start = Math.max(start, member[crossAxis]);
+      finish = Math.min(finish, end(member, crossAxis));
+    }
+  }
   if (start >= finish || otherSlots.some((slot) => !candidate.references.includes(slot)
     && slot[crossAxis] < finish && end(slot, crossAxis) > start
     && candidate.clearRanges.some((range) => slot[candidate.guide.axis] < range.end
@@ -80,7 +97,7 @@ function guideForRect(candidate: Candidate, rect: Rectangle, otherSlots: Rectang
 }
 
 export function snapSlot({ rect, unclamped = rect, pageSize, safeZone, otherSlots, kind, resizeWidth = true, resizeHeight,
-  resizeEdges = { x: 1, y: 1 }, project }: SnapOptions): {
+  resizeEdges = { x: 1, y: 1 }, project, members }: SnapOptions): {
   rect: Rectangle;
   guides: SnapGuide[];
 } {
@@ -176,7 +193,10 @@ export function snapSlot({ rect, unclamped = rect, pageSize, safeZone, otherSlot
       }
     }
 
-    for (const candidate of candidates.sort((a, b) => a.distance - b.distance)) {
+    // On a tie, Page centre gives way, so an equal gap or Slot that lines up there is still shown.
+    const rank = (candidate: Candidate) => candidate.guide.target === "Page centre" ? 1 : 0;
+    for (const candidate of candidates.sort((a, b) => Math.abs(a.distance - b.distance) > 1e-6
+      ? a.distance - b.distance : rank(a) - rank(b))) {
       const next = { ...snapped };
       if (kind === "move") next[axis] += candidate.offset;
       else if (fromStart) {
@@ -190,15 +210,15 @@ export function snapSlot({ rect, unclamped = rect, pageSize, safeZone, otherSlot
       const property = kind === "move" ? axis : axis === "x" ? "width" : "height";
       if (Math.abs(projected[property] - next[property]) >= 1e-9
         || Math.abs(projected[axis] - next[axis]) >= 1e-9
-        || !guideForRect(candidate, projected, otherSlots)
-        || chosen.some((previous) => !guideForRect(previous, projected, otherSlots))) continue;
+        || !guideForRect(candidate, projected, otherSlots, members)
+        || chosen.some((previous) => !guideForRect(previous, projected, otherSlots, members))) continue;
       snapped = projected;
       chosen.push(candidate);
       break;
     }
   }
   const guides = chosen.map((candidate) => {
-    const guide = guideForRect(candidate, snapped, otherSlots);
+    const guide = guideForRect(candidate, snapped, otherSlots, members);
     if (!guide) throw new Error("A snapped guide no longer matches the Slot.");
     return guide;
   });

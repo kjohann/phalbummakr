@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { isSlotClipboardCurrent, readText, writeText } from "./slotClipboard";
 import { Layer, Rect, Stage } from "react-konva";
 import {
-  addPage, addPhotoSlot, addTextSlot, albumSpreads, applyGridToPage, applyLayout, contentPhotoUsage, deletePage, deleteSlot, duplicatePage, lowResolutionPlacements, movePage, pageDimensions,
+  addPage, addPhotoSlot, addTextSlot, albumSpreads, applyGridToPage, applyLayout, contentPhotoUsage, deletePage, deleteSlot, deleteSlots, duplicatePage, lowResolutionPlacements, movePage, pageDimensions,
   panCrop, pasteSlot, placePhoto, placePhotoOnPage, placementDisplayCrop, photoUsage, rotateSlot, saveLayoutFromPage, setPlacementCrop,
   setPlacementFit, setSlotText, setTextStyle, slotResizeEdges, swapPlacements, uprightPhotoSize, usageForPhoto, zoomCrop, POINTS_PER_MM, TEXT_LINE_HEIGHT,
   type Album, type AppliedLayout, type HistoryDirection, type Crop, type Layout, type Page, type PageFormat, type PhotoIdentity, type PhotoPreviewPorts, type PhotoSize, type PlaceablePhoto, type Rectangle, type ResizeHandle, type Slot, type SlotAddress, type TextStyle,
@@ -85,7 +85,12 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
   const cropPreviewRef = useRef<{ pageId: string; slotId: string; crop: Crop } | null>(null);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const [selectedId, setSelectedId] = useState(savedAlbum.pages[0].id);
-  const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
+  /** The Selected Slots, all on the Selected Page. */
+  const [selectedSlotIds, setSelectedSlotIds] = useState<string[]>([]);
+  const setSelectedSlotId = (slotId: string | null) => setSelectedSlotIds(slotId === null ? [] : [slotId]);
+  const selectedSlotId = selectedSlotIds.length === 1 ? selectedSlotIds[0] : null;
+  /** A Slot pressed for selecting or dragging, so the following click knows what the press already did. */
+  const slotPress = useRef<{ targetId: string; wasSelected: boolean; moved: boolean } | null>(null);
   const [editingText, setEditingText] = useState<string | null>(null);
   const [fonts, setFonts] = useState<string[] | null>(null);
   const [fontError, setFontError] = useState<string | null>(null);
@@ -201,8 +206,9 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
     const { before, after } = result;
     const selected = after.pages.find((page) => page.id === selectedId);
     if (selected && selected !== before.pages.find((page) => page.id === selectedId)) {
-      if (!selected.slots.some((slot) => slot.id === selectedSlotId)) {
-        setSelectedSlotId(null);
+      const remaining = selectedSlotIds.filter((id) => selected.slots.some((slot) => slot.id === id));
+      if (remaining.length !== selectedSlotIds.length) {
+        setSelectedSlotIds(remaining);
         setEditingText(null);
       }
       return;
@@ -543,6 +549,22 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
     setSelectedSlotId(slotId);
   }
 
+  function isSlotSelected(pageId: string, slotId: string) {
+    return pageId === selectedPage.id && selectedSlotIds.includes(slotId);
+  }
+
+  /** Ctrl-click: adds a Slot to the Selected Slots or removes it. A Slot on another Page starts a new selection there. */
+  function toggleSlotSelection(pageId: string, slotId: string) {
+    setEditingText(null);
+    if (pageId !== selectedPage.id) {
+      setSelectedId(pageId);
+      setSelectedSlotIds([slotId]);
+      return;
+    }
+    setSelectedSlotIds((current) => current.includes(slotId)
+      ? current.filter((id) => id !== slotId) : [...current, slotId]);
+  }
+
   function startCropPan(event: ReactMouseEvent<HTMLElement>, pageId: string, slotId: string) {
     if (event.button !== 0) return;
     event.stopPropagation();
@@ -594,7 +616,22 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
   function startSlotDrag(event: ReactMouseEvent, pageId: string, slotId: string, kind: SlotDrag["kind"], handle?: ResizeHandle) {
     if (event.button !== 0) return;
     event.stopPropagation();
-    selectSlot(pageId, slotId);
+    const wasSelected = isSlotSelected(pageId, slotId);
+    const toggling = kind === "move" && !event.altKey && (event.ctrlKey || event.metaKey);
+    let slotIds = [slotId];
+    if (toggling && !wasSelected) {
+      toggleSlotSelection(pageId, slotId);
+      if (pageId === selectedPage.id) slotIds = [...selectedSlotIds, slotId];
+    } else if (kind === "move" && !event.altKey && wasSelected && selectedSlotIds.length > 1) {
+      // A plain click without moving selects only this Slot; see the Slot's click handler.
+      slotIds = selectedSlotIds;
+    } else if (!toggling) {
+      selectSlot(pageId, slotId);
+    } else {
+      slotIds = selectedSlotIds;
+    }
+    const press = { targetId: `${pageId}:${slotId}`, wasSelected, moved: false };
+    slotPress.current = press;
     if (disabled) return;
     event.preventDefault();
     commitCropPreview();
@@ -604,14 +641,16 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
     const startY = event.clientY;
     const edges = kind === "resize" && slot ? slotResizeEdges(slot, handle ?? "se") : null;
     const duplicate = kind === "move" && event.altKey;
-    let latest: SlotDrag = { pageId, slotId, kind, dx: 0, dy: 0, bypass: event.ctrlKey, duplicate, handle };
+    const group = slotIds.length > 1 ? slotIds : undefined;
+    let latest: SlotDrag = { pageId, slotId, kind, dx: 0, dy: 0, bypass: event.ctrlKey, duplicate, handle, slotIds: group };
     const offset = (moved: MouseEvent): SlotDrag => ({
       pageId, slotId, kind, dx: edges?.x === 0 ? 0 : moved.clientX - startX,
       dy: edges?.y === 0 ? 0 : moved.clientY - startY,
-      bypass: moved.ctrlKey, duplicate, handle,
+      bypass: moved.ctrlKey, duplicate, handle, slotIds: group,
     });
     const move = (moved: MouseEvent) => {
       latest = offset(moved);
+      if (latest.dx !== 0 || latest.dy !== 0) press.moved = true;
       setSlotDrag(latest.dx !== 0 || latest.dy !== 0 ? latest : null);
     };
     const modifier = (pressed: KeyboardEvent) => {
@@ -622,6 +661,8 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
     };
     const finish = (drag: SlotDrag) => {
       stop();
+      // The click that follows a mouseup reads the press first; a press without a click must not linger.
+      setTimeout(() => { if (slotPress.current === press) slotPress.current = null; });
       if (drag.dx !== 0 || drag.dy !== 0) {
         const result = applySlotDrag(savedAlbum, drag, trimWidth, trimHeight).album;
         changeAlbum((current) => applySlotDrag(current, drag, trimWidth, trimHeight).album);
@@ -687,6 +728,15 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
   function deleteSlotAt(pageId = selectedPage.id, slotId = selectedSlot?.id) {
     if (!slotId || disabled) return;
     removeSlot(pageId, slotId);
+  }
+
+  function deleteSelectedSlots() {
+    if (selectedSlotIds.length === 0 || disabled) return;
+    const pageId = selectedPage.id;
+    const slotIds = selectedSlotIds;
+    setSelectedSlotIds([]);
+    setEditingText(null);
+    changeAlbum((current) => deleteSlots(current, pageId, slotIds));
   }
 
   function applyOnPage(pageId: string, apply: (album: Album) => AppliedLayout) {
@@ -764,7 +814,7 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
     delete: () => deleteSlotAt(),
     rotate: rotateSelectedSlot,
     zoom: zoomable ? (factor) => zoomPlacementBy(selectedPage.id, selectedSlot.id, factor) : undefined,
-  } : {});
+  } : selectedSlotIds.length > 1 && !disabled ? { delete: deleteSelectedSlots } : {});
 
   function addSlot(type: "photo" | "text", pageId: string, centre?: { x: number; y: number }) {
     if (disabled) return;
@@ -943,12 +993,21 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
           return (
             <Fragment key={targetId}>
             <div className={`slot-overlay${photoDragActive && slot.type === "photo" ? " slot-overlay--dragging" : ""}${dropTargetId === targetId ? " slot-overlay--drop-target" : ""}`} role="button" tabIndex={0}
-              aria-label={name} aria-pressed={page.id === selectedPage.id && slot.id === selectedSlot?.id}
+              aria-label={name} aria-pressed={isSlotSelected(page.id, slot.id)}
               title={slot.type === "text" ? "Double-click to edit text" : slot.placement?.photoPath ?? "Drag a Photo here"}
               style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
               onMouseDown={(event) => startSlotDrag(event, page.id, slot.id, "move")}
               onClick={(event) => {
                 event.stopPropagation();
+                const press = slotPress.current;
+                slotPress.current = null;
+                const pressed = press?.targetId === targetId ? press : null;
+                if (pressed?.moved) return;
+                if (event.ctrlKey || event.metaKey) {
+                  // A press that added the Slot has already toggled it.
+                  if (!pressed || pressed.wasSelected) toggleSlotSelection(page.id, slot.id);
+                  return;
+                }
                 selectSlot(page.id, slot.id);
               }}
               onContextMenu={(event) => {
@@ -966,10 +1025,18 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
                 if (toggleTextShortcut(event, page.id, slot)) return;
                 if (event.key === " " || event.key === "Enter") {
                   event.preventDefault();
+                  if (event.key === " " && (event.ctrlKey || event.metaKey)) {
+                    toggleSlotSelection(page.id, slot.id);
+                    return;
+                  }
                   selectSlot(page.id, slot.id);
                   if (event.key === "Enter" && slot.type === "text" && !disabled) setEditingText(targetId);
                 } else if ((event.key === "Delete" || event.key === "Backspace") && !disabled) {
                   event.preventDefault();
+                  if (selectedSlotIds.length > 1 && isSlotSelected(page.id, slot.id)) {
+                    deleteSelectedSlots();
+                    return;
+                  }
                   selectSlot(page.id, slot.id);
                   deleteSlotAt(page.id, slot.id);
                 }
@@ -1027,7 +1094,8 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
                   ? slot.placement ? "Swap Photos" : "Move Photo"
                   : slot.placement ? "Replace Photo" : "Place Photo"}</span>
               )}
-              {slot.type === "photo" && slot.placement && (!disabled
+              {slot.type === "photo" && slot.placement
+                && !(selectedSlotIds.length > 1 && isSlotSelected(page.id, slot.id)) && (!disabled
                 || (draggedPlacement.current?.pageId === page.id && draggedPlacement.current.slotId === slot.id)) && (
                 <span className="slot-photo-drag-handle" draggable aria-label={`Drag Photo from ${name}`}
                   title="Drag to swap"
@@ -1099,7 +1167,7 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
                 <span className="slot-move-handle" role="button" aria-label={`Move ${name}`}
                   onMouseDown={(event) => startSlotDrag(event, page.id, slot.id, "move")}>Move</span>
               )}
-              {!disabled && (
+              {!disabled && selectedSlotIds.length <= 1 && (
                 <SlotResizeHandles slot={slot} name={name}
                   onMouseDown={(event, handle) => startSlotDrag(event, page.id, slot.id, "resize", handle)} />
               )}
@@ -1156,7 +1224,7 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
         <span>PAGE {visiblePageIndex + 1} OF {album.pages.length}</span>
         <span className="guide-legend">
           <span>Bleed: {bleedMm} mm</span><span>Trim edge</span><span>Safe Zone: {safeZoneMm} mm</span>
-          <span>Alt-drag to duplicate · Hold Ctrl for free placement</span>
+          <span>Ctrl-click to select several · Alt-drag to duplicate · Hold Ctrl for free placement</span>
         </span>
       </div>
       <nav className="spread-strip" aria-label="Spreads" ref={stripRef} onContextMenu={(event) => {

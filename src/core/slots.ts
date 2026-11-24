@@ -181,19 +181,50 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
+/** The positions a Slot may move to, keeping it within the Bleed. */
+function moveLimits(box: ReturnType<typeof bleedBox>, slot: Slot) {
+  const textRotation = slot.type === "text" ? slot.rotation ?? 0 : null;
+  const minX = textRotation === 90 ? box.left - slot.width : box.left;
+  const maxX = textRotation === 270 ? box.right : box.right - slot.width;
+  const minY = textRotation === 180 ? box.top - slot.height : box.top;
+  const maxY = textRotation === 0 ? box.bottom : box.bottom - slot.height;
+  return { minX, maxX: Math.max(minX, maxX), minY, maxY: Math.max(minY, maxY) };
+}
+
 export function moveSlot(album: Album, pageId: string, slotId: string, x: number, y: number): Album {
   if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error("Slot position must be a finite number.");
   const box = bleedBox(album);
   return editSlot(album, pageId, slotId, (slot) => {
-    const textRotation = slot.type === "text" ? slot.rotation ?? 0 : null;
-    const minX = textRotation === 90 ? box.left - slot.width : box.left;
-    const maxX = textRotation === 270 ? box.right : box.right - slot.width;
-    const minY = textRotation === 180 ? box.top - slot.height : box.top;
-    const maxY = textRotation === 0 ? box.bottom : box.bottom - slot.height;
+    const { minX, maxX, minY, maxY } = moveLimits(box, slot);
+    return { ...slot, x: clamp(x, minX, maxX), y: clamp(y, minY, maxY) };
+  });
+}
+
+/**
+ * Moves Selected Slots together by `dx`, `dy` (fractions of the trim Page). The offset is limited
+ * so that no Slot leaves its Bleed limits, keeping the Slots' spacing unchanged.
+ */
+export function moveSlots(album: Album, pageId: string, slotIds: readonly string[], dx: number, dy: number): Album {
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) throw new Error("Slot offset must be a finite number.");
+  const ids = new Set(slotIds);
+  const box = bleedBox(album);
+  return editPage(album, pageId, (page) => {
+    const moving = page.slots.filter((slot) => ids.has(slot.id));
+    if (moving.length !== ids.size) throw new Error("Slot not found on Page.");
+    let [minDx, maxDx, minDy, maxDy] = [-Infinity, Infinity, -Infinity, Infinity];
+    for (const slot of moving) {
+      const limits = moveLimits(box, slot);
+      minDx = Math.max(minDx, limits.minX - slot.x);
+      maxDx = Math.min(maxDx, limits.maxX - slot.x);
+      minDy = Math.max(minDy, limits.minY - slot.y);
+      maxDy = Math.min(maxDy, limits.maxY - slot.y);
+    }
+    // A Slot already beyond its limits must not be pulled back by moving the others.
+    const offsetX = minDx > maxDx ? 0 : clamp(dx, minDx, maxDx);
+    const offsetY = minDy > maxDy ? 0 : clamp(dy, minDy, maxDy);
     return {
-      ...slot,
-      x: clamp(x, minX, Math.max(minX, maxX)),
-      y: clamp(y, minY, Math.max(minY, maxY)),
+      ...page,
+      slots: page.slots.map((slot) => ids.has(slot.id) ? { ...slot, x: slot.x + offsetX, y: slot.y + offsetY } : slot),
     };
   });
 }
@@ -217,9 +248,14 @@ export function rotateSlot(album: Album, pageId: string, slotId: string, turn: 9
 const MIN_SLOT_SIZE = 0.02;
 
 export function deleteSlot(album: Album, pageId: string, slotId: string): Album {
+  return deleteSlots(album, pageId, [slotId]);
+}
+
+export function deleteSlots(album: Album, pageId: string, slotIds: readonly string[]): Album {
+  const ids = new Set(slotIds);
   return editPage(album, pageId, (page) => {
-    if (!page.slots.some((slot) => slot.id === slotId)) throw new Error("Slot not found on Page.");
-    return { ...page, slots: page.slots.filter((slot) => slot.id !== slotId) };
+    if (page.slots.filter((slot) => ids.has(slot.id)).length !== ids.size) throw new Error("Slot not found on Page.");
+    return { ...page, slots: page.slots.filter((slot) => !ids.has(slot.id)) };
   });
 }
 

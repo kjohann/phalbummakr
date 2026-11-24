@@ -113,6 +113,10 @@ _Avoid_: Template gallery
 A rectangular region in a Layout or Page that holds content. It is either a Photo Slot or a Text Slot. Rotating a Slot rotates its content with it.
 _Avoid_: Frame, cell, placeholder, box
 
+**Selected Slots**:
+One or more Slots on the Selected Page chosen together, such as by Ctrl-click, so they can be moved or deleted as one. A single selected Slot is the usual case. Selecting Slots never creates a lasting grouping.
+_Avoid_: Group, multi-selection
+
 **Slot rotation**:
 The orientation of a Slot and its content, changed in 90° turns.
 

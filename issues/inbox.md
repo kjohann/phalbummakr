@@ -27,8 +27,9 @@ note once it has been sorted. An empty inbox means everything has been sorted.
 - Album mode
     - More placement snapping lines, like aligning to the middle of a page, and also when free placing a slot that lines up with another, it would be nice to get help to place it at the same distance from for example the right edge as the aligned slot is from the left (or top/bottom), as well as distances from other slots. Basically snapp help to free place grid like layouts.
         - Related: [052 - Smart placement](052-smart-photo-placement.md) plans equal spacing when adding a Photo to a row or column. The broader snapping request remains here; that work is not implemented or resolved by recording 052.
+        - Aligning to the middle of a Page is done in [054](054-move-selected-slots-together.md) (Page-centre guides). Matching distances and grid help remain.
     - Z-index: move slots back, or forwards. Also with "Send to back" and "Bring to front" options.
-    - Ctrl to mark several slots and move them togheter, preserving spacing and such.
+    - Auto-place: Mark several photos in the left bar and auto place them on a page. You can then redo it and get a different layout. Very unsure if this is a feasible feature to make. It might have to depend on either using a grid or layouts from the library that matches the number of photos. Making inline layouts on the fly is probably too much advanced code to handle. An alternative thought: base on a simple grid, but vary heights/widths and spacing for each new cycle (as well as placement locations). Meaning it starts simple, then maybe has every other column with a taller photo on top, or a wider in every other row, or other such patterns.
 
 - The top bar
     - It is a bit weird that the command bar is shifted all the way to the left (but not undo/redo for some reason). It's left most part should be "anchored" to be aligned with the right most side of the left pane

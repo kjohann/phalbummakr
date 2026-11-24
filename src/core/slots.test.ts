@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import { createAlbum, deserializeAlbum, serializeAlbum } from "./album";
 import {
   addPhotoSlot, addTextSlot, deleteSlot, duplicateSlot, pasteSlot, fitPhotoRect, moveSlot, panCrop, placePhoto, placePhotoOnPage,
-  placementDisplayCrop, resizeSlot, rotateSlot, setPlacementCrop, setPlacementFit, swapPlacements, zoomCrop, type ResizeHandle,
+  moveSlots, placementDisplayCrop, resizeSlot, rotateSlot, setPlacementCrop, setPlacementFit, swapPlacements, zoomCrop, type ResizeHandle,
 } from "./slots";
 
 function slotOf(album: ReturnType<typeof createAlbum>, page = 0) {
@@ -403,4 +403,16 @@ it("creates a Photo Slot under a dropped Photo, clips it to the Bleed, and refit
   expect(clipped.placement!.crop.x).toBeGreaterThan(0);
   expect(clipped.placement!.crop.width).toBeLessThan(1);
   expect(album.pages[0].slots).toEqual([]);
+});
+
+it("moves Slots together and stops the whole group at the first Bleed limit", () => {
+  let album = addPhotoSlot(addPhotoSlot(createAlbum({ name: "Trip", bleedMm: 3 }), "page-1"), "page-1");
+  album = moveSlot(album, "page-1", "slot-2", 0.6, 0.5);
+  const moved = moveSlots(album, "page-1", ["slot-1", "slot-2"], 1, -0.1);
+  const [first, second] = moved.pages[0].slots;
+  expect(second.x).toBeCloseTo(1 + 3 / 297 - 0.4, 9);
+  expect(second.x - first.x).toBeCloseTo(0.3, 9);
+  expect(first.y).toBeCloseTo(0.2, 9);
+  expect(second.y).toBeCloseTo(0.4, 9);
+  expect(() => moveSlots(album, "page-1", ["slot-1", "missing"], 0, 0)).toThrow("Slot not found on Page.");
 });
