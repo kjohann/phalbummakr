@@ -1247,6 +1247,14 @@ button.sort-photo--selected:hover {
   background: #415d5014;
 }
 
+.smart-placement-preview {
+  position: absolute;
+  z-index: 3;
+  box-sizing: border-box;
+  border: 2px dashed #c3337a;
+  pointer-events: none;
+}
+
 .canvas-page-number {
   position: absolute;
   top: 100%;

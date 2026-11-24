@@ -5,10 +5,10 @@ import { Layer, Rect, Stage } from "react-konva";
 import {
   addPage, addPhotoSlot, addTextSlot, albumSpreads, applyLayout, contentPhotoUsage, createGridLayout, deletePage, deleteSlot, duplicatePage, lowResolutionPlacements, movePage, pageDimensions,
   panCrop, pasteSlot, placePhoto, placePhotoOnPage, placementDisplayCrop, photoUsage, rotateSlot, saveLayoutFromPage, setPlacementCrop,
-  setPlacementFit, setSlotText, setTextStyle, slotResizeEdges, swapPlacements, usageForPhoto, zoomCrop, POINTS_PER_MM, TEXT_LINE_HEIGHT,
-  type Album, type AppliedLayout, type HistoryDirection, type Crop, type Layout, type Page, type PageFormat, type PhotoIdentity, type PhotoPreviewPorts, type PhotoSize, type ResizeHandle, type Slot, type SlotAddress, type TextStyle,
+  setPlacementFit, setSlotText, setTextStyle, slotResizeEdges, swapPlacements, uprightPhotoSize, usageForPhoto, zoomCrop, POINTS_PER_MM, TEXT_LINE_HEIGHT,
+  type Album, type AppliedLayout, type HistoryDirection, type Crop, type Layout, type Page, type PageFormat, type PhotoIdentity, type PhotoPreviewPorts, type PhotoSize, type PlaceablePhoto, type Rectangle, type ResizeHandle, type Slot, type SlotAddress, type TextStyle,
 } from "../core";
-import { hasLayoutDrag, hasPhotoDrag, readLayoutDrag, readPhotoDrag, writeLayoutDrag } from "./photoDrag";
+import { hasLayoutDrag, hasPhotoDrag, leftElement, readLayoutDrag, readPhotoDrag, writeLayoutDrag } from "./photoDrag";
 import { historyShortcut } from "./historyShortcut";
 import LayoutLibraryPane, { plural } from "./LayoutLibraryPane";
 import GridLayoutDialog from "./GridLayoutDialog";
@@ -20,6 +20,7 @@ import { PhotoSlotTools, SlotActions } from "./SlotTools";
 import { createRequestQueue } from "./requestQueue";
 import { keyboardTaken, useSlotShortcuts } from "./slotShortcuts";
 import type { AlbumHistory, AlbumLayouts, CommandBarLink } from "./AlbumWorkspace";
+import { smartPlacement } from "./smartPlacement";
 
 const PLACEMENT_DRAG_TYPE = "application/x-phalbummakr-placement";
 const queuedPreview = createRequestQueue(4);
@@ -73,6 +74,10 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
   const draggedId = useRef<string | null>(null);
   const focusPageId = useRef<string | null>(null);
   const draggedPlacement = useRef<SlotAddress | null>(null);
+  const draggedPhoto = useRef<PlaceablePhoto | null>(null);
+  const smartPreviewRef = useRef<{ pageId: string; rect: Rectangle } | null>(null);
+  const smartHover = useRef<{ pageId: string; pointer: { x: number; y: number } } | null>(null);
+  const [smartPreview, setSmartPreview] = useState<{ pageId: string; rect: Rectangle } | null>(null);
   const stopSlotDrag = useRef<(() => void) | null>(null);
   const [visiblePreviews, setVisiblePreviews] = useState<Record<string, {
     path: string; image: HTMLImageElement; ready: boolean;
@@ -256,6 +261,10 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
   useEffect(() => {
     const startPhotoDrag = (event: DragEvent) => {
       if (!event.dataTransfer || (!hasPhotoDrag(event.dataTransfer) && !hasPlacementDrag(event.dataTransfer))) return;
+      draggedPhoto.current = readPhotoDrag(event.dataTransfer);
+      smartHover.current = null;
+      smartPreviewRef.current = null;
+      setSmartPreview(null);
       setPhotoDragActive(true);
       setDropTargetId(null);
     };
@@ -264,6 +273,10 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
       setDropTargetId(null);
       setLayoutDropPageId(null);
       draggedPlacement.current = null;
+      draggedPhoto.current = null;
+      smartHover.current = null;
+      smartPreviewRef.current = null;
+      setSmartPreview(null);
     };
     window.addEventListener("dragstart", startPhotoDrag);
     window.addEventListener("dragend", clearPhotoDrag);
@@ -272,6 +285,43 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
       window.removeEventListener("dragend", clearPhotoDrag);
     };
   }, []);
+
+  function updateSmartPreview(page: Page, pointer: { x: number; y: number }, bypass: boolean) {
+    const photo = draggedPhoto.current;
+    const size = photo && uprightPhotoSize(photo);
+    const result = active && !bypass && size && Number.isFinite(size.width) && Number.isFinite(size.height)
+      && size.width > 0 && size.height > 0
+      ? smartPlacement({
+        slots: page.slots, photoAspect: size.width / size.height,
+        pageMm: { width: dimensions.widthMm, height: dimensions.heightMm },
+        pagePixels: { width: trimWidth, height: trimHeight }, bleedMm, pointer,
+        previous: smartPreviewRef.current?.pageId === page.id ? smartPreviewRef.current : null,
+      })
+      : null;
+    const next = result ? { pageId: page.id, rect: result.rect } : null;
+    smartPreviewRef.current = next;
+    setSmartPreview(next);
+  }
+
+  function clearSmartPreview() {
+    smartHover.current = null;
+    smartPreviewRef.current = null;
+    setSmartPreview(null);
+  }
+
+  useEffect(() => {
+    const modifier = (event: KeyboardEvent) => {
+      if (event.key !== "Control" || !smartHover.current) return;
+      const page = album.pages.find((item) => item.id === smartHover.current?.pageId);
+      if (page) updateSmartPreview(page, smartHover.current.pointer, event.ctrlKey);
+    };
+    window.addEventListener("keydown", modifier);
+    window.addEventListener("keyup", modifier);
+    return () => {
+      window.removeEventListener("keydown", modifier);
+      window.removeEventListener("keyup", modifier);
+    };
+  });
 
   function slotRect(slot: Slot, trimLeft: number) {
     return {
@@ -747,6 +797,7 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
       if (event.target instanceof Element && event.target.closest(".slot-overlay, .canvas-page-hit")) return;
       setPhotoDragActive(true);
       setDropTargetId(null);
+      clearSmartPreview();
     }}>
       <div className="canvas-viewport" ref={viewportRef} role="group" aria-label="Spread editor">
         {viewport.width > 0 && viewport.height > 0 && scale > 0 && (
@@ -800,7 +851,15 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
                 event.dataTransfer.dropEffect = "copy";
                 setPhotoDragActive(true);
                 setDropTargetId(null);
+                const bounds = event.currentTarget.getBoundingClientRect();
+                const pointer = {
+                  x: (event.clientX - bounds.left - bleedMm * scale) / trimWidth,
+                  y: (event.clientY - bounds.top - bleedMm * scale) / trimHeight,
+                };
+                smartHover.current = { pageId: page.id, pointer };
+                updateSmartPreview(page, pointer, event.ctrlKey);
               }}
+              onDragLeave={(event) => { if (leftElement(event)) clearSmartPreview(); }}
               onDrop={(event) => {
                 if (layoutDrop(event, page.id)) return;
                 const photo = readPhotoDrag(event.dataTransfer);
@@ -811,12 +870,15 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
                 const bounds = event.currentTarget.getBoundingClientRect();
                 const x = (event.clientX - bounds.left - bleedMm * scale) / trimWidth;
                 const y = (event.clientY - bounds.top - bleedMm * scale) / trimHeight;
+                const suggested = !event.ctrlKey && smartPreviewRef.current?.pageId === page.id
+                  ? smartPreviewRef.current.rect : undefined;
+                clearSmartPreview();
                 try {
-                  const updated = placePhotoOnPage(album, page.id, photo, x, y);
+                  const updated = placePhotoOnPage(album, page.id, photo, x, y, suggested);
                   const slotId = updated.pages.find((item) => item.id === page.id)!.slots.at(-1)!.id;
                   checkDuplicate(photo.path);
                   rememberThumbnail(`${page.id}:${slotId}`, photo.thumbnail);
-                  changeAlbum((current) => placePhotoOnPage(current, page.id, photo, x, y));
+                  changeAlbum((current) => placePhotoOnPage(current, page.id, photo, x, y, suggested));
                   selectSlot(page.id, slotId);
                 } catch {
                   return; // Not a valid Photo or drop point, e.g. a forged drag payload.
@@ -847,6 +909,16 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
             </div>
           );
         })}
+        {smartPreview && (() => {
+          const side = spread.left?.id === smartPreview.pageId ? 0 : spread.right?.id === smartPreview.pageId ? 1 : -1;
+          if (side < 0) return null;
+          const rect = smartPreview.rect;
+          return <div role="img" aria-label="Smart placement preview" className="smart-placement-preview" style={{
+            left: originX + side * (pageWidth + gap) + bleedMm * scale + rect.x * trimWidth,
+            top: originY + bleedMm * scale + rect.y * trimHeight,
+            width: rect.width * trimWidth, height: rect.height * trimHeight,
+          }} />;
+        })()}
         {scale > 0 && [spread.left, spread.right].map((page, side) => page?.slots.map((slot, index) => {
           const rect = slotRect(slot, originX + side * (pageWidth + gap) + bleedMm * scale);
           const name = `Page ${pageNumbers.get(page.id)} ${slot.type === "photo" ? "Photo" : "Text"} Slot ${index + 1}`;
@@ -902,6 +974,7 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
                 event.dataTransfer.dropEffect = hasPlacementDrag(event.dataTransfer) ? "move" : "copy";
                 setPhotoDragActive(true);
                 setDropTargetId(targetId);
+                clearSmartPreview();
               }}
               onDrop={(event) => {
                 if (layoutDrop(event, page.id)) return;

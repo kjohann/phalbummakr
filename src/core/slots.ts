@@ -413,6 +413,7 @@ export function placePhotoOnPage(
   photo: PlaceablePhoto,
   centreX: number,
   centreY: number,
+  suggested?: Rectangle,
 ): Album {
   const photoAspect = uprightPhotoAspect(photo);
   if (!Number.isFinite(centreX) || !Number.isFinite(centreY)) throw new Error("Drop point must be finite.");
@@ -430,13 +431,20 @@ export function placePhotoOnPage(
   const right = clamp(clampedCentreX + size.width / 2, box.left, box.right);
   const top = clamp(clampedCentreY - size.height / 2, box.top, box.bottom);
   const bottom = clamp(clampedCentreY + size.height / 2, box.top, box.bottom);
+  if (suggested && (!Object.values(suggested).every(Number.isFinite)
+    || suggested.width <= 0 || suggested.height <= 0
+    || suggested.x < box.left - 1e-9 || suggested.y < box.top - 1e-9
+    || suggested.x + suggested.width > box.right + 1e-9 || suggested.y + suggested.height > box.bottom + 1e-9
+    || Math.abs(suggested.width * widthMm / (suggested.height * heightMm) / photoAspect - 1) > 1e-9)) {
+    throw new Error("Suggested Photo Slot geometry must fit within Bleed and preserve Photo proportions.");
+  }
   const slot: PhotoSlot = {
     id: unusedSlotId(page),
     type: "photo",
-    x: left,
-    y: top,
-    width: right - left,
-    height: bottom - top,
+    x: suggested?.x ?? left,
+    y: suggested?.y ?? top,
+    width: suggested?.width ?? right - left,
+    height: suggested?.height ?? bottom - top,
     placement: null,
   };
   slot.placement = { photoPath: photo.path, crop: centredCrop(photoAspect, slotAspect(album, slot)), fit: false };

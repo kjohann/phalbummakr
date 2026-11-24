@@ -1,6 +1,6 @@
 # 052 - Smart placement of new Photos
 
-Status: todo · Type: feature · Depends on: 006, 011, 013, 014
+Status: doing · Type: feature · Depends on: 006, 011, 013, 014
 
 ## What
 
@@ -15,7 +15,7 @@ Fit mode, an automatic Layout, or a request to rearrange the Page.
 
 Extends [006](006-photo-slots.md) and [013](013-slot-snapping.md), preserving
 the upright-Photo behaviour in [014's addendum](014-addendum.md).
-Design agreed through discussion; implementation is not authorised yet.
+Design agreed through discussion; implementation authorised for this issue.
 
 ## Acceptance criteria
 

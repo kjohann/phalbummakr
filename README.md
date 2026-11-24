@@ -147,6 +147,12 @@ Drag a Photo from the grid onto a Slot to place or replace it, or onto an empty
 part of a Page to create a Slot. The editor uses cached thumbnails and previews,
 not original files.
 
+When a new Photo is dragged near Photo Slots, an outline suggests a matching
+height or width and extends an aligned row or column with its existing spacing.
+The Photo keeps its proportions and existing Slots stay in place. Suggestions
+avoid all Slots and stay inside the Bleed; hold Ctrl to place normally instead.
+Dropping onto an existing Photo Slot still places or replaces its Photo.
+
 To move a placed Photo, drag its hand-icon handle (**Drag to swap**) onto another
 Photo Slot. An empty target receives the Placement; an occupied target swaps the
 two Placements. The Slots keep their geometry and rotation. Fit follows the Photo;
