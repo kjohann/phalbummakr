@@ -123,6 +123,10 @@ A Slot that shows one Photo.
 A Photo put into a Photo Slot on a Page, together with how it is shown there: Crop or Fit. Usage counts Placements.
 _Avoid_: Instance, occurrence
 
+**Smart placement**:
+Assisted sizing and positioning of a new Photo Slot based on nearby Photo Slots, preserving the incoming Photo's proportions and the existing arrangement.
+_Avoid_: Auto-fit, automatic Layout
+
 **Effective Resolution**:
 The print resolution a Placement actually gets, given the Photo's pixels, its Crop and the Slot's printed size. Placements below the Page Format's threshold are flagged.
 _Avoid_: DPI, quality

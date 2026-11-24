@@ -94,6 +94,8 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 049 | [Automatic Rescan and manual feedback](049-automatic-rescan.md) | 003, 048 | todo |
 | 050 | [Copy and paste Slots in Album mode](050-copy-paste-slots.md) | 011, 018, 019, 030, 040, 041 | doing |
 | 051 | [Resize Slots from corners and sides](051-slot-resize-handles.md) | 006, 009, 011, 013, 014 | done |
+| 052 | [Smart placement of new Photos](052-smart-photo-placement.md) | 006, 011, 013, 014 | todo |
+| 053 | [Apply grid around edge text](053-grid-around-edge-text.md) | 045 | todo |
 
 Work order for the layout rework: 016, 017, 018, 019, 020, then 011.
 
