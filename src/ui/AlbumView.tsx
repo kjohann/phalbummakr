@@ -689,24 +689,22 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
     removeSlot(pageId, slotId);
   }
 
-  function applyLayoutOnPage(pageId: string, layout: Layout) {
+  function applyOnPage(pageId: string, apply: (album: Album) => AppliedLayout) {
     if (disabled) return;
-    const result = applyLayout(savedAlbum, pageId, layout);
-    changeAlbum((current) => applyLayout(current, pageId, layout).album);
+    const result = apply(savedAlbum);
+    changeAlbum((current) => apply(current).album);
     setSelectedId(pageId);
     setSelectedSlotId(null);
     setEditingText(null);
     onNotice?.(appliedLayoutNotice(result, pageNumbers.get(pageId)));
   }
 
+  function applyLayoutOnPage(pageId: string, layout: Layout) {
+    applyOnPage(pageId, (current) => applyLayout(current, pageId, layout));
+  }
+
   function applyGridOnPage(pageId: string, columns: number, rows: number, removeText: boolean) {
-    if (disabled) return;
-    const result = applyGridToPage(savedAlbum, pageId, columns, rows, removeText);
-    changeAlbum((current) => applyGridToPage(current, pageId, columns, rows, removeText).album);
-    setSelectedId(pageId);
-    setSelectedSlotId(null);
-    setEditingText(null);
-    onNotice?.(appliedLayoutNotice(result, pageNumbers.get(pageId)));
+    applyOnPage(pageId, (current) => applyGridToPage(current, pageId, columns, rows, removeText));
   }
 
   function applyLayoutTo(pageId: string, layoutId: string) {

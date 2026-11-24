@@ -138,7 +138,7 @@ export function applyGridToPage(album: Album, pageId: string, columns: number, r
   if (plan.kind === "invalid") throw new Error(plan.reason);
   if (plan.kind === "replace" && !removeText) throw new Error("The grid cannot preserve the current text.");
   const preserved = removeText ? [] : page.slots.filter((slot): slot is TextSlot => slot.type === "text");
-  const bounds = removeText ? gridBounds(album.pageFormat) : plan.kind === "ready" ? plan.bounds : gridBounds(album.pageFormat);
+  const bounds = plan.kind === "ready" && !removeText ? plan.bounds : gridBounds(album.pageFormat);
   const layout = gridLayoutInBounds(album.pageFormat, columns, rows, bounds);
   const ids = new Set(preserved.map((slot) => slot.id));
   let number = 0;

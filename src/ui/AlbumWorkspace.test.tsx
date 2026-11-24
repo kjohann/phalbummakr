@@ -2985,6 +2985,26 @@ it("preserves edge text while applying a grid as one undoable change", () => {
   expect(current().pages).toEqual(applied.pages);
 });
 
+it("reports Photo overflow without reporting preserved text as removed", () => {
+  const { ports } = disk();
+  const onAlbumChange = vi.fn();
+  const album = albumWithContent();
+  album.pages[0].slots[2] = { ...album.pages[0].slots[2], y: 20 / 210, height: 10 / 210 };
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} photoPorts={previews()}
+    onAlbumChange={onAlbumChange} document={{ path: "Existing", album }} />);
+  const original = structuredClone((onAlbumChange.mock.lastCall![0] as Album).pages[0].slots[2]);
+  fireEvent.contextMenu(canvasPage(1));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Apply grid layout..." }));
+  const dialog = within(screen.getByRole("dialog", { name: "Apply grid layout" }));
+  fireEvent.change(dialog.getByLabelText("Columns"), { target: { value: "1" } });
+  fireEvent.change(dialog.getByLabelText("Rows"), { target: { value: "1" } });
+  fireEvent.click(dialog.getByRole("button", { name: "Apply" }));
+  expect(screen.getByText("1 Photo did not fit the Layout on Page 1 and was removed.")).toBeTruthy();
+  const slots = (onAlbumChange.mock.lastCall![0] as Album).pages[0].slots;
+  expect(slots[0]).toMatchObject({ type: "photo", placement: { photoPath: "a.jpg" } });
+  expect(slots[1]).toEqual(original);
+});
+
 it("applies a grid to only its Page, reports removed content, and supports undo and redo", async () => {
   const { ports } = disk();
   const library = layoutDisk([onePhotoLayout]);
