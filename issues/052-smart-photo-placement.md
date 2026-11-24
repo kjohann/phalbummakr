@@ -1,6 +1,6 @@
 # 052 - Smart placement of new Photos
 
-Status: doing · Type: feature · Depends on: 006, 011, 013, 014
+Status: done · Type: feature · Depends on: 006, 011, 013, 014
 
 ## What
 
@@ -64,7 +64,7 @@ Design agreed through discussion; implementation authorised for this issue.
   rotated/empty anchors, blocked candidates, Bleed, zoom, candidate selection,
   preview/drop agreement, Ctrl bypass and unchanged replacement behaviour.
   Type-checking, lint and build pass.
-- [ ] Native desktop drag/drop is smoke-tested for preview, modifier changes,
+- [x] Native desktop drag/drop is smoke-tested for preview, modifier changes,
   drop agreement and replacement behaviour; any validation limitation is
   recorded explicitly.
 
@@ -105,19 +105,16 @@ geometry from the same candidate calculation.
 - Standards and spec review identified independent aligned groups losing their
   spacing, and 3 mm suggestions appearing inside or instead of established
   rows. These were fixed and covered by regression tests.
-- Native smoke testing is outstanding. The existing desktop window is open on
-  a real Album; the app automatically reopens the last Album and writes to it.
-  It was not safe to use that window for test drops. The available desktop drag
-  automation also performs an atomic drag and cannot inspect the preview or
-  change Ctrl during the gesture. Check preview, Ctrl, drop agreement and
-  replacement in WebView2 with a disposable Album before marking this done.
+- The user reports that the native desktop smoke test is complete. Automated
+  desktop drag tooling could not inspect the preview or change Ctrl during a
+  drag, so it did not substitute for the user's check.
 - No Inbox notes were resolved: its broader Album-mode snapping request remains
   open as agreed.
 
 ## Earlier future considerations
 
-- The native Photo drop, upright placement and replacement checks in 006, 007,
-  014 and 015 remain open until the WebView2 check above is performed.
+- The native Smart placement and replacement smoke check is complete. Other
+  native gesture and rotation checks in 006, 007, 014 and 015 remain deferred.
 - Dense-Page snapping performance in 013 remains deferred; this feature has
   its own candidate search and does not change Slot move/resize snapping.
 - The shared Rectangle and upright-Photo helpers from 006 are reused. Extracting
