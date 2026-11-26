@@ -172,8 +172,8 @@ export function setTextStyle(album: Album, pageId: string, slotId: string, style
 /** The area a Slot may occupy: the trim Page plus the Bleed, as fractions of the trim Page. */
 function bleedBox(album: Album) {
   const { widthMm, heightMm } = pageDimensions(album.pageFormat);
-  const x = album.pageFormat.bleedMm / widthMm;
-  const y = album.pageFormat.bleedMm / heightMm;
+  const x = album.pageFormat.bleedMm.x / widthMm;
+  const y = album.pageFormat.bleedMm.y / heightMm;
   return { left: -x, top: -y, right: 1 + x, bottom: 1 + y };
 }
 

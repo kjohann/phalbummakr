@@ -46,8 +46,9 @@ const LAYOUT_GAP_MM = 6;
 
 function gridBounds(format: PageFormat): Rectangle {
   const { widthMm, heightMm } = pageDimensions(format);
-  const inset = Math.max(LAYOUT_MIN_INSET_MM, format.safeZoneMm);
-  return { x: inset, y: inset, width: widthMm - 2 * inset, height: heightMm - 2 * inset };
+  const insetX = Math.max(LAYOUT_MIN_INSET_MM, format.safeZoneMm.x);
+  const insetY = Math.max(LAYOUT_MIN_INSET_MM, format.safeZoneMm.y);
+  return { x: insetX, y: insetY, width: widthMm - 2 * insetX, height: heightMm - 2 * insetY };
 }
 
 function gridFits(bounds: Rectangle, columns: number, rows: number): boolean {

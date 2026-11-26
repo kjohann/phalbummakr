@@ -72,10 +72,10 @@ A named, reusable Page Format stored in the Library, together with the Print Pro
 _Avoid_: Profile, product
 
 **Bleed**:
-Extra image area beyond the trim edge of a Page, which the Print Provider cuts away.
+Extra image area beyond the trim edge of a Page, which the Print Provider cuts away. It has one width for the left and right edges and one for the top and bottom edges.
 
 **Safe Zone**:
-The inner area of a Page that is guaranteed to survive trimming.
+The inner area of a Page that is guaranteed to survive trimming. Like the Bleed, its margin is set separately for left/right and top/bottom.
 _Avoid_: Margin, safe area
 
 **Reflow**:

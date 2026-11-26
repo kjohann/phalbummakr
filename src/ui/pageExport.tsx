@@ -70,7 +70,8 @@ function ExportStage({ page, format, photos, onReady }: {
 }) {
   const { width, height, pixelsPerMm } = exportPageSize(format);
   const { widthMm, heightMm } = pageDimensions(format);
-  const bleed = format.bleedMm * pixelsPerMm;
+  const bleedX = format.bleedMm.x * pixelsPerMm;
+  const bleedY = format.bleedMm.y * pixelsPerMm;
   const trimWidth = widthMm * pixelsPerMm;
   const trimHeight = heightMm * pixelsPerMm;
   const background = useRef<Konva.Rect>(null);
@@ -79,7 +80,7 @@ function ExportStage({ page, format, photos, onReady }: {
       <Layer>
         <Rect ref={background} x={0} y={0} width={width} height={height} fill={page.background} />
         {page.slots.map((slot) => {
-          const rect = { x: bleed + slot.x * trimWidth, y: bleed + slot.y * trimHeight, width: slot.width * trimWidth, height: slot.height * trimHeight };
+          const rect = { x: bleedX + slot.x * trimWidth, y: bleedY + slot.y * trimHeight, width: slot.width * trimWidth, height: slot.height * trimHeight };
           const image = photos.get(slot.id);
           return <SlotFrame key={slot.id} slot={slot} rect={rect}>
             {(local) => slot.type === "text"

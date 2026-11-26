@@ -81,7 +81,9 @@ The width, collapsed state and Compact setting are stored per computer in
 Use **File > New Album** to choose a `.phalbum` file, then a title, Page Format and print settings. Initially the
 only Page Format is **A4 landscape (297 x 210 mm)**; width and height are not
 entered manually. Defaults are 2 empty white Pages, 3 mm
-Bleed, 5 mm Safe Zone and 300 DPI. Even Page counts from 2 to 10,000 are supported.
+Bleed, 5 mm Safe Zone and 300 DPI. Bleed and Safe Zone each have separate
+left/right and top/bottom values, as some Print Providers use different margins
+on each axis. Even Page counts from 2 to 10,000 are supported.
 The title is free text and is independent of the filename.
 
 Each Album is a `.phalbum` file containing versioned JSON. Its folder is the
@@ -286,8 +288,8 @@ To make an equal grid, right-click a Page, one of its Slots or its strip
 thumbnail and choose **Apply grid layout...**, or use **Make grid layout...**
 in Layout mode to create an editable Layout.
 Choose 1 to 12 columns and rows, then explicitly apply or create it. Grid Slots
-use a 6 mm gap and the greater of 15 mm or the Album's Safe Zone as their
-inset. Applying a grid does not add it to the Layout Library.
+use a 6 mm gap and, on each axis, the greater of 15 mm or the Album's Safe Zone
+as their inset. Applying a grid does not add it to the Layout Library.
 
 **Save as Layout** in the command bar adds the selected Page's Slots to the end
 of the Layout Library as a new Layout. It keeps their geometry, rotation and

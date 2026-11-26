@@ -49,7 +49,13 @@ it("warns about Pages that would print blank and about empty Photo Slots on the 
 });
 
 it("sizes an exported Page at the Page Format's resolution including the Bleed on every side", () => {
-  const album = createAlbum({ name: "Christmas", bleedMm: 3, dpi: 300 });
+  const album = createAlbum({ name: "Christmas", bleedMm: { x: 3, y: 3 }, dpi: 300 });
   // (297 + 6) mm x (210 + 6) mm at 300 DPI.
   expect(exportPageSize(album.pageFormat)).toEqual({ width: 3579, height: 2551, pixelsPerMm: 300 / 25.4 });
+});
+
+it("adds each axis' Bleed to the matching side of an exported Page", () => {
+  const album = createAlbum({ name: "Christmas", bleedMm: { x: 5, y: 0 }, dpi: 254 });
+  // (297 + 10) mm x 210 mm at 10 pixels per mm.
+  expect(exportPageSize(album.pageFormat)).toMatchObject({ width: 3070, height: 2100 });
 });

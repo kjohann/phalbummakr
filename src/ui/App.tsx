@@ -5,10 +5,11 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
-import { createAlbum, copyPhotosToFolder, DEFAULT_BLEED_MM, DEFAULT_SAFE_ZONE_MM, deserializeAlbum, clampZoom, renameFolder, sendPhotosToFolder, serializeAlbum, stepZoom, type Album, type ContentIndexStats, type ZoomChange, type HistoryDirection, type LayoutPorts, type Photo, type PhotoIdentity, type PhotoSize, type PlacementRelink } from "../core";
+import { createAlbum, copyPhotosToFolder, deserializeAlbum, clampZoom, renameFolder, sendPhotosToFolder, serializeAlbum, stepZoom, type Album, type ContentIndexStats, type ZoomChange, type HistoryDirection, type LayoutPorts, type Photo, type PhotoIdentity, type PhotoSize, type PlacementRelink } from "../core";
 import AlbumWorkspace, { type AlbumCommand, type AlbumCommandName, type CommandBarLink, type HistoryState, type PhotoMoveRunner } from "./AlbumWorkspace";
 import CommandBar, { type BarCommand } from "./CommandBar";
 import LayoutWorkspace, { type LayoutBarLink, type LayoutBarState, type LayoutCommand, type LayoutCommandName } from "./LayoutWorkspace";
+import { MarginFields, readMargins } from "./MarginFields";
 import type { Mode } from "./modes";
 import PhotoBrowser, { type SortCommandName, type SortLink } from "./PhotoBrowser";
 import SidePane, { clampPaneWidth, DEFAULT_SIDE_PANE, type PaneModes, type SidePaneSettings } from "./SidePane";
@@ -578,8 +579,7 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
       const album = createAlbum({
         name: String(form.get("title")),
         pageCount: Number(form.get("pageCount")),
-        bleedMm: Number(form.get("bleedMm")),
-        safeZoneMm: Number(form.get("safeZoneMm")),
+        ...readMargins(form),
         dpi: Number(form.get("dpi")),
         minEffectiveDpi: Number(form.get("minEffectiveDpi")),
       });
@@ -650,8 +650,7 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
           <h1>Album settings</h1>
           <label>Title<textarea name="title" defaultValue="New Album" autoFocus disabled={busy} rows={2} /></label>
           <label>Page Format<select name="pageFormat" disabled={busy}><option>A4 - landscape (297 x 210 mm)</option></select></label>
-          <label>Bleed (mm)<input name="bleedMm" type="number" min="0" step="any" defaultValue={DEFAULT_BLEED_MM} required disabled={busy} /></label>
-          <label>Safe Zone (mm)<input name="safeZoneMm" type="number" min="0" max="104.99" step="any" defaultValue={DEFAULT_SAFE_ZONE_MM} required disabled={busy} /></label>
+          <MarginFields disabled={busy} />
           <label>Export resolution (DPI)<input name="dpi" type="number" min="1" step="any" defaultValue="300" required disabled={busy} /></label>
           <label>Effective Resolution warning below (DPI)<input name="minEffectiveDpi" type="number" min="1" step="any" defaultValue="150" required disabled={busy} /></label>
           <label>Page count<input name="pageCount" type="number" min="2" max="10000" step="2" defaultValue="2" required disabled={busy} /></label>

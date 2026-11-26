@@ -107,7 +107,7 @@ it("creates empty white A4 landscape Pages and round trips JSON", () => {
   expect(album.schemaVersion).toBe(2);
   expect(album.title).toBe("Christmas");
   expect(album.pageFormat).toEqual({
-    size: "A4", orientation: "landscape", bleedMm: 3, safeZoneMm: 5, dpi: 300, minEffectiveDpi: 150,
+    size: "A4", orientation: "landscape", bleedMm: { x: 3, y: 3 }, safeZoneMm: { x: 5, y: 5 }, dpi: 300, minEffectiveDpi: 150,
   });
   expect(pageDimensions(album.pageFormat)).toEqual({ widthMm: 297, heightMm: 210 });
   expect(album.pages).toHaveLength(2);
@@ -144,18 +144,36 @@ it("gives an Album saved before the Effective Resolution threshold the 150 DPI d
   expect(JSON.parse(serializeAlbum(loaded)).pageFormat.minEffectiveDpi).toBe(150);
 });
 
+it("gives an Album saved with one Bleed and Safe Zone that value on both axes", () => {
+  const oldSave = JSON.parse(serializeAlbum(createAlbum({ name: "Old Album" })));
+  oldSave.pageFormat.bleedMm = 4;
+  oldSave.pageFormat.safeZoneMm = 7;
+
+  const loaded = deserializeAlbum(JSON.stringify(oldSave));
+  expect(loaded.pageFormat).toMatchObject({ bleedMm: { x: 4, y: 4 }, safeZoneMm: { x: 7, y: 7 } });
+});
+
+it("allows a left/right Safe Zone beyond half the Page height", () => {
+  const album = createAlbum({ name: "Wide", safeZoneMm: { x: 120, y: 5 } });
+  expect(album.pageFormat.safeZoneMm).toEqual({ x: 120, y: 5 });
+});
+
 it("accepts a custom Page count and print settings", () => {
-  const album = createAlbum({ name: " Summer ", pageCount: 4, bleedMm: 0, safeZoneMm: 8, dpi: 600, minEffectiveDpi: 200 });
+  const album = createAlbum({ name: " Summer ", pageCount: 4, bleedMm: { x: 0, y: 0 }, safeZoneMm: { x: 8, y: 8 }, dpi: 600, minEffectiveDpi: 200 });
   expect(album.title).toBe(" Summer ");
   expect(album.pages).toHaveLength(4);
-  expect(album.pageFormat).toMatchObject({ bleedMm: 0, safeZoneMm: 8, dpi: 600, minEffectiveDpi: 200 });
+  expect(album.pageFormat).toMatchObject({ bleedMm: { x: 0, y: 0 }, safeZoneMm: { x: 8, y: 8 }, dpi: 600, minEffectiveDpi: 200 });
 });
 
 it("rejects invalid print settings and malformed or unsupported Albums instead of losing data", () => {
   for (const pageCount of [0, -1, 1.5, Infinity, 10001]) {
     expect(() => createAlbum({ name: "Test", pageCount })).toThrow(/page count/i);
   }
-  for (const settings of [{ bleedMm: -1 }, { safeZoneMm: 105 }, { dpi: 0 }, { dpi: NaN }, { minEffectiveDpi: 0 }, { minEffectiveDpi: NaN }]) {
+  for (const settings of [
+    { bleedMm: { x: -1, y: 3 } }, { bleedMm: { x: 3, y: NaN } },
+    { safeZoneMm: { x: 148.5, y: 5 } }, { safeZoneMm: { x: 5, y: 105 } },
+    { dpi: 0 }, { dpi: NaN }, { minEffectiveDpi: 0 }, { minEffectiveDpi: NaN },
+  ]) {
     expect(() => createAlbum({ name: "Test", ...settings })).toThrow();
   }
   const valid = createAlbum({ name: "Test" });

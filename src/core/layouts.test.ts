@@ -42,12 +42,12 @@ it("accepts 1 through 12 whole columns and rows, rejecting invalid dimensions", 
 });
 
 it("uses the larger Safe Zone and rejects grids with no positive Slot area", () => {
-  const [slot] = createGridLayout({ ...format, safeZoneMm: 20 }, 1, 1).slots;
+  const [slot] = createGridLayout({ ...format, safeZoneMm: { x: 20, y: 5 } }, 1, 1).slots;
   expect([slot.x * 297, slot.y * 210, slot.width * 297, slot.height * 210])
-    .toEqual([20, 20, 257, 170]);
-  expect(() => createGridLayout({ ...format, safeZoneMm: 102 }, 1, 2))
+    .toEqual([20, 15, 257, 180]);
+  expect(() => createGridLayout({ ...format, safeZoneMm: { x: 102, y: 102 } }, 1, 2))
     .toThrow("These dimensions leave no positive Slot width or height on this Page Format.");
-  expect(() => createGridLayout({ ...format, safeZoneMm: 104 }, 1, 2))
+  expect(() => createGridLayout({ ...format, safeZoneMm: { x: 104, y: 104 } }, 1, 2))
     .toThrow("These dimensions leave no positive Slot width or height on this Page Format.");
 });
 
@@ -131,12 +131,12 @@ it("recognizes empty text exactly at the outer-quarter boundary, but rejects tex
 });
 
 it("distinguishes a grid that cannot fit around text from one that cannot fit the Page", () => {
-  const album = createAlbum({ name: "A", safeZoneMm: 30 });
+  const album = createAlbum({ name: "A", safeZoneMm: { x: 30, y: 30 } });
   album.pages[0].slots = [edgeText("top", 30, 57.5, 30, 10), edgeText("bottom", 30, 142.5, 30, 10)];
   expect(planPageGrid(album.pageFormat, album.pages[0], 1, 12)).toEqual({ kind: "replace", reason: "space" });
   expect(() => applyGridToPage(album, "page-1", 1, 12)).toThrow("cannot preserve");
   expect(applyGridToPage(album, "page-1", 1, 12, true).album.pages[0].slots).toHaveLength(12);
-  const small = { ...album.pageFormat, safeZoneMm: 102 };
+  const small = { ...album.pageFormat, safeZoneMm: { x: 102, y: 102 } };
   expect(planPageGrid(small, album.pages[0], 1, 2)).toMatchObject({ kind: "invalid" });
   expect(() => applyGridToPage({ ...album, pageFormat: small }, "page-1", 1, 2, true)).toThrow("no positive Slot");
 });
@@ -243,14 +243,14 @@ describe("applying a Layout to a Page", () => {
 
 describe("Layout Library", () => {
   it("designs starter Layouts for the default margins even when the Album has a very large Safe Zone and Bleed", () => {
-    const album = createAlbum({ name: "Large margins", safeZoneMm: 104, bleedMm: 20 });
+    const album = createAlbum({ name: "Large margins", safeZoneMm: { x: 104, y: 104 }, bleedMm: { x: 20, y: 20 } });
     const library = predefinedLayoutLibrary(album.pageFormat);
     expect(library).toEqual(predefinedLayoutLibrary(format));
     expect(() => serializeLayoutLibrary(library)).not.toThrow();
     const applied = applyLayout(album, "page-1", library.layouts[2]).album;
     expect(applied.pages[0].slots).toEqual(library.layouts[2].slots);
     expect(applied.pages[0].slots[0].x * 297).toBeCloseTo(15);
-    expect(applied.pageFormat.safeZoneMm).toBe(104);
+    expect(applied.pageFormat.safeZoneMm).toEqual({ x: 104, y: 104 });
   });
 
   it("offers a large left-hand Photo beside three stacked Photos", () => {
@@ -380,7 +380,7 @@ describe("Layout Library", () => {
   });
 
   it("covers the whole Page out to the Bleed with the full-bleed Layout", () => {
-    const [fullBleed] = predefinedLayoutLibrary({ ...format, bleedMm: 3 }).layouts;
+    const [fullBleed] = predefinedLayoutLibrary({ ...format, bleedMm: { x: 3, y: 3 } }).layouts;
     expect(fullBleed.slots[0]).toMatchObject({ type: "photo", placement: null });
     expect(fullBleed.slots[0].x * 297).toBeCloseTo(-3);
     expect(fullBleed.slots[0].y * 210).toBeCloseTo(-3);
@@ -498,7 +498,7 @@ describe("Layout Library", () => {
   });
 
   it("keeps the other predefined Layouts inside the Safe Zone", () => {
-    const library = predefinedLayoutLibrary({ ...format, safeZoneMm: 5 });
+    const library = predefinedLayoutLibrary({ ...format, safeZoneMm: { x: 5, y: 5 } });
     for (const layout of library.layouts.slice(1)) {
       for (const slot of layout.slots) {
         expect(slot.x * 297).toBeGreaterThanOrEqual(5);

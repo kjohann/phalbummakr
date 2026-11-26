@@ -10,7 +10,7 @@ import LayoutLibraryPane from "./LayoutLibraryPane";
 import GridLayoutDialog from "./GridLayoutDialog";
 import ModalDialog from "./ModalDialog";
 import { historyShortcut } from "./historyShortcut";
-import { applySlotDrag, LayerPage, SlotResizeHandles, SnapGuides, TextContent, type SlotDrag } from "./pageCanvas";
+import { applySlotDrag, formatMargins, LayerPage, SlotResizeHandles, SnapGuides, TextContent, type SlotDrag } from "./pageCanvas";
 import { PhotoSlotTools, SlotActions } from "./SlotTools";
 import { useSlotShortcuts } from "./slotShortcuts";
 import { tauriFontPorts, type FontPorts } from "./tauriFontPorts";
@@ -106,15 +106,15 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
 
   const dimensions = pageDimensions(format);
   const { bleedMm, safeZoneMm } = format;
-  const fullWidth = dimensions.widthMm + 2 * bleedMm;
-  const fullHeight = dimensions.heightMm + 2 * bleedMm;
+  const fullWidth = dimensions.widthMm + 2 * bleedMm.x;
+  const fullHeight = dimensions.heightMm + 2 * bleedMm.y;
   const scale = Math.max(0, Math.min((viewport.width - 48) / fullWidth, (viewport.height - 48) / fullHeight));
   const pageWidth = fullWidth * scale;
   const pageHeight = fullHeight * scale;
   const originX = (viewport.width - pageWidth) / 2;
   const originY = (viewport.height - pageHeight) / 2;
-  const trimLeft = originX + bleedMm * scale;
-  const trimTop = originY + bleedMm * scale;
+  const trimLeft = originX + bleedMm.x * scale;
+  const trimTop = originY + bleedMm.y * scale;
   const trimWidth = dimensions.widthMm * scale;
   const trimHeight = dimensions.heightMm * scale;
   const dragPreview = slotDrag && savedAlbum && scale > 0 ? applySlotDrag(savedAlbum, slotDrag, trimWidth, trimHeight, true) : null;
@@ -388,7 +388,7 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
             <Stage width={viewport.width} height={viewport.height}>
               <Layer>
                 <LayerPage x={originX} y={originY} width={pageWidth} height={pageHeight}
-                  bleed={bleedMm * scale} safeZone={safeZoneMm * scale}>
+                  bleed={{ x: bleedMm.x * scale, y: bleedMm.y * scale }} safeZone={{ x: safeZoneMm.x * scale, y: safeZoneMm.y * scale }}>
                   {slots.map((slot) => {
                     const rect = { x: trimLeft + slot.x * trimWidth, y: trimTop + slot.y * trimHeight, width: slot.width * trimWidth, height: slot.height * trimHeight };
                     const sideways = slot.rotation === 90 || slot.rotation === 270;
@@ -419,8 +419,8 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
               setCanvasMenu({
                 x: event.clientX, y: event.clientY, kind: "page",
                 centre: {
-                  x: (event.clientX - bounds.left - bleedMm * scale) / trimWidth,
-                  y: (event.clientY - bounds.top - bleedMm * scale) / trimHeight,
+                  x: (event.clientX - bounds.left - bleedMm.x * scale) / trimWidth,
+                  y: (event.clientY - bounds.top - bleedMm.y * scale) / trimHeight,
                 },
               });
             }} />}
@@ -512,7 +512,7 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
         <div className="workspace-footer">
           <span>{layout && library ? `LAYOUT ${layoutIndex + 1} OF ${library.layouts.length}` : "NO LAYOUT SELECTED"}</span>
           <span className="guide-legend">
-            <span>Bleed: {bleedMm} mm</span><span>Trim edge</span><span>Safe Zone: {safeZoneMm} mm</span>
+            <span>Bleed: {formatMargins(bleedMm)}</span><span>Trim edge</span><span>Safe Zone: {formatMargins(safeZoneMm)}</span>
             <span>Alt-drag to duplicate · Hold Ctrl for free placement</span>
           </span>
         </div>

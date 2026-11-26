@@ -63,8 +63,8 @@ export function exportPageSize(format: PageFormat): { width: number; height: num
   const { widthMm, heightMm } = pageDimensions(format);
   const pixelsPerMm = format.dpi / MM_PER_INCH;
   return {
-    width: Math.round((widthMm + 2 * format.bleedMm) * pixelsPerMm),
-    height: Math.round((heightMm + 2 * format.bleedMm) * pixelsPerMm),
+    width: Math.round((widthMm + 2 * format.bleedMm.x) * pixelsPerMm),
+    height: Math.round((heightMm + 2 * format.bleedMm.y) * pixelsPerMm),
     pixelsPerMm,
   };
 }

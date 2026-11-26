@@ -1,11 +1,11 @@
-import type { Rectangle, Slot } from "../core";
+import type { EdgeMargins, Rectangle, Slot } from "../core";
 
 interface Options {
   slots: Slot[];
   photoAspect: number;
   pageMm: { width: number; height: number };
   pagePixels: { width: number; height: number };
-  bleedMm: number;
+  bleedMm: EdgeMargins;
   pointer: { x: number; y: number };
   previous?: { rect: Rectangle } | null;
 }
@@ -54,10 +54,10 @@ export function smartPlacement({ slots, photoAspect, pageMm, pagePixels, bleedMm
     }
   }
   const valid = candidates.filter(({ rect, member }) => (!member || !patternMembers.has(member))
-    && rect.x >= -bleedMm / pageMm.width - 1e-9
-    && rect.y >= -bleedMm / pageMm.height - 1e-9
-    && rect.x + rect.width <= 1 + bleedMm / pageMm.width + 1e-9
-    && rect.y + rect.height <= 1 + bleedMm / pageMm.height + 1e-9
+    && rect.x >= -bleedMm.x / pageMm.width - 1e-9
+    && rect.y >= -bleedMm.y / pageMm.height - 1e-9
+    && rect.x + rect.width <= 1 + bleedMm.x / pageMm.width + 1e-9
+    && rect.y + rect.height <= 1 + bleedMm.y / pageMm.height + 1e-9
     && !slots.some((slot) => rect.x < slot.x + slot.width - 1e-9 && rect.x + rect.width > slot.x + 1e-9
       && rect.y < slot.y + slot.height - 1e-9 && rect.y + rect.height > slot.y + 1e-9))
     .map(({ rect, pattern }) => ({ rect, pattern, distance: Math.hypot(

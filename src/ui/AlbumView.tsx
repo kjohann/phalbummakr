@@ -12,7 +12,7 @@ import { hasLayoutDrag, hasPhotoDrag, leftElement, readLayoutDrag, readPhotoDrag
 import { historyShortcut } from "./historyShortcut";
 import LayoutLibraryPane, { plural } from "./LayoutLibraryPane";
 import GridLayoutDialog from "./GridLayoutDialog";
-import { applySlotDrag, LayerPage, PhotoImage, SlotFrame, SlotResizeHandles, SnapGuides, TextContent, type SlotDrag } from "./pageCanvas";
+import { applySlotDrag, formatMargins, LayerPage, PhotoImage, SlotFrame, SlotResizeHandles, SnapGuides, TextContent, type SlotDrag } from "./pageCanvas";
 import type { FontPorts } from "./tauriFontPorts";
 import { fitTextSlots } from "./textLayout";
 import TextSlotTools from "./TextSlotTools";
@@ -120,8 +120,8 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
   }>>({});
   const dimensions = pageDimensions(savedAlbum.pageFormat);
   const { bleedMm, safeZoneMm } = savedAlbum.pageFormat;
-  const fullWidth = dimensions.widthMm + 2 * bleedMm;
-  const fullHeight = dimensions.heightMm + 2 * bleedMm;
+  const fullWidth = dimensions.widthMm + 2 * bleedMm.x;
+  const fullHeight = dimensions.heightMm + 2 * bleedMm.y;
   const gap = 18;
   const scale = Math.max(0, Math.min((viewport.width - 48 - gap) / (2 * fullWidth), (viewport.height - 48) / fullHeight));
   const pageWidth = fullWidth * scale;
@@ -332,7 +332,7 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
   function slotRect(slot: Slot, trimLeft: number) {
     return {
       x: trimLeft + slot.x * trimWidth,
-      y: originY + bleedMm * scale + slot.y * trimHeight,
+      y: originY + bleedMm.y * scale + slot.y * trimHeight,
       width: slot.width * trimWidth,
       height: slot.height * trimHeight,
     };
@@ -863,10 +863,10 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
             <Layer>
               {[spread.left, spread.right].map((page, side) => page && (
                 <LayerPage key={page.id} x={originX + side * (pageWidth + gap)} y={originY}
-                  width={pageWidth} height={pageHeight} bleed={bleedMm * scale}
-                  safeZone={safeZoneMm * scale}>
+                  width={pageWidth} height={pageHeight} bleed={{ x: bleedMm.x * scale, y: bleedMm.y * scale }}
+                  safeZone={{ x: safeZoneMm.x * scale, y: safeZoneMm.y * scale }}>
                   {page.slots.map((slot) => {
-                    const rect = slotRect(slot, originX + side * (pageWidth + gap) + bleedMm * scale);
+                    const rect = slotRect(slot, originX + side * (pageWidth + gap) + bleedMm.x * scale);
                     const slotId = `${page.id}:${slot.id}`;
                     const duplicateSource = slotDrag?.duplicate && slotDrag.pageId === page.id
                       && slot.id === page.slots.at(-1)?.id
@@ -911,8 +911,8 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
                 setDropTargetId(null);
                 const bounds = event.currentTarget.getBoundingClientRect();
                 const pointer = {
-                  x: (event.clientX - bounds.left - bleedMm * scale) / trimWidth,
-                  y: (event.clientY - bounds.top - bleedMm * scale) / trimHeight,
+                  x: (event.clientX - bounds.left - bleedMm.x * scale) / trimWidth,
+                  y: (event.clientY - bounds.top - bleedMm.y * scale) / trimHeight,
                 };
                 smartHover.current = { pageId: page.id, pointer };
                 updateSmartPreview(page, pointer, event.ctrlKey);
@@ -926,8 +926,8 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
                 setPhotoDragActive(false);
                 setDropTargetId(null);
                 const bounds = event.currentTarget.getBoundingClientRect();
-                const x = (event.clientX - bounds.left - bleedMm * scale) / trimWidth;
-                const y = (event.clientY - bounds.top - bleedMm * scale) / trimHeight;
+                const x = (event.clientX - bounds.left - bleedMm.x * scale) / trimWidth;
+                const y = (event.clientY - bounds.top - bleedMm.y * scale) / trimHeight;
                 const suggested = !event.ctrlKey && smartPreviewRef.current?.pageId === page.id
                   ? smartPreviewRef.current.rect : undefined;
                 clearSmartPreview();
@@ -954,8 +954,8 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
                 setCanvasMenu({
                   x: event.clientX, y: event.clientY, pageId: page.id, kind: "page",
                   centre: {
-                    x: (event.clientX - bounds.left - bleedMm * scale) / trimWidth,
-                    y: (event.clientY - bounds.top - bleedMm * scale) / trimHeight,
+                    x: (event.clientX - bounds.left - bleedMm.x * scale) / trimWidth,
+                    y: (event.clientY - bounds.top - bleedMm.y * scale) / trimHeight,
                   },
                 });
               }}>
@@ -972,13 +972,13 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
           if (side < 0) return null;
           const rect = smartPreview.rect;
           return <div role="img" aria-label="Smart placement preview" className="smart-placement-preview" style={{
-            left: originX + side * (pageWidth + gap) + bleedMm * scale + rect.x * trimWidth,
-            top: originY + bleedMm * scale + rect.y * trimHeight,
+            left: originX + side * (pageWidth + gap) + bleedMm.x * scale + rect.x * trimWidth,
+            top: originY + bleedMm.y * scale + rect.y * trimHeight,
             width: rect.width * trimWidth, height: rect.height * trimHeight,
           }} />;
         })()}
         {scale > 0 && [spread.left, spread.right].map((page, side) => page?.slots.map((slot, index) => {
-          const rect = slotRect(slot, originX + side * (pageWidth + gap) + bleedMm * scale);
+          const rect = slotRect(slot, originX + side * (pageWidth + gap) + bleedMm.x * scale);
           const name = `Page ${pageNumbers.get(page.id)} ${slot.type === "photo" ? "Photo" : "Text"} Slot ${index + 1}`;
           const targetId = `${page.id}:${slot.id}`;
           const outsidePage = slot.type === "text" && slot.text.length > 0
@@ -1200,8 +1200,8 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
         }))}
         {slotDrag && dragPreview && dragPreview.guides.length > 0 && (
           <SnapGuides guides={dragPreview.guides} width={viewport.width} height={viewport.height}
-            trimLeft={originX + (spread.left?.id === slotDrag.pageId ? 0 : 1) * (pageWidth + gap) + bleedMm * scale}
-            trimTop={originY + bleedMm * scale} trimWidth={trimWidth} trimHeight={trimHeight} />
+            trimLeft={originX + (spread.left?.id === slotDrag.pageId ? 0 : 1) * (pageWidth + gap) + bleedMm.x * scale}
+            trimTop={originY + bleedMm.y * scale} trimWidth={trimWidth} trimHeight={trimHeight} />
         )}
         {active && toolsHost && selectedSlot && createPortal(<Fragment key={`${selectedPage.id}:${selectedSlot.id}`}>
           {selectedSlot.type === "text" ? (
@@ -1223,7 +1223,7 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
       <div className="workspace-footer">
         <span>PAGE {visiblePageIndex + 1} OF {album.pages.length}</span>
         <span className="guide-legend">
-          <span>Bleed: {bleedMm} mm</span><span>Trim edge</span><span>Safe Zone: {safeZoneMm} mm</span>
+          <span>Bleed: {formatMargins(bleedMm)}</span><span>Trim edge</span><span>Safe Zone: {formatMargins(safeZoneMm)}</span>
           <span>Ctrl-click to select several · Alt-drag to duplicate · Hold Ctrl for free placement</span>
         </span>
       </div>

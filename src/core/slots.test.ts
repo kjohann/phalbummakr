@@ -10,7 +10,7 @@ function slotOf(album: ReturnType<typeof createAlbum>, page = 0) {
 }
 
 it("pastes an independent Slot on another Page using the movement Bleed limits", () => {
-  let album = addPhotoSlot(createAlbum({ name: "Trip", bleedMm: 3 }), "page-1");
+  let album = addPhotoSlot(createAlbum({ name: "Trip", bleedMm: { x: 3, y: 3 } }), "page-1");
   album = placePhoto(album, "page-1", "slot-1", { path: "a.jpg", width: 6000, height: 4000, orientation: 1 });
   const snapshot = structuredClone(slotOf(album));
   album = deleteSlot(album, "page-1", "slot-1");
@@ -37,7 +37,7 @@ it("preserves Text Slot content, placeholder, formatting and out-of-Bleed positi
 });
 
 it("adds a Slot centred on a point, keeping it inside the Bleed", () => {
-  const album = createAlbum({ name: "Trip", bleedMm: 3 });
+  const album = createAlbum({ name: "Trip", bleedMm: { x: 3, y: 3 } });
   const photo = slotOf(addPhotoSlot(album, "page-1", { x: 0.5, y: 0.25 }));
   expect(photo).toMatchObject({ x: 0.3, width: 0.4, height: 0.4 });
   expect(photo.y).toBeCloseTo(0.05);
@@ -47,6 +47,13 @@ it("adds a Slot centred on a point, keeping it inside the Bleed", () => {
   const text = slotOf(addTextSlot(album, "page-1", { x: 0.2, y: 0.6 }));
   expect(text.x).toBeCloseTo(0);
   expect(text.y).toBeCloseTo(0.6 - text.height / 2);
+});
+
+it("keeps Slots within each axis' own Bleed", () => {
+  const album = createAlbum({ name: "Trip", bleedMm: { x: 6, y: 0 } });
+  const corner = slotOf(addPhotoSlot(album, "page-1", { x: 1, y: 1 }));
+  expect(corner.x).toBeCloseTo(1 + 6 / 297 - 0.4);
+  expect(corner.y).toBeCloseTo(1 - 0.4);
 });
 
 it("duplicates empty, cropped, fitted and formatted text Slots as independent content above the originals", () => {
@@ -195,7 +202,7 @@ it("deletes a Slot and its Placement, leaving the other Slots", () => {
 });
 
 it("resizes a Slot from its bottom-right corner, keeping a minimum size and stopping at the Bleed edge", () => {
-  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 2, bleedMm: 21 }), "page-1");
+  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 2, bleedMm: { x: 21, y: 21 } }), "page-1");
   expect(slotOf(resizeSlot(album, "page-1", "slot-1", 0.5, 0.25))).toMatchObject({ x: 0.3, y: 0.3, width: 0.5, height: 0.25 });
   const huge = slotOf(resizeSlot(album, "page-1", "slot-1", 10, 10));
   expect(huge.width).toBeCloseTo(0.7707, 4);
@@ -220,7 +227,7 @@ it.each<{ handle: ResizeHandle; x: number; y: number; width: number; height: num
 });
 
 it("clamps top-left resizing at the Bleed and minimum size without moving the opposite corner", () => {
-  const album = addPhotoSlot(createAlbum({ name: "Trip", bleedMm: 21 }), "page-1");
+  const album = addPhotoSlot(createAlbum({ name: "Trip", bleedMm: { x: 21, y: 21 } }), "page-1");
   const large = slotOf(resizeSlot(album, "page-1", "slot-1", 10, 10, "nw"));
   expect(large.x).toBeCloseTo(-21 / 297, 9);
   expect(large.y).toBeCloseTo(-0.1, 9);
@@ -355,7 +362,7 @@ it("preserves Crop zoom and centre when a Photo Slot is resized in Fit", () => {
 
 it("moves a Slot freely within the Page and into the Bleed, but never past the Bleed edge", () => {
   // 21 mm Bleed on 297 x 210 mm is 0.0707 of the width and 0.1 of the height.
-  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 2, bleedMm: 21 }), "page-1");
+  const album = addPhotoSlot(createAlbum({ name: "Test", pageCount: 2, bleedMm: { x: 21, y: 21 } }), "page-1");
   expect(slotOf(moveSlot(album, "page-1", "slot-1", 0.1, 0.55))).toMatchObject({ x: 0.1, y: 0.55, width: 0.4, height: 0.4 });
   const pastTopLeft = slotOf(moveSlot(album, "page-1", "slot-1", -1, -1));
   expect(pastTopLeft.x).toBeCloseTo(-0.0707, 4);
@@ -383,7 +390,7 @@ it("adds an empty Photo Slot to a Page, stored as fractions of the Page, without
 });
 
 it("creates a Photo Slot under a dropped Photo, clips it to the Bleed, and refits the centred Crop", () => {
-  const album = createAlbum({ name: "Test", pageCount: 2, bleedMm: 21 });
+  const album = createAlbum({ name: "Test", pageCount: 2, bleedMm: { x: 21, y: 21 } });
   const photo = { path: "tree.jpg", width: 6000, height: 4000, orientation: 1 };
   const centred = placePhotoOnPage(album, "page-1", photo, 0.5, 0.5).pages[0].slots[0];
   expect(centred.x).toBeCloseTo(0.3, 9);
@@ -406,7 +413,7 @@ it("creates a Photo Slot under a dropped Photo, clips it to the Bleed, and refit
 });
 
 it("moves Slots together and stops the whole group at the first Bleed limit", () => {
-  let album = addPhotoSlot(addPhotoSlot(createAlbum({ name: "Trip", bleedMm: 3 }), "page-1"), "page-1");
+  let album = addPhotoSlot(addPhotoSlot(createAlbum({ name: "Trip", bleedMm: { x: 3, y: 3 } }), "page-1"), "page-1");
   album = moveSlot(album, "page-1", "slot-2", 0.6, 0.5);
   const moved = moveSlots(album, "page-1", ["slot-1", "slot-2"], 1, -0.1);
   const [first, second] = moved.pages[0].slots;

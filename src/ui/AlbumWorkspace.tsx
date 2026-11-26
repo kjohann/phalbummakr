@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
-  canRedo, canUndo, createAlbum, DEFAULT_BLEED_MM, DEFAULT_SAFE_ZONE_MM, deserializeAlbum, emptyHistory, endGroup, recordChange, relinkPlacements, serializeAlbum, stepHistory,
+  canRedo, canUndo, createAlbum, deserializeAlbum, emptyHistory, endGroup, recordChange, relinkPlacements, serializeAlbum, stepHistory,
   type Album, type AlbumPorts, type ContentIndexStats, type HistoryDirection, type PhotoIdentity, type PhotoPreviewPorts, type PhotoSize, type PlacementRelink, type UndoHistory,
 } from "../core";
 import AlbumView from "./AlbumView";
 import ExportDialog from "./ExportDialog";
+import { MarginFields, readMargins } from "./MarginFields";
 import ModalDialog from "./ModalDialog";
 import { tauriPageExportPorts, type PageExportPorts } from "./pageExport";
 import { tauriAlbumPorts } from "./tauriAlbumPorts";
@@ -281,8 +282,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
       const album = createAlbum({
         name: String(form.get("name")),
         pageCount: Number(form.get("pageCount")),
-        bleedMm: Number(form.get("bleedMm")),
-        safeZoneMm: Number(form.get("safeZoneMm")),
+        ...readMargins(form),
         dpi: Number(form.get("dpi")),
         minEffectiveDpi: Number(form.get("minEffectiveDpi")),
       });
@@ -388,8 +388,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
           <h2>New Album</h2>
           <label>Name<input name="name" required maxLength={100} autoFocus disabled={busy} /></label>
           <label>Page Format<select name="pageFormat" disabled={busy}><option>A4 - landscape (297 x 210 mm)</option></select></label>
-          <label>Bleed (mm)<input name="bleedMm" type="number" min="0" step="any" defaultValue={DEFAULT_BLEED_MM} required disabled={busy} /></label>
-          <label>Safe Zone (mm)<input name="safeZoneMm" type="number" min="0" max="104.99" step="any" defaultValue={DEFAULT_SAFE_ZONE_MM} required disabled={busy} /></label>
+          <MarginFields disabled={busy} />
           <label>Export resolution (DPI)<input name="dpi" type="number" min="1" step="any" defaultValue="300" required disabled={busy} /></label>
           <label>Effective Resolution warning below (DPI)<input name="minEffectiveDpi" type="number" min="1" step="any" defaultValue="150" required disabled={busy} /></label>
           <label>Page count<input name="pageCount" type="number" min="2" max="10000" step="2" defaultValue="2" required disabled={busy} /></label>
@@ -408,8 +407,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
                   const form = new FormData(event.currentTarget);
                   changeAlbum((album) => ({ ...album, title: document ? String(form.get("title")) : album.title, pageFormat: {
                     ...album.pageFormat,
-                    bleedMm: Number(form.get("bleedMm")),
-                    safeZoneMm: Number(form.get("safeZoneMm")),
+                    ...readMargins(form),
                     dpi: Number(form.get("dpi")),
                     minEffectiveDpi: Number(form.get("minEffectiveDpi")),
                   } }));
@@ -419,10 +417,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
                 <fieldset disabled={suspended || busy || saveStatus === "saving" || saveStatus === "error"}>
                   {document && <label>Title<textarea name="title" defaultValue={current.album.title} rows={2} /></label>}
                   <p className="album-details">Page Format: A4 landscape (297 x 210 mm)</p>
-                  <label>Bleed (mm)<input name="bleedMm" type="number" min="0" step="any"
-                    defaultValue={current.album.pageFormat.bleedMm} required /></label>
-                  <label>Safe Zone (mm)<input name="safeZoneMm" type="number" min="0" max="104.99" step="any"
-                    defaultValue={current.album.pageFormat.safeZoneMm} required /></label>
+                  <MarginFields bleedMm={current.album.pageFormat.bleedMm} safeZoneMm={current.album.pageFormat.safeZoneMm} />
                   <label>Export resolution (DPI)<input name="dpi" type="number" min="1" step="any"
                     defaultValue={current.album.pageFormat.dpi} required /></label>
                   <label>Effective Resolution warning below (DPI)<input name="minEffectiveDpi" type="number" min="1" step="any"

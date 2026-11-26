@@ -2,7 +2,7 @@ import { useEffect, useMemo, type MouseEvent as ReactMouseEvent, type ReactNode 
 import { Group, Image as KonvaImage, Rect, Text } from "react-konva";
 import {
   duplicateSlot, fitPhotoRect, moveSlot, moveSlots, pageDimensions, resizeSlot, slotResizeEdges, POINTS_PER_MM, TEXT_LINE_HEIGHT,
-  type Album, type Crop, type PageFormat, type Rectangle, type ResizeHandle, type Slot, type TextSlot,
+  type Album, type Crop, type EdgeMargins, type PageFormat, type Rectangle, type ResizeHandle, type Slot, type TextSlot,
 } from "../core";
 import { snapSlot, type SnapGuide } from "./slotSnapping";
 import { fitTextSlots, measureTextSlot, textFontStyle } from "./textLayout";
@@ -53,7 +53,7 @@ function applyGroupDrag(album: Album, drag: SlotDrag & { slotIds: string[] }, tr
     rect: boundsAfter(updated),
     unclamped: { ...bounds, x: bounds.x + dx, y: bounds.y + dy },
     pageSize: { width: trimWidth, height: trimHeight },
-    safeZone: { x: album.pageFormat.safeZoneMm / dimensions.widthMm, y: album.pageFormat.safeZoneMm / dimensions.heightMm },
+    safeZone: { x: album.pageFormat.safeZoneMm.x / dimensions.widthMm, y: album.pageFormat.safeZoneMm.y / dimensions.heightMm },
     otherSlots: page.slots.filter((slot) => !ids.has(slot.id)),
     kind: "move",
     resizeHeight: false,
@@ -99,7 +99,7 @@ export function applySlotDrag(album: Album, drag: SlotDrag, trimWidth: number, t
     rect: proposed,
     unclamped,
     pageSize: { width: trimWidth, height: trimHeight },
-    safeZone: { x: album.pageFormat.safeZoneMm / dimensions.widthMm, y: album.pageFormat.safeZoneMm / dimensions.heightMm },
+    safeZone: { x: album.pageFormat.safeZoneMm.x / dimensions.widthMm, y: album.pageFormat.safeZoneMm.y / dimensions.heightMm },
     otherSlots: page.slots.filter((item) => item.id !== drag.slotId),
     kind: drag.kind,
     resizeEdges: edges,
@@ -211,18 +211,23 @@ export function TextContent({ slot, id, rect, scale, format, hidden, showPlaceho
   );
 }
 
+/** Legend text for a per-axis margin, e.g. "3 mm" or "7 mm left/right, 4 mm top/bottom". */
+export function formatMargins({ x, y }: EdgeMargins): string {
+  return x === y ? `${x} mm` : `${x} mm left/right, ${y} mm top/bottom`;
+}
+
 export function LayerPage({ x, y, width, height, bleed, safeZone, children }: {
-  x: number; y: number; width: number; height: number; bleed: number; safeZone: number; children: ReactNode;
+  x: number; y: number; width: number; height: number; bleed: EdgeMargins; safeZone: EdgeMargins; children: ReactNode;
 }) {
   return (
     <>
       <Rect x={x} y={y} width={width} height={height} fill="#ffffff" stroke="#b89176" strokeWidth={1}
         shadowColor="#1e2926" shadowBlur={12} shadowOpacity={0.1} shadowOffsetY={4} />
       {children}
-      <Rect x={x + bleed} y={y + bleed} width={width - 2 * bleed} height={height - 2 * bleed}
+      <Rect x={x + bleed.x} y={y + bleed.y} width={width - 2 * bleed.x} height={height - 2 * bleed.y}
         stroke="#9e6d4e" strokeWidth={1} dash={[5, 4]} />
-      <Rect x={x + bleed + safeZone} y={y + bleed + safeZone}
-        width={width - 2 * (bleed + safeZone)} height={height - 2 * (bleed + safeZone)}
+      <Rect x={x + bleed.x + safeZone.x} y={y + bleed.y + safeZone.y}
+        width={width - 2 * (bleed.x + safeZone.x)} height={height - 2 * (bleed.y + safeZone.y)}
         stroke="#56829d" strokeWidth={1} dash={[3, 3]} />
     </>
   );

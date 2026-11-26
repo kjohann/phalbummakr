@@ -413,7 +413,7 @@ it("offsets same-Page pastes in millimetres, clamps them at the Bleed and resets
   vi.mocked(writeText).mockImplementation(async (text) => { clipboard = text; });
   vi.mocked(readText).mockImplementation(async () => clipboard);
   const { ports } = disk();
-  const album = addPhotoSlot(createAlbum({ name: "Existing", bleedMm: 3 }), "page-1");
+  const album = addPhotoSlot(createAlbum({ name: "Existing", bleedMm: { x: 3, y: 3 } }), "page-1");
   album.pages[0].slots[0].x = 0.6;
   album.pages[0].slots[0].y = 0.6;
   const onAlbumChange = vi.fn();
@@ -1238,22 +1238,26 @@ it("keeps print settings in Album settings, validates them, and persists changes
   expect(screen.queryByLabelText("Page 1 side")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Bar album-settings" }));
   expect(screen.queryByLabelText("Page 1 side")).toBeNull();
-  fireEvent.change(screen.getByLabelText("Bleed (mm)"), { target: { value: "4" } });
-  fireEvent.change(screen.getByLabelText("Safe Zone (mm)"), { target: { value: "7" } });
+  fireEvent.change(screen.getByLabelText("Bleed left/right (mm)"), { target: { value: "4" } });
+  fireEvent.change(screen.getByLabelText("Bleed top/bottom (mm)"), { target: { value: "2" } });
+  fireEvent.change(screen.getByLabelText("Safe Zone left/right (mm)"), { target: { value: "7" } });
+  fireEvent.change(screen.getByLabelText("Safe Zone top/bottom (mm)"), { target: { value: "4" } });
   fireEvent.change(screen.getByLabelText("Export resolution (DPI)"), { target: { value: "600" } });
   fireEvent.submit(screen.getByRole("form", { name: "Album settings" }));
   await waitForAutosave();
   fireEvent.click(screen.getByRole("button", { name: "Open Album Existing" }));
-  await waitFor(() => expect(screen.queryByLabelText("Bleed (mm)")).toBeNull());
+  await waitFor(() => expect(screen.queryByLabelText("Bleed left/right (mm)")).toBeNull());
   fireEvent.click(screen.getByRole("button", { name: "Bar album-settings" }));
   expect(screen.queryByLabelText("Page 1 side")).toBeNull();
-  expect((screen.getByLabelText("Bleed (mm)") as HTMLInputElement).value).toBe("4");
-  expect((screen.getByLabelText("Safe Zone (mm)") as HTMLInputElement).value).toBe("7");
+  expect((screen.getByLabelText("Bleed left/right (mm)") as HTMLInputElement).value).toBe("4");
+  expect((screen.getByLabelText("Bleed top/bottom (mm)") as HTMLInputElement).value).toBe("2");
+  expect((screen.getByLabelText("Safe Zone left/right (mm)") as HTMLInputElement).value).toBe("7");
+  expect((screen.getByLabelText("Safe Zone top/bottom (mm)") as HTMLInputElement).value).toBe("4");
   expect((screen.getByLabelText("Export resolution (DPI)") as HTMLInputElement).value).toBe("600");
-  fireEvent.change(screen.getByLabelText("Safe Zone (mm)"), { target: { value: "105" } });
+  fireEvent.change(screen.getByLabelText("Safe Zone top/bottom (mm)"), { target: { value: "105" } });
   fireEvent.submit(screen.getByRole("form", { name: "Album settings" }));
   expect(screen.getByRole("alert").textContent).toContain("Safe Zone");
-  expect(screen.getByText("Safe Zone: 7 mm")).toBeTruthy();
+  expect(screen.getByText("Safe Zone: 7 mm left/right, 4 mm top/bottom")).toBeTruthy();
 });
 
 it("keeps content-index statistics in collapsed Album settings diagnostics without editing the Album", async () => {
@@ -1358,24 +1362,24 @@ it("debounces changes, blocks navigation until saved, and reopens the persisted 
   await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
   fireEvent.click(screen.getByRole("button", { name: "Bar album-settings" }));
   vi.useFakeTimers();
-  fireEvent.change(screen.getByLabelText("Bleed (mm)"), { target: { value: "4" } });
+  fireEvent.change(screen.getByLabelText("Bleed left/right (mm)"), { target: { value: "4" } });
   fireEvent.submit(screen.getByRole("form", { name: "Album settings" }));
   await act(() => vi.advanceTimersByTimeAsync(300));
-  fireEvent.change(screen.getByLabelText("Bleed (mm)"), { target: { value: "6" } });
+  fireEvent.change(screen.getByLabelText("Bleed left/right (mm)"), { target: { value: "6" } });
   fireEvent.submit(screen.getByRole("form", { name: "Album settings" }));
   expect((screen.getByRole("button", { name: "New Album" }) as HTMLButtonElement).disabled).toBe(true);
   expect(onBusyChange).toHaveBeenLastCalledWith(true);
   await act(() => vi.advanceTimersByTimeAsync(499));
-  expect(deserializeAlbum(files.get("Existing")!).pageFormat.bleedMm).toBe(3);
+  expect(deserializeAlbum(files.get("Existing")!).pageFormat.bleedMm.x).toBe(3);
   await act(() => vi.advanceTimersByTimeAsync(1));
-  expect(deserializeAlbum(files.get("Existing")!).pageFormat.bleedMm).toBe(6);
+  expect(deserializeAlbum(files.get("Existing")!).pageFormat.bleedMm.x).toBe(6);
   expect((screen.getByRole("button", { name: "Open Album Existing" }) as HTMLButtonElement).disabled).toBe(false);
   expect(ports.write).toHaveBeenCalledTimes(1);
   vi.useRealTimers();
   fireEvent.click(screen.getByRole("button", { name: "Open Album Existing" }));
-  await waitFor(() => expect(screen.queryByLabelText("Bleed (mm)")).toBeNull());
+  await waitFor(() => expect(screen.queryByLabelText("Bleed left/right (mm)")).toBeNull());
   fireEvent.click(screen.getByRole("button", { name: "Bar album-settings" }));
-  await waitFor(() => expect((screen.getByLabelText("Bleed (mm)") as HTMLInputElement).value).toBe("6"));
+  await waitFor(() => expect((screen.getByLabelText("Bleed left/right (mm)") as HTMLInputElement).value).toBe("6"));
 });
 
 it("keeps unsaved changes after a failed save, prevents leaving, and retries explicitly", async () => {
@@ -1387,7 +1391,7 @@ it("keeps unsaved changes after a failed save, prevents leaving, and retries exp
   await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
   fireEvent.click(screen.getByRole("button", { name: "Bar album-settings" }));
   vi.useFakeTimers();
-  fireEvent.change(screen.getByLabelText("Bleed (mm)"), { target: { value: "4" } });
+  fireEvent.change(screen.getByLabelText("Bleed left/right (mm)"), { target: { value: "4" } });
   fireEvent.submit(screen.getByRole("form", { name: "Album settings" }));
   await act(() => vi.advanceTimersByTimeAsync(500));
   expect(screen.getByRole("alert").textContent).toContain("Disk full");
@@ -1395,14 +1399,14 @@ it("keeps unsaved changes after a failed save, prevents leaving, and retries exp
   expect((screen.getByRole("button", { name: "Insert Spread before Spread 2" }) as HTMLButtonElement).disabled).toBe(true);
   expect(within(screen.getByRole("navigation", { name: "Spreads" }))
     .getByRole("button", { name: "Select Page 1" }).draggable).toBe(false);
-  expect(deserializeAlbum(files.get("Existing")!).pageFormat.bleedMm).toBe(3);
+  expect(deserializeAlbum(files.get("Existing")!).pageFormat.bleedMm.x).toBe(3);
   expect((screen.getByRole("button", { name: "Open Album Existing" }) as HTMLButtonElement).disabled).toBe(true);
   const unload = new Event("beforeunload", { cancelable: true });
   window.dispatchEvent(unload);
   expect(unload.defaultPrevented).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "Retry save" }));
   await act(() => vi.advanceTimersByTimeAsync(500));
-  expect(deserializeAlbum(files.get("Existing")!).pageFormat.bleedMm).toBe(4);
+  expect(deserializeAlbum(files.get("Existing")!).pageFormat.bleedMm.x).toBe(4);
   expect(screen.queryByRole("alert")).toBeNull();
   expect((screen.getByRole("button", { name: "Open Album Existing" }) as HTMLButtonElement).disabled).toBe(false);
 });
@@ -2179,7 +2183,7 @@ it("ignores an unreachable snap target in favor of a reachable one when resizing
 
 it("reaches the Bleed when dragged well past the Page edge", async () => {
   const { ports, files } = disk();
-  const album = createAlbum({ name: "Existing", pageCount: 2, bleedMm: 2 });
+  const album = createAlbum({ name: "Existing", pageCount: 2, bleedMm: { x: 2, y: 2 } });
   album.pages[0].slots.push({
     id: "slot-1", type: "photo", x: 0.3, y: 0.3, width: 0.4, height: 0.4, placement: null,
   });
@@ -3143,7 +3147,7 @@ it("applies a grid to only its Page, reports removed content, and supports undo 
 it("offers full-page replacement when the chosen grid does not fit around text", () => {
   const { ports } = disk();
   const onAlbumChange = vi.fn();
-  let album = addTextSlot(createAlbum({ name: "Existing", safeZoneMm: 30 }), "page-1");
+  let album = addTextSlot(createAlbum({ name: "Existing", safeZoneMm: { x: 30, y: 30 } }), "page-1");
   album = addTextSlot(album, "page-1");
   album.pages[0].slots = [
     { ...album.pages[0].slots[0], y: 57.5 / 210, height: 10 / 210 },
@@ -3372,7 +3376,7 @@ it("reloads a restored Photo after a replacement preview starts", async () => {
 
 it("explains invalid and no-area grids and supports keyboard selection", () => {
   const { ports } = disk();
-  const album = createAlbum({ name: "Existing", safeZoneMm: 104 });
+  const album = createAlbum({ name: "Existing", safeZoneMm: { x: 104, y: 104 } });
   render(<AlbumWorkspace root="D:\\Photos" ports={ports} document={{ path: "Existing", album }} />);
   fireEvent.contextMenu(canvasPage(1));
   fireEvent.click(screen.getByRole("menuitem", { name: "Apply grid layout..." }));
