@@ -2219,6 +2219,37 @@ it("keeps a Photo and Text Slot together at the first Bleed limit", async () => 
   expect(parseFloat(caption.style.left)).toBeCloseTo(textStart, 7);
 });
 
+it("nudges a rotated Slot without moving its out-of-Bleed perpendicular axis", async () => {
+  const { ports, files } = disk();
+  let album = addPhotoSlot(createAlbum({ name: "Existing", pageCount: 2 }), "page-1");
+  album.pages[0].slots[0].x = 0;
+  album.pages[0].slots[0].y = 0;
+  album = rotateSlot(album, "page-1", "slot-1", 90);
+  files.set("Existing", serializeAlbum(album));
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  const slot = await screen.findByRole("button", { name: "Page 1 Photo Slot 1" });
+  fireEvent.click(slot);
+  const left = parseFloat(slot.style.left);
+  const top = parseFloat(slot.style.top);
+  fireEvent.keyDown(window, { key: "ArrowRight" });
+  expect(parseFloat(slot.style.left) - left).toBeCloseTo(2, 7);
+  expect(parseFloat(slot.style.top)).toBeCloseTo(top, 7);
+});
+
+it("focuses a pointer-selected Album Slot so arrow keys work after a toolbar action", async () => {
+  const { slots: [slot] } = await openSelectedSlotsAlbum();
+  const command = screen.getByRole("button", { name: "Bar add-spread" });
+  command.focus();
+  fireEvent.mouseDown(slot, { button: 0 });
+  fireEvent.mouseUp(window);
+  fireEvent.click(slot);
+  expect(document.activeElement).toBe(slot);
+  const before = parseFloat(slot.style.top);
+  fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+  expect(parseFloat(slot.style.top) - before).toBeCloseTo(2, 7);
+});
+
 it("leaves Album text editing, fields, dialogs and Ctrl rotation in charge of their keys", async () => {
   const { ports } = disk();
   render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);

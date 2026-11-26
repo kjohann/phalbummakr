@@ -1,6 +1,6 @@
 # 056 – Keyboard nudging for Selected Slots
 
-Status: doing · Type: feature · Depends on: 011, 013, 014, 030, 051, 054
+Status: done · Type: feature · Depends on: 011, 013, 014, 030, 051, 054
 
 ## What
 
@@ -53,3 +53,15 @@ movement step when a nudge stops at an alignment.
   automated workspace tests cover the keyboard and SVG guide behavior here.
 - The inbox has no additional note resolved by this change; its broader
   matching-distance request remains separate.
+
+## Code review
+
+- Fixed an out-of-Bleed rotated Slot jumping on the axis perpendicular to a
+  nudge: an unchanged movement axis no longer clamps the Slot.
+- Fixed pointer selection leaving focus on a toolbar button: selecting a Slot
+  by pointer now focuses it, without taking arrow keys from other controls.
+- Standards review found no significant issues.
+
+## Future considerations (low priority)
+
+- No remaining non-blocking review findings.

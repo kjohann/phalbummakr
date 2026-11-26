@@ -158,6 +158,23 @@ it("does not create Layout history when a nudge is blocked at the Bleed", async 
   expect(ports.write).not.toHaveBeenCalled();
 });
 
+it("focuses a pointer-selected Layout Slot so arrow keys work after a toolbar action", async () => {
+  const initial = readLayoutLibrary(null, format);
+  Object.assign(initial.layouts[0].slots[0], { x: 0.2, y: 0.2, width: 0.2, height: 0.2 });
+  const { ports } = disk(serializeLayoutLibrary(initial));
+  render(<Harness ports={ports} />);
+  await cards();
+  const slot = screen.getByRole("button", { name: "Photo Slot 1" });
+  bar().getByRole("button", { name: "Bar add-photo-slot" }).focus();
+  fireEvent.mouseDown(slot, { button: 0 });
+  fireEvent.mouseUp(window);
+  fireEvent.click(slot);
+  expect(document.activeElement).toBe(slot);
+  const before = parseFloat(slot.style.top);
+  fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+  expect(parseFloat(slot.style.top) - before).toBeCloseTo(2, 7);
+});
+
 it("leaves Layout placeholder editing and dialogs in charge of arrow keys", async () => {
   const { ports } = disk();
   render(<Harness ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);

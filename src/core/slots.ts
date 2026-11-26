@@ -220,8 +220,8 @@ export function moveSlots(album: Album, pageId: string, slotIds: readonly string
       maxDy = Math.min(maxDy, limits.maxY - slot.y);
     }
     // A Slot already beyond its limits must not be pulled back by moving the others.
-    const offsetX = minDx > maxDx ? 0 : clamp(dx, minDx, maxDx);
-    const offsetY = minDy > maxDy ? 0 : clamp(dy, minDy, maxDy);
+    const offsetX = dx === 0 || minDx > maxDx ? 0 : clamp(dx, minDx, maxDx);
+    const offsetY = dy === 0 || minDy > maxDy ? 0 : clamp(dy, minDy, maxDy);
     return {
       ...page,
       slots: page.slots.map((slot) => ids.has(slot.id) ? { ...slot, x: slot.x + offsetX, y: slot.y + offsetY } : slot),

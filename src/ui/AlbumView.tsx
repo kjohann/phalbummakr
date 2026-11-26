@@ -642,6 +642,9 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
     slotPress.current = press;
     if (disabled) return;
     event.preventDefault();
+    if (event.currentTarget instanceof HTMLElement && event.currentTarget.classList.contains("slot-overlay")) {
+      event.currentTarget.focus({ preventScroll: true });
+    }
     commitCropPreview();
     stopSlotDrag.current?.();
     const slot = album.pages.find((page) => page.id === pageId)?.slots.find((item) => item.id === slotId);

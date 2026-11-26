@@ -292,6 +292,9 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
     selectSlot(slotId);
     if (disabled || !savedAlbum) return;
     event.preventDefault();
+    if (event.currentTarget instanceof HTMLElement && event.currentTarget.classList.contains("slot-overlay")) {
+      event.currentTarget.focus({ preventScroll: true });
+    }
     stopSlotDrag.current?.();
     const baseAlbum = savedAlbum;
     const slot = slots.find((item) => item.id === slotId);
