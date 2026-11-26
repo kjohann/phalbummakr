@@ -1,6 +1,6 @@
 # 050 - Copy and paste Slots in Album mode
 
-Status: doing · Type: feature · Depends on: 011, 018, 019, 030, 040, 041
+Status: done · Type: feature · Depends on: 011, 018, 019, 030, 040, 041
 
 ## What
 
@@ -10,45 +10,45 @@ including across Spreads. This extends the single-Page duplication behavior in
 
 ## Acceptance criteria
 
-- [ ] Copy one selected Photo or Text Slot, including an empty Slot, with
+- [x] Copy one selected Photo or Text Slot, including an empty Slot, with
   Ctrl/Cmd+C or the Slot's right-click menu. Capture a snapshot: later edits
   to, or deletion of, the original Slot do not change the copy.
-- [ ] Preserve the Slot's size, rotation and content, including Photo
+- [x] Preserve the Slot's size, rotation and content, including Photo
   reference, Crop/Fit, text, formatting and Placeholder text as applicable.
   Each pasted Slot is independent and has its own identity. Do not copy a
   Photo file.
-- [ ] Ctrl/Cmd+V pastes onto the Selected Page. The right-click menus of a
+- [x] Ctrl/Cmd+V pastes onto the Selected Page. The right-click menus of a
   Page, Slot and Page thumbnail also offer Paste onto the clicked Page.
   Pasting on a Slot adds another Slot; it does not replace the clicked Slot.
   Select the pasted Slot and place it above the Page's existing Slots.
-- [ ] The first paste onto a different Page keeps the original Page-relative
+- [x] The first paste onto a different Page keeps the original Page-relative
   position, without mirroring or using the pointer position. The first paste
   onto the source Page is offset 5 mm right and 5 mm down, independent of
   screen zoom.
-- [ ] Further pastes onto each destination Page advance another 5 mm right
+- [x] Further pastes onto each destination Page advance another 5 mm right
   and down from that Page's previous paste position. The sequence is
   independent for each Page and starts over on a new Copy. Limit each offset
   using the existing Slot movement and Bleed constraints, even if copies
   overlap at an edge.
-- [ ] Use normal system-clipboard replacement: copying a Slot replaces the
+- [x] Use normal system-clipboard replacement: copying a Slot replaces the
   previous clipboard contents, and copying other data makes the Slot
   unavailable. Pasting is restricted to the currently open Album. When no
   valid Slot is available, disable Paste in the menus and leave the Album
   unchanged on the shortcut.
-- [ ] Keep the Slot copy while navigating Pages and Spreads. Invalidate it
+- [x] Keep the Slot copy while navigating Pages and Spreads. Invalidate it
   when the Album closes or switches, when leaving Album mode for Sort or
   Layout mode, or after any successful in-app Photo move or Folder rename,
   even if it concerns another Photo. Do not clear unrelated ordinary text from
   the system clipboard when invalidating a Slot copy.
-- [ ] Preserve normal copy/paste in text fields, inline Text Slot editing and
+- [x] Preserve normal copy/paste in text fields, inline Text Slot editing and
   dialogs. Report clipboard access failures rather than silently claiming
   success; failed copy/paste does not change the Album or add an undo step.
-- [ ] Each paste is one undoable Album edit; undo removes the pasted Slot and
+- [x] Each paste is one undoable Album edit; undo removes the pasted Slot and
   redo restores it. Copy itself adds no undo step.
-- [ ] Pasting a populated Photo Slot increases its Photo's Usage without the
+- [x] Pasting a populated Photo Slot increases its Photo's Usage without the
   ordinary already-used warning, as with Alt-drag duplication. Ordinary Photo
   placement warnings remain unchanged.
-- [ ] Focused tests cover both Slot types and empty Slots, independent
+- [x] Focused tests cover both Slot types and empty Slots, independent
   snapshots, keyboard and context-menu targets, repeated positions on
   interleaved Pages and Bleed limits, clipboard replacement and failures,
   invalidation, text editing, Usage, and undo/redo. Verify clipboard and menu
@@ -70,7 +70,8 @@ separate snapping feedback is outside this issue.
   offsets and recording each paste through the existing Album history.
 - Clipboard operations are serialized. Queued work and in-flight results are
   invalidated on mode changes, Album switches and successful Photo moves or
-  Folder renames, subject to the write-cancellation limitation below.
+  Folder renames, subject to the write-cancellation limitation under Future
+  considerations.
 
 ## Review and remaining work
 
@@ -79,14 +80,23 @@ stale clipboard-read failures discarding a newer copy, and reused Page IDs
 inheriting deleted Pages' paste positions. Windows clipboard sequence checking
 also rejects an old token restored from history.
 
-**Still blocking:** a Slot write already dispatched to native code cannot be
-cancelled by a later invalidation. The Windows implementation detects changes
-while waiting for the clipboard lock, but a delayed IPC request could still
-begin after invalidation and overwrite newer ordinary clipboard content. This
-needs a coordinated cancellation or a synchronous clipboard-write design before
-the issue can be marked done. On non-Windows platforms the token-only fallback
-also cannot detect a restored clipboard-history entry; Windows is the only
-platform currently targeted.
+Review of the acceptance criteria after implementation confirmed each one in
+code and tests. A test was added for invalidating the Slot copy when another
+Album is opened, which was handled (the Album view remounts per Album file)
+but not covered.
+
+## Future considerations (low priority)
+
+- A Slot write already dispatched to native code cannot be cancelled by a later
+  invalidation. A delayed request could in theory start after invalidation and
+  overwrite ordinary text copied in the few milliseconds in between. This was
+  first treated as blocking, but was downgraded with the user: it needs a
+  copy, an invalidating action and a copy in another app within the same
+  IPC round trip, and the worst case is the clipboard holding the Slot token
+  the user just asked to copy. A fix would need coordinated cancellation or a
+  synchronous clipboard-write design.
+- On non-Windows platforms the token-only fallback cannot detect a restored
+  clipboard-history entry. Windows is the only platform currently targeted.
 
 ## Earlier follow-ups and inbox
 

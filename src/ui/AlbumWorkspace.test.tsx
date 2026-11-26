@@ -504,6 +504,28 @@ it("keeps a Slot copy when an Album creation form is cancelled without switching
   await waitFor(() => expect((onAlbumChange.mock.lastCall![0] as Album).pages[0].slots).toHaveLength(2));
 });
 
+it("invalidates a Slot copy when another Album is opened", async () => {
+  let clipboard = "";
+  vi.mocked(writeText).mockImplementation(async (text) => { clipboard = text; });
+  vi.mocked(readText).mockImplementation(async () => clipboard);
+  const { ports, files } = disk();
+  files.set("Existing", serializeAlbum(addPhotoSlot(createAlbum({ name: "Existing" }), "page-1")));
+  files.set("Other", serializeAlbum(addPhotoSlot(createAlbum({ name: "Other" }), "page-1")));
+  const onAlbumChange = vi.fn();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} onAlbumChange={onAlbumChange} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Page 1 Photo Slot 1" }));
+  fireEvent.keyDown(document.body, { key: "c", ctrlKey: true });
+  await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
+  fireEvent.click(screen.getByRole("button", { name: "Open Album Other" }));
+  await waitFor(() => expect((onAlbumChange.mock.lastCall![0] as Album).title).toBe("Other"));
+  fireEvent.keyDown(document.body, { key: "v", ctrlKey: true });
+  await act(async () => {});
+  expect(readText).not.toHaveBeenCalled();
+  expect((onAlbumChange.mock.lastCall![0] as Album).pages[0].slots).toHaveLength(1);
+  expect(clipboard).not.toBe("");
+});
+
 it.each([
   ["Photo move", [{ from: "unrelated.jpg", to: "other/unrelated.jpg" }]],
   ["Folder rename", { from: "unrelated", to: "renamed" }],

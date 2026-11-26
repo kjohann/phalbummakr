@@ -47,6 +47,28 @@ points, each with sub-points. Sort the inbox one top-level point at a time:
 
 # Finishing an issue
 
+## Acceptance criteria
+
+Tick each acceptance criterion (`- [x]`) as soon as it is implemented and
+verified, even if other criteria in the issue are still open. Before finishing,
+check every criterion against the code and tests, not against memory of the work.
+
+Leave a criterion unticked only if it is not done. For each unticked
+criterion, add an entry under a `## Open acceptance criteria` section in the
+issue that names the criterion, explains why it is open (blocked, deferred
+by the user, needs a manual check, and so on) and says what is needed to
+close it. An issue stays `doing` while any criterion is open, unless the user
+agrees to finish it without that criterion; record that decision in the
+criterion's entry. If the user agrees that a remaining gap is acceptable, record
+it under "Future considerations (low priority)" with the reason, and the
+criterion counts as met.
+
+A review finding is blocking only if it breaks a criterion in realistic use.
+Ask the user before keeping an issue open for a theoretical or very unlikely
+edge case.
+
+## Earlier follow-ups and inbox
+
 After implementing an issue, review the "Future considerations (low priority)"
 sections in earlier [issue files](issues/). Reassess each open point against the
 current changes: address points that now fit the scope, and leave unrelated work
