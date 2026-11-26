@@ -2098,6 +2098,150 @@ async function openSelectedSlotsAlbum() {
   return { slots, saved };
 }
 
+it("nudges Selected Slots by Page millimetres and undoes the run together", async () => {
+  const { slots: [a, b], saved } = await openSelectedSlotsAlbum();
+  fireEvent.click(a);
+  ctrlClick(b);
+  fireEvent.keyDown(window, { key: "ArrowRight" });
+  fireEvent.keyDown(window, { key: "Shift", shiftKey: true });
+  fireEvent.keyDown(window, { key: "ArrowRight", shiftKey: true });
+  await waitFor(() => expect(saved()[0].x).toBeCloseTo(0.1 + 11 / 297, 9));
+  expect(saved()[1].x).toBeCloseTo(0.4 + 11 / 297, 9);
+  fireEvent.click(screen.getByRole("button", { name: "Bar undo" }));
+  await waitFor(() => expect(saved()[0].x).toBeCloseTo(0.1, 9));
+  expect(saved()[1].x).toBeCloseTo(0.4, 9);
+});
+
+it.each([[900, 600], [1800, 1200]])("moves 1 mm at a %i by %i viewport scale", async (width, height) => {
+  vi.stubGlobal("ResizeObserver", class {
+    constructor(private callback: ResizeObserverCallback) {}
+    observe(target: Element) {
+      this.callback([{ target, contentRect: new DOMRectReadOnly(0, 0, width, height) } as ResizeObserverEntry], this);
+    }
+    unobserve() {}
+    disconnect() {}
+  });
+  const { slots: [slot], saved } = await openSelectedSlotsAlbum();
+  fireEvent.click(slot);
+  fireEvent.keyDown(window, { key: "ArrowDown" });
+  await waitFor(() => expect(saved()[0].y).toBeCloseTo(0.1 + 1 / 210, 9));
+});
+
+it("stops at successive crossed alignments, completes the step, and keeps guides until the run ends", async () => {
+  const { ports, files } = disk();
+  const album = createAlbum({ name: "Existing", pageCount: 2 });
+  album.pages[0].slots = [
+    { id: "a", type: "photo", x: 0.1, y: 0.2, width: 0.1, height: 0.1, placement: null },
+    { id: "b", type: "photo", x: 0.101, y: 0.6, width: 0.05, height: 0.05, placement: null },
+    { id: "c", type: "photo", x: 0.102, y: 0.8, width: 0.05, height: 0.05, placement: null },
+  ];
+  files.set("Existing", serializeAlbum(album));
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  const slot = await screen.findByRole("button", { name: "Page 1 Photo Slot 1" });
+  fireEvent.click(slot);
+  vi.useFakeTimers();
+  const left = () => parseFloat(slot.style.left);
+  const start = left();
+  fireEvent.keyDown(window, { key: "ArrowRight" });
+  expect(left() - start).toBeCloseTo(0.001 * 594, 7);
+  expect(screen.getAllByLabelText("Snap to Slot").length).toBeGreaterThan(0);
+  fireEvent.keyDown(window, { key: "ArrowRight" });
+  expect(left() - start).toBeCloseTo(0.002 * 594, 7);
+  fireEvent.keyDown(window, { key: "ArrowRight" });
+  expect(left() - start).toBeCloseTo(2, 7);
+  expect(screen.getAllByLabelText("Snap to Slot").length).toBeGreaterThan(0);
+  fireEvent.keyDown(window, { key: "ArrowLeft" });
+  expect(left() - start).toBeCloseTo(0.002 * 594, 7);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1001); });
+  expect(screen.queryAllByLabelText("Snap to Slot")).toHaveLength(0);
+  fireEvent.click(screen.getByRole("button", { name: "Bar undo" }));
+  expect(left()).toBeCloseTo(start, 7);
+  expect(screen.queryByLabelText("Snap to Slot")).toBeNull();
+});
+
+it("resets an interrupted step on direction change and starts a new undo run on selection change", async () => {
+  const { ports, files } = disk();
+  const album = createAlbum({ name: "Existing", pageCount: 2 });
+  album.pages[0].slots = [
+    { id: "a", type: "photo", x: 0.1, y: 0.2, width: 0.1, height: 0.1, placement: null },
+    { id: "b", type: "photo", x: 0.101, y: 0.6, width: 0.05, height: 0.05, placement: null },
+  ];
+  files.set("Existing", serializeAlbum(album));
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  const a = await screen.findByRole("button", { name: "Page 1 Photo Slot 1" });
+  const b = screen.getByRole("button", { name: "Page 1 Photo Slot 2" });
+  fireEvent.click(a);
+  const start = parseFloat(a.style.left);
+  fireEvent.keyDown(window, { key: "ArrowRight" });
+  expect(parseFloat(a.style.left) - start).toBeCloseTo(0.594, 7);
+  fireEvent.keyDown(window, { key: "ArrowLeft" });
+  expect(parseFloat(a.style.left) - start).toBeCloseTo(0.594 - 2, 7);
+  const moved = parseFloat(a.style.left);
+  fireEvent.click(b);
+  const bStart = parseFloat(b.style.top);
+  fireEvent.keyDown(window, { key: "ArrowDown" });
+  expect(parseFloat(b.style.top) - bStart).toBeCloseTo(2, 7);
+  fireEvent.click(screen.getByRole("button", { name: "Bar undo" }));
+  expect(parseFloat(b.style.top)).toBeCloseTo(bStart, 7);
+  expect(parseFloat(a.style.left)).toBeCloseTo(moved, 7);
+  fireEvent.click(screen.getByRole("button", { name: "Bar undo" }));
+  expect(parseFloat(a.style.left)).toBeCloseTo(start, 7);
+});
+
+it("keeps a Photo and Text Slot together at the first Bleed limit", async () => {
+  const { ports, files } = disk();
+  let album = createAlbum({ name: "Existing", pageCount: 2 });
+  album = addTextSlot(album, album.pages[0].id);
+  const text = album.pages[0].slots[0];
+  text.x = 0.3;
+  text.y = 0.3;
+  album.pages[0].slots.unshift({
+    id: "photo", type: "photo", x: -3 / 297 + 0.001, y: 0.1, width: 0.1, height: 0.1, placement: null,
+  });
+  files.set("Existing", serializeAlbum(album));
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} photoPorts={previews()} fontPorts={{ list: async () => ["Arial"] }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  const photo = await screen.findByRole("button", { name: "Page 1 Photo Slot 1" });
+  const caption = screen.getByRole("button", { name: "Page 1 Text Slot 2" });
+  fireEvent.click(photo);
+  ctrlClick(caption);
+  const photoStart = parseFloat(photo.style.left);
+  const textStart = parseFloat(caption.style.left);
+  fireEvent.keyDown(window, { key: "ArrowLeft", shiftKey: true });
+  expect(parseFloat(photo.style.left) - photoStart).toBeCloseTo(-0.594, 7);
+  expect(parseFloat(caption.style.left) - textStart).toBeCloseTo(-0.594, 7);
+  fireEvent.keyDown(window, { key: "ArrowLeft" });
+  expect(parseFloat(photo.style.left) - photoStart).toBeCloseTo(-0.594, 7);
+  fireEvent.click(screen.getByRole("button", { name: "Bar undo" }));
+  expect(parseFloat(photo.style.left)).toBeCloseTo(photoStart, 7);
+  expect(parseFloat(caption.style.left)).toBeCloseTo(textStart, 7);
+});
+
+it("leaves Album text editing, fields, dialogs and Ctrl rotation in charge of their keys", async () => {
+  const { ports } = disk();
+  render(<AlbumWorkspace root={"D:\\Photos"} ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Album Existing" }));
+  await screen.findByRole("group", { name: "Spread editor" });
+  fireEvent.click(screen.getByRole("button", { name: "Add Text Slot" }));
+  const slot = screen.getByRole("button", { name: "Page 1 Text Slot 1" });
+  const editor = screen.getByRole("textbox", { name: "Edit Page 1 Text Slot 1" });
+  const start = parseFloat(slot.style.left);
+  fireEvent.keyDown(editor, { key: "ArrowRight" });
+  expect(parseFloat(slot.style.left)).toBe(start);
+  fireEvent.keyDown(editor, { key: "Escape" });
+  fireEvent.keyDown(screen.getByRole("button", { name: "Bar add-spread" }), { key: "ArrowRight" });
+  expect(parseFloat(slot.style.left)).toBe(start);
+  fireEvent.keyDown(slot, { key: "ArrowRight", ctrlKey: true });
+  expect(document.querySelector('[data-slot-rotation="90"]')).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Bar album-settings" }));
+  const dialog = screen.getByRole("dialog");
+  const before = parseFloat(slot.style.left);
+  fireEvent.keyDown(dialog, { key: "ArrowRight" });
+  expect(parseFloat(slot.style.left)).toBe(before);
+});
+
 it("hides the Photo drag handle on Selected Slots while more than one is selected", async () => {
   const { slots: [a, b, c] } = await openSelectedSlotsAlbum();
   fireEvent.drop(a, photoDrop({ path: "a.jpg", width: 6000, height: 4000, orientation: 1 }));

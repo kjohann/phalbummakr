@@ -221,6 +221,13 @@ Hold **Ctrl** at any point during the gesture to bypass snapping and place or
 resize freely; releasing it restores snapping. Text Slot height still fits its
 content automatically.
 
+In Album and Layout modes, use the arrow keys to nudge Selected Slots 1 mm, or
+Shift+arrow for 10 mm. A step pauses at crossed alignment guides; subsequent
+presses finish that step before starting another. Guides remain until the
+sequence ends. A sequence is one undo step and ends after about a second,
+selection changes or another action. Text editing and controls keep their keys;
+Ctrl+Left/Right still rotates a single selected Slot.
+
 **Alt-drag** a Slot in Album or Layout mode to duplicate it, leaving the original
 in place. Hold Alt when the drag starts; changing Alt later does not change the
 gesture. The duplicate keeps all content, formatting, rotation and Crop/Fit,

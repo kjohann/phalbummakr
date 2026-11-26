@@ -115,6 +115,67 @@ function saved(store: { json: string | null }) {
   return readLayoutLibrary(store.json, format);
 }
 
+it("nudges in Layout mode, separates timed runs, and leaves controls and rotation in charge of their keys", async () => {
+  const initial = readLayoutLibrary(null, format);
+  const original = initial.layouts[0].slots[0];
+  Object.assign(original, { x: 0.2, y: 0.2, width: 0.2, height: 0.2 });
+  const { ports } = disk(serializeLayoutLibrary(initial));
+  render(<Harness ports={ports} />);
+  await cards();
+  const slot = screen.getByRole("button", { name: "Photo Slot 1" });
+  fireEvent.click(slot);
+  const start = parseFloat(slot.style.top);
+  vi.useFakeTimers();
+  fireEvent.keyDown(slot, { key: "ArrowDown", shiftKey: true });
+  expect(parseFloat(slot.style.top) - start).toBeCloseTo(20, 7);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1100); });
+  fireEvent.keyDown(slot, { key: "ArrowDown" });
+  expect(parseFloat(slot.style.top) - start).toBeCloseTo(22, 7);
+  fireEvent.click(bar().getByRole("button", { name: "Bar undo" }));
+  expect(parseFloat(slot.style.top) - start).toBeCloseTo(20, 7);
+  fireEvent.click(bar().getByRole("button", { name: "Bar undo" }));
+  expect(parseFloat(slot.style.top)).toBeCloseTo(start, 7);
+  const command = bar().getByRole("button", { name: "Bar add-photo-slot" });
+  fireEvent.keyDown(command, { key: "ArrowDown" });
+  expect(parseFloat(slot.style.top)).toBeCloseTo(start, 7);
+  fireEvent.keyDown(slot, { key: "ArrowRight", ctrlKey: true });
+  expect(document.querySelector('[data-slot-rotation="90"]')).not.toBeNull();
+});
+
+it("does not create Layout history when a nudge is blocked at the Bleed", async () => {
+  const initial = readLayoutLibrary(null, format);
+  Object.assign(initial.layouts[0].slots[0], { x: -3 / 297, y: 0.2, width: 0.2, height: 0.2 });
+  const { ports } = disk(serializeLayoutLibrary(initial));
+  render(<Harness ports={ports} />);
+  await cards();
+  const slot = screen.getByRole("button", { name: "Photo Slot 1" });
+  fireEvent.click(slot);
+  const before = slot.style.left;
+  fireEvent.keyDown(slot, { key: "ArrowLeft" });
+  expect(slot.style.left).toBe(before);
+  fireEvent.click(bar().getByRole("button", { name: "Bar undo" }));
+  expect(slot.style.left).toBe(before);
+  expect(ports.write).not.toHaveBeenCalled();
+});
+
+it("leaves Layout placeholder editing and dialogs in charge of arrow keys", async () => {
+  const { ports } = disk();
+  render(<Harness ports={ports} fontPorts={{ list: async () => ["Arial"] }} />);
+  const choices = await cards();
+  fireEvent.click(choices[captionIndex]);
+  const slot = screen.getByRole("button", { name: "Text Slot 2" });
+  fireEvent.doubleClick(slot);
+  const editor = screen.getByRole("textbox", { name: "Edit the placeholder of Text Slot 2" });
+  const before = slot.style.left;
+  fireEvent.keyDown(editor, { key: "ArrowRight" });
+  expect(slot.style.left).toBe(before);
+  fireEvent.keyDown(editor, { key: "Escape" });
+  fireEvent.click(bar().getByRole("button", { name: "Bar make-grid-layout" }));
+  const dialog = screen.getByRole("dialog");
+  fireEvent.keyDown(dialog, { key: "ArrowRight" });
+  expect(slot.style.left).toBe(before);
+});
+
 it("persists a saved Library's mosaic migration and does not restore deleted additions on reopen", async () => {
   const original = readLayoutLibrary(null, format).layouts[1];
   const { ports, store } = disk(JSON.stringify({ schemaVersion: 1, layouts: [original] }));

@@ -102,6 +102,7 @@ export function useLayoutLibrary({ root, format, ports = tauriLayoutPorts, onBus
     if (!previous || disabledRef.current) return false;
     try {
       const next = update(previous);
+      if (next === previous) return true;
       serializeLayoutLibrary(next);
       setError(null);
       hasUserChanges.current = true;

@@ -98,7 +98,7 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 053 | [Apply grid around edge text](053-grid-around-edge-text.md) | 045 | done |
 | 054 | [Move Selected Slots together](054-move-selected-slots-together.md) | 011, 013, 019, 024, 040, 051 | done |
 | 055 | [Separate Bleed and Safe Zone per axis](055-per-axis-bleed-and-safe-zone.md) | 004, 012, 017 | done |
-| 056 | [Keyboard nudging for Selected Slots](056-keyboard-nudging.md) | 011, 013, 014, 030, 051, 054 | todo |
+| 056 | [Keyboard nudging for Selected Slots](056-keyboard-nudging.md) | 011, 013, 014, 030, 051, 054 | doing |
 
 Work order for the layout rework: 016, 017, 018, 019, 020, then 011.
 

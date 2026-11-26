@@ -31,6 +31,31 @@ function boundsOf(rects: Rectangle[]): Rectangle {
   };
 }
 
+export function nudgeSlots(album: Album, pageId: string, slotIds: readonly string[], axis: "x" | "y", distance: number): {
+  album: Album; moved: number; guides: SnapGuide[];
+} {
+  const page = album.pages.find((item) => item.id === pageId);
+  const ids = new Set(slotIds);
+  const moving = page?.slots.filter((slot) => ids.has(slot.id)) ?? [];
+  if (!page || moving.length !== ids.size || moving.length === 0) throw new Error("Selected Slots not found on Page.");
+  const bounds = boundsOf(moving);
+  const apply = (offset: number) => moveSlots(album, pageId, slotIds, axis === "x" ? offset : 0, axis === "y" ? offset : 0);
+  const boundsAfter = (next: Album) => boundsOf(next.pages.find((item) => item.id === pageId)!.slots.filter((slot) => ids.has(slot.id)));
+  const proposed = boundsAfter(apply(distance));
+  if (Math.abs(proposed[axis] - bounds[axis]) < 1e-12) return { album, moved: 0, guides: [] };
+  const dimensions = pageDimensions(album.pageFormat);
+  const snapped = snapSlot({
+    rect: proposed, crossing: { axis, from: bounds[axis] },
+    pageSize: { width: dimensions.widthMm, height: dimensions.heightMm },
+    safeZone: { x: album.pageFormat.safeZoneMm.x / dimensions.widthMm, y: album.pageFormat.safeZoneMm.y / dimensions.heightMm },
+    otherSlots: page.slots.filter((slot) => !ids.has(slot.id)), kind: "move", resizeHeight: false,
+    project: (rect) => boundsAfter(apply(rect[axis] - bounds[axis])),
+    members: moving.map((slot) => ({ x: slot.x - bounds.x, y: slot.y - bounds.y, width: slot.width, height: slot.height })),
+  });
+  const moved = snapped.rect[axis] - bounds[axis];
+  return { album: apply(moved), moved, guides: snapped.guides };
+}
+
 /** Moves Selected Slots as one rigid unit, snapping their outer bounds. */
 function applyGroupDrag(album: Album, drag: SlotDrag & { slotIds: string[] }, trimWidth: number, trimHeight: number): {
   album: Album;

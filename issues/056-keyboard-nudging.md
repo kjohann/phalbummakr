@@ -1,6 +1,6 @@
 # 056 – Keyboard nudging for Selected Slots
 
-Status: todo · Type: feature · Depends on: 011, 013, 014, 030, 051, 054
+Status: doing · Type: feature · Depends on: 011, 013, 014, 030, 051, 054
 
 ## What
 
@@ -11,25 +11,45 @@ movement step when a nudge stops at an alignment.
 
 ## Acceptance criteria
 
-- [ ] In Album and Layout modes, the arrow keys move all Selected Slots
+- [x] In Album and Layout modes, the arrow keys move all Selected Slots
   together by 1 mm per press; Shift+arrow moves them by 10 mm. Distances are
   measured on the Page, independent of canvas zoom.
-- [ ] Nudging follows the same movement limits as dragging and does not
+- [x] Nudging follows the same movement limits as dragging and does not
   otherwise snap.
-- [ ] If a nudge step would cross an alignment target, it stops exactly at the
+- [x] If a nudge step would cross an alignment target, it stops exactly at the
   target and shows the matching snap guide. Targets match drag snapping:
   Page edges and centre, Safe Zone, other Slots' edges and centres, and equal
   gaps.
-- [ ] After a step stops at an alignment, the next press completes the
+- [x] After a step stops at an alignment, the next press completes the
   remaining distance to the original 1 mm or 10 mm step endpoint. If that
   completion crosses another alignment, it stops there in turn. Changing
   direction or ending the nudge run resets the interrupted-step rhythm.
-- [ ] Guides remain visible until the nudge run ends.
-- [ ] Each nudge run is one undo step. A run ends on selection change, another
+- [x] Guides remain visible until the nudge run ends.
+- [x] Each nudge run is one undo step. A run ends on selection change, another
   action, or about one second without nudging.
-- [ ] Nudging follows existing keyboard ownership rules and does not interfere
+- [x] Nudging follows existing keyboard ownership rules and does not interfere
   with text editing, fields, dialogs, or other controls. Ctrl+Left/Right
   continues to rotate the selected Slot(s).
-- [ ] Focused tests cover single and multiple Selected Slots, both step sizes,
+- [x] Focused tests cover single and multiple Selected Slots, both step sizes,
   alignment stops and guide visibility, movement limits, undo grouping, and
   keyboard ownership in both modes.
+
+## Implementation
+
+- Shared crossing-aware snapping finds the first reachable drag alignment in a
+  keyboard step. Nudging uses the existing rigid Slot move and Bleed limits.
+- A shared keyboard run retains an interrupted step, guides and one history
+  group until an action, selection change or one-second pause ends it.
+- Layout mode retains its existing single-Slot selection; Album mode moves
+  Selected Slots together.
+
+## Earlier follow-ups and inbox
+
+- [006](006-photo-slots.md) suggested keyboard nudging; this issue implements it.
+- [013](013-slot-snapping.md) and [054](054-move-selected-slots-together.md)
+  dense-Page profiling remains deferred: the existing pair scan and group
+  bounds rules are unchanged. Inner group-edge snapping remains separate.
+- Native WebView2 checks from 011, 013, 014, 030, 051 and 055 remain deferred;
+  automated workspace tests cover the keyboard and SVG guide behavior here.
+- The inbox has no additional note resolved by this change; its broader
+  matching-distance request remains separate.

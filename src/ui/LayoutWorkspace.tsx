@@ -17,6 +17,7 @@ import { tauriFontPorts, type FontPorts } from "./tauriFontPorts";
 import { fitTextSlots } from "./textLayout";
 import TextSlotTools from "./TextSlotTools";
 import type { LayoutLibraryState } from "./useLayoutLibrary";
+import { useSlotNudging } from "./useSlotNudging";
 
 export type LayoutCommandName = "new-layout" | "make-grid-layout" | "duplicate-layout" | "delete-layout" | "add-photo-slot" | "add-text-slot" | "undo" | "redo";
 
@@ -120,6 +121,11 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
   const dragPreview = slotDrag && savedAlbum && scale > 0 ? applySlotDrag(savedAlbum, slotDrag, trimWidth, trimHeight, true) : null;
   const slots = (dragPreview?.album ?? savedAlbum)?.pages[0].slots ?? [];
   const selectedSlot = slots.find((slot) => slot.id === selectedSlotId) ?? null;
+  const nudging = useSlotNudging({
+    active: active && !slotDrag && !editingPlaceholder && !canvasMenu && !layoutDeleteTarget && !gridDialogOpen,
+    enabled: !disabled,
+    pageId: LAYOUT_PAGE, slotIds: selectedSlot ? [selectedSlot.id] : [], change: changeLayout, endGroup: endChangeGroup,
+  });
 
   useEffect(() => {
     const element = viewportRef.current;
@@ -169,17 +175,22 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
 
   /** Applies a change to the selected Layout as one undo step; consecutive changes in the same `group` share a step. */
   function changeLayout(update: (album: Album) => Album, group?: string) {
+    if (!group?.startsWith("nudge:")) nudging.finish();
     const id = selectedId;
     if (!id) return;
     let previous: Layout | undefined;
+    let changed = false;
     const applied = changeLibrary((current) => {
       const target = current.layouts.find((item) => item.id === id);
       if (!target) throw new Error("Layout not found in the Layout Library.");
       previous = target;
       const before = layoutAlbum(target, format);
-      return setLayoutSlots(current, id, fitTextSlots(update(before), before, true).pages[0].slots, pageAspectRatio(format));
+      const after = update(before);
+      if (after === before) return current;
+      changed = true;
+      return setLayoutSlots(current, id, fitTextSlots(after, before, true).pages[0].slots, pageAspectRatio(format));
     });
-    if (applied && previous) setHistory(id, recordChange(histories.current.get(id) ?? emptyHistory(), previous, group));
+    if (applied && previous && changed) setHistory(id, recordChange(histories.current.get(id) ?? emptyHistory(), previous, group));
   }
 
   function endChangeGroup() {
@@ -188,6 +199,7 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
   }
 
   function undoOrRedo(direction: HistoryDirection) {
+    nudging.finish();
     const id = selectedId;
     const history = id ? histories.current.get(id) : undefined;
     if (!id || !history || disabled || !(direction === "undo" ? canUndo(history) : canRedo(history))) return;
@@ -493,6 +505,10 @@ export default function LayoutWorkspace({ format, layouts, fontPorts = tauriFont
           })}
           {slotDrag && dragPreview && dragPreview.guides.length > 0 && (
             <SnapGuides guides={dragPreview.guides} width={viewport.width} height={viewport.height}
+              trimLeft={trimLeft} trimTop={trimTop} trimWidth={trimWidth} trimHeight={trimHeight} />
+          )}
+          {nudging.guides.length > 0 && (
+            <SnapGuides guides={nudging.guides} width={viewport.width} height={viewport.height}
               trimLeft={trimLeft} trimTop={trimTop} trimWidth={trimWidth} trimHeight={trimHeight} />
           )}
           {active && toolsHost && selectedSlot && createPortal(<Fragment key={`${selectedId}:${selectedSlot.id}`}>

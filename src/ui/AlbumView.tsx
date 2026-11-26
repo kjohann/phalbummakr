@@ -21,6 +21,7 @@ import { createRequestQueue } from "./requestQueue";
 import { keyboardTaken, useSlotShortcuts } from "./slotShortcuts";
 import type { AlbumHistory, AlbumLayouts, CommandBarLink } from "./AlbumWorkspace";
 import { smartPlacement } from "./smartPlacement";
+import { useSlotNudging } from "./useSlotNudging";
 
 const PLACEMENT_DRAG_TYPE = "application/x-phalbummakr-placement";
 const queuedPreview = createRequestQueue(4);
@@ -137,6 +138,11 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
     : dragPreview?.album ?? savedAlbum;
   const visiblePageIndex = Math.max(0, album.pages.findIndex((page) => page.id === selectedId));
   const selectedPage = album.pages[visiblePageIndex];
+  const nudging = useSlotNudging({
+    active: active && !slotDrag && !cropPreview && !editingText && !canvasMenu && !stripMenu && !layoutMenu,
+    enabled: !disabled,
+    pageId: selectedPage.id, slotIds: selectedSlotIds, change: changeAlbum, endGroup: history.endGroup,
+  });
   const spreads = albumSpreads(album);
   const spreadIndex = spreads.findIndex((spread) => spread.left?.id === selectedPage.id || spread.right?.id === selectedPage.id);
   const spread = spreads[spreadIndex];
@@ -200,6 +206,7 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
   /** Undoes or redoes one step, then shows where it happened if that is not on the selected Page. */
   function undoOrRedo(direction: HistoryDirection) {
     if (disabled || cropPreviewRef.current) return;
+    nudging.finish();
     stopSlotDrag.current?.();
     const result = history.step(direction);
     if (!result) return;
@@ -250,6 +257,7 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
   }
 
   function changeAlbum(update: (album: Album) => Album, group?: string) {
+    if (!group?.startsWith("nudge:")) nudging.finish();
     commitCropPreview();
     onChange((current) => fitTextSlots(update(current), current), group);
   }
@@ -1201,6 +1209,11 @@ export default function AlbumView({ album: savedAlbum, onChange, history, disabl
         {slotDrag && dragPreview && dragPreview.guides.length > 0 && (
           <SnapGuides guides={dragPreview.guides} width={viewport.width} height={viewport.height}
             trimLeft={originX + (spread.left?.id === slotDrag.pageId ? 0 : 1) * (pageWidth + gap) + bleedMm.x * scale}
+            trimTop={originY + bleedMm.y * scale} trimWidth={trimWidth} trimHeight={trimHeight} />
+        )}
+        {nudging.guides.length > 0 && (
+          <SnapGuides guides={nudging.guides} width={viewport.width} height={viewport.height}
+            trimLeft={originX + (spread.left?.id === selectedPage.id ? 0 : 1) * (pageWidth + gap) + bleedMm.x * scale}
             trimTop={originY + bleedMm.y * scale} trimWidth={trimWidth} trimHeight={trimHeight} />
         )}
         {active && toolsHost && selectedSlot && createPortal(<Fragment key={`${selectedPage.id}:${selectedSlot.id}`}>

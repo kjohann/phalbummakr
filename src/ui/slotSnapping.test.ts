@@ -1,6 +1,55 @@
 import { expect, it } from "vitest";
 import { snapSlot } from "./slotSnapping";
 
+it("stops a keyboard move at the first crossed alignment, not a nearby target behind it", () => {
+  const result = snapSlot({
+    rect: { x: 0.21, y: 0.2, width: 0.1, height: 0.1 },
+    crossing: { axis: "x", from: 0.2 },
+    pageSize: { width: 600, height: 400 },
+    safeZone: { x: 0.05, y: 0.05 },
+    otherSlots: [
+      { x: 0.197, y: 0.6, width: 0.05, height: 0.05 },
+      { x: 0.204, y: 0.6, width: 0.05, height: 0.05 },
+      { x: 0.207, y: 0.6, width: 0.05, height: 0.05 },
+    ],
+    kind: "move", resizeHeight: false,
+  });
+  expect(result.rect.x).toBeCloseTo(0.204, 9);
+  expect(result.guides).toContainEqual({ axis: "x", position: 0.204, target: "Slot" });
+});
+
+it("stops on an equal gap crossed by a keyboard move", () => {
+  const result = snapSlot({
+    rect: { x: 0.38, y: 0.25, width: 0.25, height: 0.25 },
+    crossing: { axis: "x", from: 0.37 },
+    pageSize: { width: 600, height: 400 }, safeZone: { x: 0.02, y: 0.03 },
+    otherSlots: [
+      { x: 0.125, y: 0.25, width: 0.125, height: 0.25 },
+      { x: 0.75, y: 0.25, width: 0.125, height: 0.25 },
+    ],
+    kind: "move", resizeHeight: false,
+  });
+  expect(result.rect.x).toBeCloseTo(0.375, 9);
+  expect(result.guides).toContainEqual({
+    axis: "x", target: "Equal gap", cross: 0.375,
+    gaps: [{ start: 0.25, end: 0.375 }, { start: 0.625, end: 0.75 }],
+  });
+});
+
+it.each([
+  { from: -0.003, to: 0.003, x: 0, target: "Page edge" },
+  { from: 0.017, to: 0.023, x: 0.02, target: "Safe Zone" },
+  { from: 0.397, to: 0.403, x: 0.4, target: "Page centre" },
+])("crosses the $target independently of snap proximity", ({ from, to, x, target }) => {
+  const result = snapSlot({
+    rect: { x: to, y: 0.3, width: 0.2, height: 0.2 }, crossing: { axis: "x", from },
+    pageSize: { width: 1200, height: 800 }, safeZone: { x: 0.02, y: 0.03 },
+    otherSlots: [], kind: "move", resizeHeight: false,
+  });
+  expect(result.rect.x).toBeCloseTo(x, 9);
+  expect(result.guides.some((guide) => guide.target === target && guide.axis === "x")).toBe(true);
+});
+
 it("snaps near the Safe Zone but leaves a free position unchanged", () => {
   const options = {
     pageSize: { width: 600, height: 400 },
