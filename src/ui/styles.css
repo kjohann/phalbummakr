@@ -836,6 +836,17 @@ body {
   border: 0;
 }
 
+.album-form label.dimension-operation {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.album-form .dimension-operation input {
+  width: auto;
+  margin: 0;
+}
+
 .export-dialog {
   display: grid;
   gap: 14px;
@@ -1313,6 +1324,7 @@ button.sort-photo--selected:hover {
 
 .dialog-backdrop .album-form {
   background: white;
+  max-height: calc(100vh - 32px);
   padding: 24px;
 }
 

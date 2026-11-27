@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
-import { addPage, albumSpreads, createAlbum, deletePage, deserializeAlbum, duplicatePage, movePage, pageDimensions, serializeAlbum } from "./album";
-import { addPhotoSlot, placePhoto } from "./slots";
+import { addPage, adjustPageBoundary, albumSpreads, createAlbum, deletePage, deserializeAlbum, duplicatePage, movePage, pageDimensions, scaleAlbum, serializeAlbum } from "./album";
+import { addPhotoSlot, addTextSlot, placePhoto } from "./slots";
+import { lowResolutionPlacements } from "./effectiveResolution";
 
 it("creates a two-Page Album with front and back Inside Covers", () => {
   const album = createAlbum({ name: "Test" });
@@ -114,6 +115,63 @@ it("creates empty white A4 landscape Pages and round trips JSON", () => {
   expect(album.pages.every((page) => page.background === "#ffffff" && page.slots.length === 0)).toBe(true);
   expect(new Set(album.pages.map((page) => page.id)).size).toBe(2);
   expect(deserializeAlbum(serializeAlbum(album))).toEqual(album);
+});
+
+it("creates and reopens an Album with its chosen physical Page dimensions", () => {
+  const album = createAlbum({ name: "Square", dimensions: { widthMm: 200, heightMm: 200 } });
+  expect(pageDimensions(album.pageFormat)).toEqual({ widthMm: 200, heightMm: 200 });
+  expect(album.pageFormat).toMatchObject({ bleedMm: { x: 3, y: 3 }, safeZoneMm: { x: 5, y: 5 }, dpi: 300, minEffectiveDpi: 150 });
+  expect(pageDimensions(deserializeAlbum(serializeAlbum(album)).pageFormat)).toEqual({ widthMm: 200, heightMm: 200 });
+});
+
+it("scales every Page and text proportionally without altering Photo framing or Bleed placements", () => {
+  let album = addTextSlot(addPhotoSlot(createAlbum({ name: "Test" }), "page-1"), "page-2");
+  album = placePhoto(album, "page-1", "slot-1", { path: "tree.jpg", width: 3000, height: 2000, orientation: 1 });
+  album.pages[0].slots[0].x = -0.01;
+  const scaled = scaleAlbum(album, 2);
+  expect(pageDimensions(scaled.pageFormat)).toEqual({ widthMm: 594, heightMm: 420 });
+  expect(scaled.pages[0].slots[0]).toEqual(album.pages[0].slots[0]);
+  const text = scaled.pages[1].slots[0];
+  expect(text.type === "text" && text.style.fontSize).toBe(36);
+  expect(scaled.pageFormat.bleedMm).toEqual({ x: 3, y: 3 });
+  expect(deserializeAlbum(serializeAlbum(scaled))).toEqual(scaled);
+});
+
+it("updates Effective Resolution warnings when proportionally scaling a Placement", () => {
+  let album = addPhotoSlot(createAlbum({ name: "Test", minEffectiveDpi: 150 }), "page-1");
+  const photo = { path: "tree.jpg", width: 1000, height: 1000, orientation: 1 };
+  album = placePhoto(album, "page-1", "slot-1", photo);
+  const photos = new Map([[photo.path, photo]]);
+  expect(lowResolutionPlacements(album, photos)).toHaveLength(0);
+  expect(lowResolutionPlacements(scaleAlbum(album, 2), photos)).toHaveLength(1);
+});
+
+it("adjusts Page boundaries without changing physical Slot geometry or text size", () => {
+  let album = addTextSlot(addPhotoSlot(createAlbum({ name: "Test", safeZoneMm: { x: 18, y: 5 } }), "page-1"), "page-2");
+  album = placePhoto(album, "page-1", "slot-1", { path: "tree.jpg", width: 3000, height: 2000, orientation: 1 });
+  album.pages[0].slots[0].rotation = 90;
+  const adjusted = adjustPageBoundary(album, { widthMm: 280, heightMm: 210 });
+  const before = album.pages[0].slots[0];
+  const after = adjusted.pages[0].slots[0];
+  expect(after.x * 280).toBeCloseTo(before.x * 297);
+  expect(after.width * 280).toBeCloseTo(before.width * 297);
+  expect(after.y).toBe(before.y);
+  expect(after.rotation).toBe(90);
+  expect(after.placement).toEqual(before.placement);
+  expect(adjusted.pages[1].slots[0]).toEqual(album.pages[1].slots[0].type === "text"
+    ? { ...album.pages[1].slots[0], x: album.pages[1].slots[0].x * 297 / 280, width: album.pages[1].slots[0].width * 297 / 280 }
+    : null);
+});
+
+it("blocks boundary changes when the current Safe Zone or Slots on any Page do not fit", () => {
+  const album = createAlbum({ name: "Test", pageCount: 4 });
+  expect(() => adjustPageBoundary(album, { widthMm: 280, heightMm: 210 })).toThrow(/current safe zone/i);
+  const prepared = addPhotoSlot(addPhotoSlot({ ...album, pageFormat: { ...album.pageFormat, safeZoneMm: { x: 18, y: 5 } } }, "page-2"), "page-4");
+  prepared.pages[1].slots[0].x = -0.01;
+  prepared.pages[3].slots[0].x = 0.9;
+  prepared.pages[3].slots[0].rotation = 90;
+  expect(() => adjustPageBoundary(prepared, { widthMm: 280, heightMm: 210 })).toThrow(/Pages 2, 4/i);
+  expect(pageDimensions(prepared.pageFormat)).toEqual({ widthMm: 297, heightMm: 210 });
 });
 
 it("loads an Album saved before Placements had the Fit field", () => {

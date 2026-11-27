@@ -78,9 +78,9 @@ The width, collapsed state and Compact setting are stored per computer in
 
 ## Albums
 
-Use **File > New Album** to choose a `.phalbum` file, then a title, Page Format and print settings. Initially the
-only Page Format is **A4 landscape (297 x 210 mm)**; width and height are not
-entered manually. Defaults are 2 empty white Pages, 3 mm
+Use **File > New Album** to choose a `.phalbum` file, then a title, Page Format and print settings. Choose A4
+landscape or portrait, 16 x 16, 20 x 20, 28 x 28, 21 x 28 or 28 x 21 cm;
+dimensions are for one trimmed Page. Defaults are A4 landscape, 2 empty white Pages, 3 mm
 Bleed, 5 mm Safe Zone and 300 DPI. Bleed and Safe Zone each have separate
 left/right and top/bottom values, as some Print Providers use different margins
 on each axis. Even Page counts from 2 to 10,000 are supported.
@@ -113,7 +113,7 @@ be deleted. Drag a Page thumbnail onto another to move it to that position, or
 focus it and use Alt+Left/Right to move it one position.
 Page numbers and Spreads update from the new order, while Page identities remain
 stable. The selected thumbnail scrolls into view. The editor keeps the trim edge
-at A4 proportions, with Bleed outside it and a dashed Safe Zone inside it.
+at the Album's Page proportions, with Bleed outside it and a dashed Safe Zone inside it.
 
 **Undo** and **Redo** at the right of the command bar, or Ctrl+Z and Ctrl+Y
 (or Ctrl+Shift+Z), step through every Album change made since the Album was
@@ -124,8 +124,15 @@ the current state. In Layout mode, each Layout has its own history. Creating,
 duplicating and deleting Layouts, and moving or copying Photos between Folders, are not
 undone.
 
-**Album settings** contains the title and print settings. Use **Apply print settings** for the title, Bleed,
-Safe Zone and DPI changes. The Page Format remains A4 landscape. All applied edits
+**Album settings** contains the title and print settings. To change Page dimensions,
+choose **Scale proportionally** to scale Slots and text together, or **Adjust page
+boundary** to keep their physical positions and sizes. Before adjusting a boundary,
+the existing Safe Zone and every Slot (including Slots in the Bleed) must fit inside
+the new trim boundary. Apply margin changes and prepare the Pages first if needed.
+Confirm the dimension change and check the Pages afterward. Bleed and Safe Zone
+values remain independent and do not scale automatically. Use **Apply print settings**
+for title, margin and DPI changes too. Each applied dimension operation is one
+undo step. All applied edits
 autosave after 500 ms without another change. Album switching is blocked until
 saving finishes; save failures keep the
 changes in memory and offer **Retry save**. Closing the desktop window is also

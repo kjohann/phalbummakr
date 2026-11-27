@@ -6,15 +6,17 @@ export interface EdgeMargins {
   y: number;
 }
 
-export interface PageFormat {
-  size: "A4";
-  orientation: "landscape";
+type PageSize =
+  | { size: "A4"; orientation: "landscape"; widthMm?: never; heightMm?: never }
+  | { size: "custom"; orientation: "custom"; widthMm: number; heightMm: number };
+
+export type PageFormat = PageSize & {
   bleedMm: EdgeMargins;
   safeZoneMm: EdgeMargins;
   dpi: number;
   /** The Effective Resolution threshold: Placements below it are flagged. */
   minEffectiveDpi: number;
-}
+};
 
 export const DEFAULT_BLEED_MM = 3;
 export const DEFAULT_SAFE_ZONE_MM = 5;
@@ -35,6 +37,7 @@ export interface Album {
 
 export interface AlbumOptions {
   name: string;
+  dimensions?: PageDimensions;
   pageCount?: number;
   bleedMm?: EdgeMargins;
   safeZoneMm?: EdgeMargins;
@@ -117,9 +120,84 @@ export function movePage(album: Album, id: string, toIndex: number): Album {
 
 export const MM_PER_INCH = 25.4;
 
-export function pageDimensions(format: PageFormat): { widthMm: number; heightMm: number } {
-  const dimensions = { A4: { widthMm: 297, heightMm: 210 } };
-  return { ...dimensions[format.size] };
+export interface PageDimensions {
+  widthMm: number;
+  heightMm: number;
+}
+
+export function pageDimensions(format: PageFormat): PageDimensions {
+  if (format.size === "custom") {
+    return { widthMm: format.widthMm, heightMm: format.heightMm };
+  }
+  return { widthMm: 297, heightMm: 210 };
+}
+
+function formatDimensions(dimensions: PageDimensions): PageSize {
+  return dimensions.widthMm === 297 && dimensions.heightMm === 210
+    ? { size: "A4", orientation: "landscape" }
+    : { size: "custom", orientation: "custom", ...dimensions };
+}
+
+type PrintSettings = Pick<PageFormat, "bleedMm" | "safeZoneMm" | "dpi" | "minEffectiveDpi">;
+
+function changeFormatDimensions(format: PageFormat, dimensions: PageDimensions, changes: Partial<PrintSettings>): PageFormat {
+  return {
+    bleedMm: format.bleedMm, safeZoneMm: format.safeZoneMm,
+    dpi: format.dpi, minEffectiveDpi: format.minEffectiveDpi,
+    ...changes, ...formatDimensions(dimensions),
+  };
+}
+
+export function scaleAlbum(album: Album, factor: number, changes: Partial<PrintSettings> = {}): Album {
+  if (!Number.isFinite(factor) || factor <= 0) throw new Error("Scale must be a positive number.");
+  const { widthMm, heightMm } = pageDimensions(album.pageFormat);
+  const scaled: Album = {
+    ...album,
+    pageFormat: changeFormatDimensions(album.pageFormat, { widthMm: widthMm * factor, heightMm: heightMm * factor }, changes),
+    pages: album.pages.map((page) => ({
+      ...page,
+      slots: page.slots.map((slot) => slot.type === "text"
+        ? { ...slot, style: { ...slot.style, fontSize: slot.style.fontSize * factor } }
+        : slot),
+    })),
+  };
+  validateAlbum(scaled);
+  return scaled;
+}
+
+export function adjustPageBoundary(album: Album, dimensions: PageDimensions, changes: Partial<PrintSettings> = {}): Album {
+  const { widthMm, heightMm } = dimensions;
+  if (!Number.isFinite(widthMm) || widthMm <= 0 || !Number.isFinite(heightMm) || heightMm <= 0) {
+    throw new Error("Page dimensions must be positive numbers.");
+  }
+  const old = pageDimensions(album.pageFormat);
+  const safe = album.pageFormat.safeZoneMm;
+  const tolerance = 1e-8;
+  if (old.widthMm - safe.x > widthMm + tolerance || old.heightMm - safe.y > heightMm + tolerance) {
+    throw new Error("The current Safe Zone does not fit the proposed Page boundary. Apply margin changes first.");
+  }
+  // Slot rectangles already represent their rotated, Page-space bounding boxes.
+  const affected = album.pages.flatMap((page, index) => page.slots.some((slot) =>
+    slot.x * old.widthMm < -tolerance || slot.y * old.heightMm < -tolerance
+    || (slot.x + slot.width) * old.widthMm > widthMm + tolerance
+    || (slot.y + slot.height) * old.heightMm > heightMm + tolerance) ? [index + 1] : []);
+  if (affected.length) throw new Error(`Slots outside the proposed Page boundary on Pages ${affected.join(", ")}. Fix those Pages first.`);
+  const adjusted: Album = {
+    ...album,
+    pageFormat: changeFormatDimensions(album.pageFormat, dimensions, changes),
+    pages: album.pages.map((page) => ({
+      ...page,
+      slots: page.slots.map((slot) => ({
+        ...slot,
+        x: slot.x * old.widthMm / widthMm,
+        y: slot.y * old.heightMm / heightMm,
+        width: slot.width * old.widthMm / widthMm,
+        height: slot.height * old.heightMm / heightMm,
+      })),
+    })),
+  };
+  validateAlbum(adjusted);
+  return adjusted;
 }
 
 export function createAlbum(options: AlbumOptions): Album {
@@ -129,8 +207,7 @@ export function createAlbum(options: AlbumOptions): Album {
     schemaVersion: 2,
     title: options.name,
     pageFormat: {
-      size: "A4",
-      orientation: "landscape",
+      ...formatDimensions(options.dimensions ?? { widthMm: 297, heightMm: 210 }),
       bleedMm: { ...(options.bleedMm ?? { x: DEFAULT_BLEED_MM, y: DEFAULT_BLEED_MM }) },
       safeZoneMm: { ...(options.safeZoneMm ?? { x: DEFAULT_SAFE_ZONE_MM, y: DEFAULT_SAFE_ZONE_MM }) },
       dpi: options.dpi ?? 300,
@@ -198,9 +275,13 @@ function validateAlbum(value: unknown): asserts value is Album {
     throw new Error("Album title must be text.");
   }
   const format = value.pageFormat;
-  if (!record(format, ["size", "orientation", "bleedMm", "safeZoneMm", "dpi", "minEffectiveDpi"])
-    || format.size !== "A4" || format.orientation !== "landscape") {
-    throw new Error("Only A4 landscape Page Format is supported.");
+  if (!(record(format, ["size", "orientation", "bleedMm", "safeZoneMm", "dpi", "minEffectiveDpi"])
+      && format.size === "A4" && format.orientation === "landscape")
+    && !(record(format, ["size", "orientation", "widthMm", "heightMm", "bleedMm", "safeZoneMm", "dpi", "minEffectiveDpi"])
+      && format.size === "custom" && format.orientation === "custom"
+      && typeof format.widthMm === "number" && Number.isFinite(format.widthMm) && format.widthMm > 0
+      && typeof format.heightMm === "number" && Number.isFinite(format.heightMm) && format.heightMm > 0)) {
+    throw new Error("Page dimensions are invalid or unsupported.");
   }
   for (const key of ["bleedMm", "safeZoneMm"] as const) {
     if (!record(format[key], ["x", "y"])) throw new Error(`${key === "bleedMm" ? "Bleed" : "Safe Zone"} is invalid.`);
@@ -208,16 +289,16 @@ function validateAlbum(value: unknown): asserts value is Album {
   const bleed = format.bleedMm as Record<string, unknown>;
   const safeZone = format.safeZoneMm as Record<string, unknown>;
   const { widthMm, heightMm } = pageDimensions(format as unknown as PageFormat);
-  for (const [label, number, limit] of [
-    ["Left/right Bleed", bleed.x, Infinity],
-    ["Top/bottom Bleed", bleed.y, Infinity],
-    ["Left/right Safe Zone", safeZone.x, widthMm / 2],
-    ["Top/bottom Safe Zone", safeZone.y, heightMm / 2],
-    ["Export resolution", format.dpi, Infinity],
-    ["Effective Resolution threshold", format.minEffectiveDpi, Infinity],
+  for (const [label, number, limit, positive] of [
+    ["Left/right Bleed", bleed.x, Infinity, false],
+    ["Top/bottom Bleed", bleed.y, Infinity, false],
+    ["Left/right Safe Zone", safeZone.x, widthMm / 2, false],
+    ["Top/bottom Safe Zone", safeZone.y, heightMm / 2, false],
+    ["Export resolution", format.dpi, Infinity, true],
+    ["Effective Resolution threshold", format.minEffectiveDpi, Infinity, true],
   ] as const) {
     if (typeof number !== "number" || !Number.isFinite(number) || number < 0 || number >= limit
-      || ((label === "Export resolution" || label === "Effective Resolution threshold") && number === 0)) {
+      || (positive && number === 0)) {
       throw new Error(`${label} is invalid${Number.isFinite(limit) ? ` (must be less than ${limit} mm)` : ""}.`);
     }
   }

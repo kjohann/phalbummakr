@@ -1,6 +1,6 @@
 # 057 - Built-in Page dimensions and controlled dimension changes
 
-Status: todo · Type: feature · Depends on: 004, 011, 012, 016, 022, 055
+Status: doing · Type: feature · Depends on: 004, 011, 012, 016, 022, 055
 
 ## What
 
@@ -43,56 +43,56 @@ Page Format Preset ideas in the [backlog](backlog.md) remain separate work.
 
 ## Acceptance criteria
 
-- [ ] Both New Album entry points offer all seven choices with clear centimetre
+- [x] Both New Album entry points offer all seven choices with clear centimetre
   dimensions and orientation labels for A4. A4 landscape remains the default;
   custom numeric dimensions are not offered during creation.
-- [ ] Existing Albums retain their saved format until explicitly changed.
+- [x] Existing Albums retain their saved format until explicitly changed.
   Existing A4 landscape files continue to open without migration of their design.
-- [ ] All choices produce the correct physical Page dimensions in Album mode,
+- [x] All choices produce the correct physical Page dimensions in Album mode,
   Spread and Page previews, Layout mode, and Page Export. Export pixel dimensions
   derive from the selected dimensions, per-axis Bleed and export resolution.
-- [ ] Creating an Album retains the existing initial Bleed, Safe Zone, export
+- [x] Creating an Album retains the existing initial Bleed, Safe Zone, export
   resolution and Effective Resolution threshold defaults regardless of size.
-- [ ] Album settings distinguish "Scale proportionally" with linked dimensions
+- [x] Album settings distinguish "Scale proportionally" with linked dimensions
   from "Adjust page boundary" with independent dimensions, explaining what each
   operation preserves.
-- [ ] Proportional scaling preserves the current aspect ratio and scales every
+- [x] Proportional scaling preserves the current aspect ratio and scales every
   Slot's physical position and dimensions, including text size, by the same
   factor. Photo framing, Fit behaviour, rotations and the design's relative
   appearance are preserved; no Crop is reset.
-- [ ] Proportional scaling is not subject to the boundary-adjustment Slot-bounds
+- [x] Proportional scaling is not subject to the boundary-adjustment Slot-bounds
   gate. Intentional Bleed placements do not require manual repositioning merely
   to scale the design.
-- [ ] Page boundary adjustment preserves every Slot's physical size and distance
+- [x] Page boundary adjustment preserves every Slot's physical size and distance
   from the Page's top-left trim edge, text size and Photo framing. It does not
   reposition Slots, reshape them, rewrap text through a changed physical width,
   or automatically fix the design.
-- [ ] Before any boundary adjustment, the current Safe Zone rectangle must fit
+- [x] Before any boundary adjustment, the current Safe Zone rectangle must fit
   entirely within the proposed trim boundary. The check uses the current margins,
   not a smaller Safe Zone introduced only in the pending adjustment. Users can
   first apply margin changes and prepare their Pages, then try again.
-- [ ] Before any boundary adjustment, every Slot on every Page must fit entirely
+- [x] Before any boundary adjustment, every Slot on every Page must fit entirely
   within the proposed trim boundary, including rotated corners. Bleed is not an
   allowance for this check; intentional bleeding Slots also block the change.
   Slots need not be inside the Safe Zone.
-- [ ] A blocked boundary adjustment explains the failed constraint and identifies
+- [x] A blocked boundary adjustment explains the failed constraint and identifies
   affected Page numbers for Slot failures, telling users to fix those Pages.
   No Page or format change is partially applied.
-- [ ] Dimension and margin inputs have explicit units and reject invalid values
+- [x] Dimension and margin inputs have explicit units and reject invalid values
   with clear feedback. Proposed margins must leave a usable Safe Zone; they are
   never silently reduced to fit a new Page size.
-- [ ] Other Page Format settings remain unchanged by a dimension operation unless
+- [x] Other Page Format settings remain unchanged by a dimension operation unless
   independently edited by the user. Effective Resolution warnings update for the
   new physical Slot sizes; low resolution warns but does not block scaling.
-- [ ] Selecting or entering dimensions changes only the settings draft. Applying
+- [x] Selecting or entering dimensions changes only the settings draft. Applying
   a dimension change requires confirmation describing its effects and advising
   the user to check Pages. Cancellation leaves the Album untouched; completion
   gives a review reminder without adding persistent per-Page review state.
-- [ ] Each dimension operation, including its accompanying design changes, is one
+- [x] Each dimension operation, including its accompanying design changes, is one
   undoable operation. Undo/redo restores the format and design together. Normal
   autosave persists the result, and reopening retains it without persisting
   session-only undo history.
-- [ ] Shared saved Layouts are not rewritten when an Album changes dimensions.
+- [x] Shared saved Layouts are not rewritten when an Album changes dimensions.
   Layout mode uses the Album's current format, and existing cross-ratio warnings
   and proportional Layout application behaviour remain available.
 
@@ -107,6 +107,28 @@ also fit inside the proposed 280 x 210 mm trim boundary.
 Increasing the margin alone does not fix Slots: the user must adjust any
 out-of-bounds content on every affected Page before applying the dimension
 change.
+
+## Verification
+
+- Album and UI tests cover built-in dimensions, legacy files, scaling, boundary
+  gates, confirmation, undo/redo, autosave, resolution warnings and Layouts.
+- Export tests check all seven dimensions with per-axis Bleed.
+- The full test suite, typecheck, lint and production build pass.
+
+## Earlier considerations reviewed
+
+- [022](022-effective-resolution-warning.md): print settings fields and their
+  parser are now shared; the validation table uses an explicit positivity flag,
+  and the common physical-size result has a named type.
+- [006](006-photo-slots.md): out-of-Bleed Slots are still loadable and are not
+  silently clamped. Boundary adjustments explicitly reject them; warnings for
+  ordinary Bleed changes remain separate work.
+- [010](010-layouts.md): saved Layouts remain unchanged and cross-ratio warnings
+  remain available. Native WebView2 checks are still useful and were not part
+  of the automated verification.
+- The remaining earlier considerations concern separate workflows, native
+  checks, performance or general Reflow, and remain deferred. No inbox notes
+  were resolved by this issue.
 
 ## Future considerations (low priority)
 

@@ -59,3 +59,12 @@ it("adds each axis' Bleed to the matching side of an exported Page", () => {
   // (297 + 10) mm x 210 mm at 10 pixels per mm.
   expect(exportPageSize(album.pageFormat)).toMatchObject({ width: 3070, height: 2100 });
 });
+
+it.each([
+  [297, 210, 3050, 2140], [210, 297, 2180, 3010], [160, 160, 1680, 1640],
+  [200, 200, 2080, 2040], [280, 280, 2880, 2840], [210, 280, 2180, 2840],
+  [280, 210, 2880, 2140],
+])("exports a %i x %i mm Page with per-axis Bleed", (widthMm, heightMm, width, height) => {
+  const album = createAlbum({ name: "Test", dimensions: { widthMm, heightMm }, bleedMm: { x: 4, y: 2 }, dpi: 254 });
+  expect(exportPageSize(album.pageFormat)).toMatchObject({ width, height });
+});

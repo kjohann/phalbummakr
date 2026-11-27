@@ -2,7 +2,7 @@
 import { useState, type ComponentProps, type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { addPhotoSlot, addTextSlot, applyLayout, createAlbum, createGridLayout, deserializeAlbum, photoUsage, placePhoto, readLayoutLibrary, relinkPlacements, rotateSlot, serializeAlbum, serializeLayoutLibrary, setSlotPlaceholder, setSlotText, type Album, type AlbumPorts, type Layout, type LayoutPorts } from "../core";
+import { addPhotoSlot, addTextSlot, applyLayout, createAlbum, createGridLayout, deserializeAlbum, pageDimensions, photoUsage, placePhoto, readLayoutLibrary, relinkPlacements, rotateSlot, serializeAlbum, serializeLayoutLibrary, setSlotPlaceholder, setSlotText, type Album, type AlbumPorts, type Layout, type LayoutPorts } from "../core";
 import Workspace, { type AlbumCommand, type AlbumCommandName, type PhotoMoveLink } from "./AlbumWorkspace";
 import PhotoBrowser from "./PhotoBrowser";
 import { PhotoSlotTools } from "./SlotTools";
@@ -1282,6 +1282,77 @@ it("keeps print settings in Album settings, validates them, and persists changes
   expect(screen.getByText("Safe Zone: 7 mm left/right, 4 mm top/bottom")).toBeTruthy();
 });
 
+it("confirms proportional dimension changes and undoes format and text together", async () => {
+  const { ports } = disk();
+  const album = addTextSlot(createAlbum({ name: "Existing" }), "page-1");
+  const changed = vi.fn();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} onAlbumChange={changed}
+    document={{ path: "Existing", album }} />);
+  fireEvent.click(bar().getByRole("button", { name: "Bar album-settings" }));
+  fireEvent.change(screen.getByLabelText("Page width (cm)"), { target: { value: "59.4" } });
+  expect((screen.getByLabelText("Page height (cm)") as HTMLInputElement).value).toBe("42");
+  fireEvent.click(screen.getByRole("button", { name: "Apply print settings" }));
+  expect(pageDimensions((changed.mock.lastCall![0] as Album).pageFormat)).toEqual({ widthMm: 297, heightMm: 210 });
+  fireEvent.click(screen.getByRole("button", { name: "Cancel dimension change" }));
+  expect(pageDimensions((changed.mock.lastCall![0] as Album).pageFormat)).toEqual({ widthMm: 297, heightMm: 210 });
+  fireEvent.click(screen.getByRole("button", { name: "Apply print settings" }));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm dimension change" }));
+  let result = changed.mock.lastCall![0] as Album;
+  expect(pageDimensions(result.pageFormat)).toEqual({ widthMm: 594, heightMm: 420 });
+  expect(result.pages[0].slots[0].type === "text" && result.pages[0].slots[0].style.fontSize).toBe(36);
+  expect(screen.getByRole("status").textContent).toMatch(/check.*pages/i);
+  fireEvent.click(bar().getByRole("button", { name: "Bar undo" }));
+  result = changed.mock.lastCall![0] as Album;
+  expect(pageDimensions(result.pageFormat)).toEqual({ widthMm: 297, heightMm: 210 });
+  expect(result.pages[0].slots[0].type === "text" && result.pages[0].slots[0].style.fontSize).toBe(18);
+  fireEvent.click(bar().getByRole("button", { name: "Bar redo" }));
+  expect(pageDimensions((changed.mock.lastCall![0] as Album).pageFormat)).toEqual({ widthMm: 594, heightMm: 420 });
+});
+
+it("blocks boundary adjustment until the current Safe Zone and every Page are prepared", () => {
+  const { ports } = disk();
+  const original = addPhotoSlot(createAlbum({ name: "Existing", pageCount: 4 }), "page-2");
+  original.pages[1].slots[0].x = 0.9;
+  const changed = vi.fn();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} onAlbumChange={changed}
+    document={{ path: "Existing", album: original }} />);
+  fireEvent.click(bar().getByRole("button", { name: "Bar album-settings" }));
+  fireEvent.click(screen.getByLabelText("Adjust page boundary"));
+  fireEvent.change(screen.getByLabelText("Page width (cm)"), { target: { value: "28" } });
+  fireEvent.change(screen.getByLabelText("Safe Zone left/right (mm)"), { target: { value: "18" } });
+  fireEvent.submit(screen.getByRole("form", { name: "Album settings" }));
+  expect(screen.getByRole("alert").textContent).toMatch(/current safe zone/i);
+  expect((changed.mock.lastCall![0] as Album).pageFormat.safeZoneMm.x).toBe(5);
+  fireEvent.change(screen.getByLabelText("Page width (cm)"), { target: { value: "29.7" } });
+  fireEvent.submit(screen.getByRole("form", { name: "Album settings" }));
+  fireEvent.change(screen.getByLabelText("Page width (cm)"), { target: { value: "28" } });
+  fireEvent.submit(screen.getByRole("form", { name: "Album settings" }));
+  expect(screen.getByRole("alert").textContent).toMatch(/Pages 2.*fix/i);
+  expect(pageDimensions((changed.mock.lastCall![0] as Album).pageFormat)).toEqual({ widthMm: 297, heightMm: 210 });
+});
+
+it("saves a confirmed boundary adjustment and undoes the physical geometry together", async () => {
+  const { ports, files } = disk();
+  const original = addPhotoSlot(createAlbum({ name: "Existing", safeZoneMm: { x: 18, y: 5 } }), "page-1");
+  const changed = vi.fn();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} onAlbumChange={changed}
+    document={{ path: "Existing", album: original }} />);
+  fireEvent.click(bar().getByRole("button", { name: "Bar album-settings" }));
+  fireEvent.click(screen.getByLabelText("Adjust page boundary"));
+  fireEvent.change(screen.getByLabelText("Page width (cm)"), { target: { value: "28" } });
+  fireEvent.click(screen.getByRole("button", { name: "Apply print settings" }));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm dimension change" }));
+  let result = changed.mock.lastCall![0] as Album;
+  expect(result.pages[0].slots[0].x * 280).toBeCloseTo(original.pages[0].slots[0].x * 297);
+  await waitFor(() => expect(ports.write).toHaveBeenCalled());
+  expect(pageDimensions(deserializeAlbum(files.get("Existing")!).pageFormat)).toEqual({ widthMm: 280, heightMm: 210 });
+  fireEvent.click(bar().getByRole("button", { name: "Bar undo" }));
+  result = changed.mock.lastCall![0] as Album;
+  expect(result).toEqual(original);
+  fireEvent.click(bar().getByRole("button", { name: "Bar redo" }));
+  expect(pageDimensions((changed.mock.lastCall![0] as Album).pageFormat)).toEqual({ widthMm: 280, heightMm: 210 });
+});
+
 it("keeps content-index statistics in collapsed Album settings diagnostics without editing the Album", async () => {
   const { ports } = disk();
   render(<MenuHarness root="D:\\Photos" ports={ports}
@@ -1363,7 +1434,7 @@ it("lists and opens existing Albums, then creates an A4 landscape Album without 
   await screen.findByRole("button", { name: "Open Album Existing", current: "page" });
   expect(screen.getByText(/ OF 2$/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "New Album" }));
-  expect(screen.getByLabelText("Page Format").textContent).toBe("A4 - landscape (297 x 210 mm)");
+  expect((screen.getByLabelText("Page Format") as HTMLSelectElement).options).toHaveLength(7);
   expect(screen.queryByLabelText(/width|height/i)).toBeNull();
   expect((screen.getByLabelText("Page count") as HTMLInputElement).value).toBe("2");
   expect(screen.queryByLabelText("Page 1 side")).toBeNull();
@@ -1374,6 +1445,17 @@ it("lists and opens existing Albums, then creates an A4 landscape Album without 
   expect(album.pages).toHaveLength(2);
   expect(album.pageFormat.size).toBe("A4");
   expect(album.pageFormat.orientation).toBe("landscape");
+});
+
+it("creates an Album with a selected built-in Page dimension", async () => {
+  const { ports, files } = disk();
+  render(<AlbumWorkspace root="D:\\Photos" ports={ports} />);
+  fireEvent.click(await screen.findByRole("button", { name: "New Album" }));
+  fireEvent.change(screen.getByLabelText("Page Format"), { target: { value: "200x200" } });
+  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Square" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create Album" }));
+  await screen.findByRole("button", { name: "Open Album Square", current: "page" });
+  expect(pageDimensions(deserializeAlbum(files.get("Square")!).pageFormat)).toEqual({ widthMm: 200, heightMm: 200 });
 });
 
 it("debounces changes, blocks navigation until saved, and reopens the persisted Album", async () => {

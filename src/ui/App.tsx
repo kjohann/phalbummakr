@@ -9,7 +9,7 @@ import { createAlbum, copyPhotosToFolder, deserializeAlbum, clampZoom, renameFol
 import AlbumWorkspace, { type AlbumCommand, type AlbumCommandName, type CommandBarLink, type HistoryState, type PhotoMoveRunner } from "./AlbumWorkspace";
 import CommandBar, { type BarCommand } from "./CommandBar";
 import LayoutWorkspace, { type LayoutBarLink, type LayoutBarState, type LayoutCommand, type LayoutCommandName } from "./LayoutWorkspace";
-import { MarginFields, readMargins } from "./MarginFields";
+import { PageFormatChoices, PrintSettingsFields, readPageChoice, readPrintSettings } from "./MarginFields";
 import type { Mode } from "./modes";
 import PhotoBrowser, { type SortCommandName, type SortLink } from "./PhotoBrowser";
 import SidePane, { clampPaneWidth, DEFAULT_SIDE_PANE, type PaneModes, type SidePaneSettings } from "./SidePane";
@@ -578,10 +578,9 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
     await run(async () => {
       const album = createAlbum({
         name: String(form.get("title")),
+        dimensions: readPageChoice(form),
         pageCount: Number(form.get("pageCount")),
-        ...readMargins(form),
-        dpi: Number(form.get("dpi")),
-        minEffectiveDpi: Number(form.get("minEffectiveDpi")),
+        ...readPrintSettings(form),
       });
       await ports.write(draft, serializeAlbum(album), true);
       const root = await ports.parent(draft);
@@ -649,10 +648,8 @@ export default function App({ ports = desktopPorts, layoutPorts }: { ports?: Doc
         <form className="album-form new-album-form" role="dialog" aria-modal="true" onSubmit={(event) => void create(event)} aria-label="Album settings">
           <h1>Album settings</h1>
           <label>Title<textarea name="title" defaultValue="New Album" autoFocus disabled={busy} rows={2} /></label>
-          <label>Page Format<select name="pageFormat" disabled={busy}><option>A4 - landscape (297 x 210 mm)</option></select></label>
-          <MarginFields disabled={busy} />
-          <label>Export resolution (DPI)<input name="dpi" type="number" min="1" step="any" defaultValue="300" required disabled={busy} /></label>
-          <label>Effective Resolution warning below (DPI)<input name="minEffectiveDpi" type="number" min="1" step="any" defaultValue="150" required disabled={busy} /></label>
+          <PageFormatChoices disabled={busy} />
+          <PrintSettingsFields disabled={busy} />
           <label>Page count<input name="pageCount" type="number" min="2" max="10000" step="2" defaultValue="2" required disabled={busy} /></label>
           <div className="album-toolbar">
             <button type="submit" className="button-primary" disabled={busy}>Create Album</button>

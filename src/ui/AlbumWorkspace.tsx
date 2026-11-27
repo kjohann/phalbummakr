@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
-  canRedo, canUndo, createAlbum, deserializeAlbum, emptyHistory, endGroup, recordChange, relinkPlacements, serializeAlbum, stepHistory,
+  adjustPageBoundary, canRedo, canUndo, createAlbum, deserializeAlbum, emptyHistory, endGroup, pageDimensions, recordChange, relinkPlacements, scaleAlbum, serializeAlbum, stepHistory,
   type Album, type AlbumPorts, type ContentIndexStats, type HistoryDirection, type PhotoIdentity, type PhotoPreviewPorts, type PhotoSize, type PlacementRelink, type UndoHistory,
 } from "../core";
 import AlbumView from "./AlbumView";
 import ExportDialog from "./ExportDialog";
-import { MarginFields, readMargins } from "./MarginFields";
+import { PageFormatChoices, PrintSettingsFields, readPageChoice, readPrintSettings } from "./MarginFields";
 import ModalDialog from "./ModalDialog";
 import { tauriPageExportPorts, type PageExportPorts } from "./pageExport";
 import { tauriAlbumPorts } from "./tauriAlbumPorts";
@@ -99,6 +99,10 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
   );
   const [creating, setCreating] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [dimensionMode, setDimensionMode] = useState<"scale" | "boundary">("scale");
+  const [dimensionWidth, setDimensionWidth] = useState("");
+  const [dimensionHeight, setDimensionHeight] = useState("");
+  const [pendingDimensions, setPendingDimensions] = useState<{ before: Album; after: Album; mode: "scale" | "boundary" } | null>(null);
   // The Album as it was when Export Pages was chosen; later edits don't change the export.
   const [exporting, setExporting] = useState<{ filename: string; album: Album } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -134,7 +138,15 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
   useEffect(() => {
     if (!command || handledCommand.current === command.serial) return;
     handledCommand.current = command.serial;
-    if (command.name === "album-settings" && currentRef.current && !suspended) setSettingsOpen(true);
+    if (command.name === "album-settings" && currentRef.current && !suspended) {
+      const { widthMm, heightMm } = pageDimensions(currentRef.current.album.pageFormat);
+      setDimensionWidth(String(widthMm / 10));
+      setDimensionHeight(String(heightMm / 10));
+      setDimensionMode("scale");
+      setPendingDimensions(null);
+      setError(null);
+      setSettingsOpen(true);
+    }
     if (command.name === "export-pages" && currentRef.current && !suspended) setExporting(currentRef.current);
   }, [command, suspended]);
 
@@ -281,10 +293,9 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
     try {
       const album = createAlbum({
         name: String(form.get("name")),
+        dimensions: readPageChoice(form),
         pageCount: Number(form.get("pageCount")),
-        ...readMargins(form),
-        dpi: Number(form.get("dpi")),
-        minEffectiveDpi: Number(form.get("minEffectiveDpi")),
+        ...readPrintSettings(form),
       });
       await ports.write(root, album.title, serializeAlbum(album), true);
       savedJson.current = serializeAlbum(album);
@@ -387,10 +398,8 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
         <form className="album-form" onSubmit={(event) => void create(event)} aria-label="New Album">
           <h2>New Album</h2>
           <label>Name<input name="name" required maxLength={100} autoFocus disabled={busy} /></label>
-          <label>Page Format<select name="pageFormat" disabled={busy}><option>A4 - landscape (297 x 210 mm)</option></select></label>
-          <MarginFields disabled={busy} />
-          <label>Export resolution (DPI)<input name="dpi" type="number" min="1" step="any" defaultValue="300" required disabled={busy} /></label>
-          <label>Effective Resolution warning below (DPI)<input name="minEffectiveDpi" type="number" min="1" step="any" defaultValue="150" required disabled={busy} /></label>
+          <PageFormatChoices disabled={busy} />
+          <PrintSettingsFields disabled={busy} />
           <label>Page count<input name="pageCount" type="number" min="2" max="10000" step="2" defaultValue="2" required disabled={busy} /></label>
           <div className="album-toolbar">
             <button type="submit" className="button-primary" disabled={busy}>Create Album</button>
@@ -400,28 +409,72 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
       ) : current ? (
         <>
           {settingsOpen && (
-            <ModalDialog label="Album settings" onClose={() => setSettingsOpen(false)}>
+            <ModalDialog label="Album settings" onClose={() => { setSettingsOpen(false); setPendingDimensions(null); }}>
               <form id="album-settings" className="album-settings" aria-label="Album settings"
+                hidden={pendingDimensions !== null}
+                style={pendingDimensions ? { display: "none" } : undefined}
                 onSubmit={(event) => {
                   event.preventDefault();
                   const form = new FormData(event.currentTarget);
-                  changeAlbum((album) => ({ ...album, title: document ? String(form.get("title")) : album.title, pageFormat: {
-                    ...album.pageFormat,
-                    ...readMargins(form),
-                    dpi: Number(form.get("dpi")),
-                    minEffectiveDpi: Number(form.get("minEffectiveDpi")),
-                  } }));
+                  const album = currentRef.current?.album;
+                  if (!album) return;
+                  const original = pageDimensions(album.pageFormat);
+                  const widthMm = Number(dimensionWidth) * 10;
+                  const heightMm = Number(dimensionHeight) * 10;
+                  try {
+                    const settings = readPrintSettings(form);
+                    if (!dimensionWidth || !dimensionHeight || !Number.isFinite(widthMm) || widthMm <= 0
+                      || !Number.isFinite(heightMm) || heightMm <= 0) throw new Error("Page dimensions must be positive numbers in cm.");
+                    const changed = Math.abs(widthMm - original.widthMm) > 1e-8 || Math.abs(heightMm - original.heightMm) > 1e-8;
+                    const result = !changed ? { ...album, pageFormat: { ...album.pageFormat, ...settings } }
+                      : dimensionMode === "scale" ? scaleAlbum(album, widthMm / original.widthMm, settings)
+                        : adjustPageBoundary(album, { widthMm, heightMm }, settings);
+                    const after = { ...result, title: document ? String(form.get("title")) : album.title };
+                    serializeAlbum(after);
+                    setError(null);
+                    if (changed) setPendingDimensions({ before: album, after, mode: dimensionMode });
+                    else changeAlbum(() => after);
+                  } catch (cause) {
+                    setError(`Could not update Album: ${String(cause)}`);
+                  }
                 }}>
                 <h2>Album settings</h2>
                 {error && <p className="error-banner" role="alert">{error}</p>}
                 <fieldset disabled={suspended || busy || saveStatus === "saving" || saveStatus === "error"}>
                   {document && <label>Title<textarea name="title" defaultValue={current.album.title} rows={2} /></label>}
-                  <p className="album-details">Page Format: A4 landscape (297 x 210 mm)</p>
-                  <MarginFields bleedMm={current.album.pageFormat.bleedMm} safeZoneMm={current.album.pageFormat.safeZoneMm} />
-                  <label>Export resolution (DPI)<input name="dpi" type="number" min="1" step="any"
-                    defaultValue={current.album.pageFormat.dpi} required /></label>
-                  <label>Effective Resolution warning below (DPI)<input name="minEffectiveDpi" type="number" min="1" step="any"
-                    defaultValue={current.album.pageFormat.minEffectiveDpi} required /></label>
+                  <fieldset>
+                    <legend>Page dimensions</legend>
+                    <label className="dimension-operation"><input type="radio" name="dimensionMode" checked={dimensionMode === "scale"}
+                      onChange={() => {
+                        setDimensionMode("scale");
+                        const { widthMm, heightMm } = pageDimensions(current.album.pageFormat);
+                        const width = Number(dimensionWidth);
+                        setDimensionHeight(width > 0 ? String(Number((width * heightMm / widthMm).toPrecision(12))) : "");
+                      }} /> Scale proportionally</label>
+                    <p>Linked dimensions scale Slots and text together, preserving Photo framing.</p>
+                    <label className="dimension-operation"><input type="radio" name="dimensionMode" checked={dimensionMode === "boundary"}
+                      onChange={() => setDimensionMode("boundary")} /> Adjust page boundary</label>
+                    <p>Independent dimensions preserve Slot positions and sizes. Prepare every Page and the current Safe Zone first.</p>
+                    <label>Page width (cm)<input type="number" min="0.000001" step="any" required value={dimensionWidth}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setDimensionWidth(value);
+                        if (dimensionMode === "scale") {
+                          const { widthMm, heightMm } = pageDimensions(current.album.pageFormat);
+                          setDimensionHeight(Number(value) > 0 ? String(Number((Number(value) * heightMm / widthMm).toPrecision(12))) : "");
+                        }
+                      }} /></label>
+                    <label>Page height (cm)<input type="number" min="0.000001" step="any" required value={dimensionHeight}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setDimensionHeight(value);
+                        if (dimensionMode === "scale") {
+                          const { widthMm, heightMm } = pageDimensions(current.album.pageFormat);
+                          setDimensionWidth(Number(value) > 0 ? String(Number((Number(value) * widthMm / heightMm).toPrecision(12))) : "");
+                        }
+                      }} /></label>
+                  </fieldset>
+                  <PrintSettingsFields format={current.album.pageFormat} />
                 </fieldset>
                 <details>
                   <summary>Diagnostics</summary>
@@ -436,6 +489,27 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
                   <button type="button" className="button-quiet" onClick={() => setSettingsOpen(false)}>Close</button>
                 </div>
               </form>
+              {pendingDimensions && <div>
+                <h2>Confirm dimension change</h2>
+                <p>{pendingDimensions.mode === "scale"
+                  ? "Slots and text will scale proportionally; Photo framing is preserved. Margins change only if edited."
+                  : "The Page boundary will change without moving or resizing Slots or changing Photo framing."} Check all Pages after applying.</p>
+                <div className="album-toolbar">
+                  <button type="button" className="button-primary" autoFocus
+                    disabled={suspended || busy || saveStatus === "saving" || saveStatus === "error"} onClick={() => {
+                    if (currentRef.current?.album !== pendingDimensions.before) {
+                      setError("The Album changed. Review the settings and try again.");
+                      setPendingDimensions(null);
+                      return;
+                    }
+                    changeAlbum(() => pendingDimensions.after);
+                    setPendingDimensions(null);
+                    setSettingsOpen(false);
+                    setNotice("Page dimensions changed. Please check all Pages.");
+                  }}>Confirm dimension change</button>
+                  <button type="button" className="button-quiet" onClick={() => setPendingDimensions(null)}>Cancel dimension change</button>
+                </div>
+              </div>}
             </ModalDialog>
           )}
           {exporting && (

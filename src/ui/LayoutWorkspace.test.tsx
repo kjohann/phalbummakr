@@ -2,7 +2,7 @@
 import { useState, type ComponentProps, type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createAlbum, readLayoutLibrary, serializeLayoutLibrary, type LayoutPorts } from "../core";
+import { createAlbum, readLayoutLibrary, serializeLayoutLibrary, type LayoutPorts, type PageFormat } from "../core";
 import LayoutWorkspace, { type LayoutCommand, type LayoutCommandName } from "./LayoutWorkspace";
 import { useLayoutLibrary } from "./useLayoutLibrary";
 
@@ -57,11 +57,11 @@ function disk(json: string | null = null) {
 }
 
 /** Stands in for the Side pane, the command bar and the shared Layout Library around Layout mode. */
-function Harness({ ports, ...props }: Omit<ComponentProps<typeof LayoutWorkspace>, "paneHost" | "active" | "format" | "layouts"> & { active?: boolean; ports: LayoutPorts }) {
+function Harness({ ports, pageFormat = format, ...props }: Omit<ComponentProps<typeof LayoutWorkspace>, "paneHost" | "active" | "format" | "layouts"> & { active?: boolean; ports: LayoutPorts; pageFormat?: PageFormat }) {
   const [command, setCommand] = useState<LayoutCommand>();
   const [toolsHost, setToolsHost] = useState<HTMLElement | null>(null);
   const [paneHost, setPaneHost] = useState<HTMLElement | null>(null);
-  const layouts = useLayoutLibrary({ root: "D:\\Photos", format, ports });
+  const layouts = useLayoutLibrary({ root: "D:\\Photos", format: pageFormat, ports });
   const send = (name: LayoutCommandName) => setCommand((current) => ({ name, serial: (current?.serial ?? 0) + 1 }));
   return <>
     <section aria-label="Side pane" ref={setPaneHost} />
@@ -71,7 +71,7 @@ function Harness({ ports, ...props }: Omit<ComponentProps<typeof LayoutWorkspace
         <button key={name} type="button" onClick={() => send(name)}>Bar {name}</button>
       ))}
     </div>
-    <LayoutWorkspace format={format} layouts={layouts} paneHost={paneHost} active={props.active ?? true}
+    <LayoutWorkspace format={pageFormat} layouts={layouts} paneHost={paneHost} active={props.active ?? true}
       {...props} bar={{ ...props.bar, command, toolsHost }} />
   </>;
 }
@@ -100,6 +100,21 @@ it("lists the predefined Layouts in the pane and shows the first on the canvas, 
   expect(canvas.getByText("Text")).toBeTruthy();
   expect(canvas.queryByText("Sample text")).toBeNull();
   await act(() => new Promise((resolve) => setTimeout(resolve, 700)));
+  expect(ports.write).not.toHaveBeenCalled();
+});
+
+it("updates the Layout canvas for a changed Page Format without rewriting saved Layouts", async () => {
+  const savedJson = serializeLayoutLibrary(readLayoutLibrary(null, format));
+  const { ports, store } = disk(savedJson);
+  const { rerender } = render(<Harness ports={ports} />);
+  await cards();
+  const originalWidth = parseFloat(screen.getByRole("button", { name: "Photo Slot 1" }).style.width);
+  const square = createAlbum({ name: "Square", dimensions: { widthMm: 200, heightMm: 200 } }).pageFormat;
+  rerender(<Harness ports={ports} pageFormat={square} />);
+  expect(screen.getByRole("status").textContent).toMatch(/different aspect ratio/i);
+  expect(parseFloat(screen.getByRole("button", { name: "Photo Slot 1" }).style.width)).not.toBe(originalWidth);
+  await act(() => new Promise((resolve) => setTimeout(resolve, 600)));
+  expect(store.json).toBe(savedJson);
   expect(ports.write).not.toHaveBeenCalled();
 });
 

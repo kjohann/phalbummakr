@@ -1,4 +1,4 @@
-import { pageDimensions, type Album, type Page, type PageFormat } from "./album";
+import { pageDimensions, type Album, type Page, type PageDimensions, type PageFormat } from "./album";
 import type { PhotoSize } from "./photos";
 
 export interface Rectangle {
@@ -296,7 +296,7 @@ function slotAspect(album: Album, slot: Slot): number {
 }
 
 /** A Slot's printed size in its own upright orientation: width and height swap for 90° and 270° Slot rotation. */
-export function slotContentSizeMm(format: PageFormat, slot: Slot): { widthMm: number; heightMm: number } {
+export function slotContentSizeMm(format: PageFormat, slot: Slot): PageDimensions {
   const page = pageDimensions(format);
   const width = slot.width * page.widthMm;
   const height = slot.height * page.heightMm;

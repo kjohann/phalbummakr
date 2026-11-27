@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createAlbum, newLayout, serializeAlbum, type LayoutPorts } from "../core";
+import { createAlbum, deserializeAlbum, newLayout, pageDimensions, serializeAlbum, type LayoutPorts } from "../core";
 import App, { type DocumentPorts } from "./App";
 import type { LayoutLibraryState } from "./useLayoutLibrary";
 
@@ -763,6 +763,7 @@ it("creates the chosen file with a title independent of its filename", async () 
   expect(screen.queryByLabelText("Page 1 side")).toBeNull();
   expect((screen.getByLabelText("Page count") as HTMLInputElement).value).toBe("2");
   fireEvent.change(screen.getByLabelText("Title"), { target: { value: "A: B / C" } });
+  fireEvent.change(screen.getByLabelText("Page Format"), { target: { value: "210x297" } });
   fireEvent.click(screen.getByRole("button", { name: "Create Album" }));
   await screen.findByText("A: B / C");
   expect(ports.write).toHaveBeenCalledWith(path, expect.any(String), true);
@@ -770,6 +771,7 @@ it("creates the chosen file with a title independent of its filename", async () 
   expect(JSON.parse(json).title).toBe("A: B / C");
   expect(JSON.parse(json)).not.toHaveProperty("startingSide");
   expect(JSON.parse(json).pages).toHaveLength(2);
+  expect(pageDimensions(deserializeAlbum(json).pageFormat)).toEqual({ widthMm: 210, heightMm: 297 });
   expect(ports.remember).toHaveBeenCalledWith(path);
 });
 
