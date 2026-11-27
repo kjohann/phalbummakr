@@ -100,6 +100,7 @@ Each issue is a thin vertical slice that leaves the app runnable.
 | 055 | [Separate Bleed and Safe Zone per axis](055-per-axis-bleed-and-safe-zone.md) | 004, 012, 017 | done |
 | 056 | [Keyboard nudging for Selected Slots](056-keyboard-nudging.md) | 011, 013, 014, 030, 051, 054 | done |
 | 057 | [Built-in Page dimensions and controlled dimension changes](057-page-dimensions.md) | 004, 011, 012, 016, 022, 055 | done |
+| 058 | [Photo Usage on drives without a change time (bug)](058-usage-on-drives-without-change-time.md) | 041 | done |
 
 Work order for the layout rework: 016, 017, 018, 019, 020, then 011.
 

@@ -45,6 +45,11 @@ enum FileChangeToken {
         volume: u32,
         file_id: u64,
     },
+    // FAT32/exFAT report no ChangeTime; length and mtime are the only change signal.
+    WindowsWithoutChangeTime {
+        volume: u32,
+        file_id: u64,
+    },
     Unix {
         ctime: i64,
         ctime_ns: i64,
@@ -131,17 +136,38 @@ fn file_stamp(file: &File) -> Result<FileStamp, String> {
             ));
         }
     }
-    if basic.ChangeTime == 0 {
-        return Err("The filesystem did not provide a Photo change identity.".into());
-    }
     stamp(
         &file.metadata().map_err(|error| error.to_string())?,
-        FileChangeToken::Windows {
-            change_time: basic.ChangeTime,
-            volume: identity.dwVolumeSerialNumber,
-            file_id: ((identity.nFileIndexHigh as u64) << 32) | identity.nFileIndexLow as u64,
-        },
+        windows_change_token(
+            basic.ChangeTime,
+            identity.dwVolumeSerialNumber,
+            ((identity.nFileIndexHigh as u64) << 32) | identity.nFileIndexLow as u64,
+        ),
     )
+}
+
+#[cfg(all(test, windows))]
+thread_local! {
+    static SIMULATE_NO_CHANGE_TIME: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(windows)]
+fn windows_change_token(change_time: i64, volume: u32, file_id: u64) -> FileChangeToken {
+    #[cfg(test)]
+    let change_time = if SIMULATE_NO_CHANGE_TIME.get() {
+        0
+    } else {
+        change_time
+    };
+    if change_time == 0 {
+        FileChangeToken::WindowsWithoutChangeTime { volume, file_id }
+    } else {
+        FileChangeToken::Windows {
+            change_time,
+            volume,
+            file_id,
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -747,6 +773,32 @@ mod tests {
             (0, 0, 1)
         );
         assert_eq!(ready_hash(&cached.identities[0]), ABC_SHA256);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn filesystem_without_change_time_caches_by_length_and_modified_time() {
+        SIMULATE_NO_CHANGE_TIME.set(true);
+        let library = library();
+        let photo = library.path().join("photo.jpg");
+        fs::write(&photo, b"abc").unwrap();
+
+        let first = index_paths(library.path(), &paths(&["photo.jpg"])).unwrap();
+        assert_eq!(ready_hash(&first.identities[0]), ABC_SHA256);
+        let cached = index_paths(library.path(), &paths(&["photo.jpg"])).unwrap();
+        assert_eq!(
+            (cached.hashed_files, cached.hashed_bytes, cached.cache_hits),
+            (0, 0, 1)
+        );
+
+        fs::write(&photo, b"abcd").unwrap();
+        let edited = index_paths(library.path(), &paths(&["photo.jpg"])).unwrap();
+        SIMULATE_NO_CHANGE_TIME.set(false);
+        assert_ne!(ready_hash(&edited.identities[0]), ABC_SHA256);
+        assert_eq!(
+            (edited.hashed_files, edited.hashed_bytes, edited.cache_hits),
+            (1, 4, 0)
+        );
     }
 
     #[cfg(windows)]
