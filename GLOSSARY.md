@@ -82,6 +82,12 @@ _Avoid_: Margin, safe area
 The explicit step of changing an Album's Page Format and adapting every existing Page to it.
 _Avoid_: Resize
 
+**Proportional scaling**:
+Changing an Album's Page dimensions without changing their aspect ratio, scaling its Slots and text by the same factor while preserving Photo framing.
+
+**Page boundary adjustment**:
+Changing an Album's Page dimensions while keeping its Slots' physical size and position, text size and Photo framing unchanged. The existing Safe Zone and all Slots must fit within the new trim boundary.
+
 **Spread**:
 Two facing sides viewed together. A middle Spread has two Pages; the first pairs the front Inside Cover with Page 1, and the last pairs the final Page with the back Inside Cover.
 _Avoid_: Double page
