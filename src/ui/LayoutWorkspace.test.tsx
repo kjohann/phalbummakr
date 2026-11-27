@@ -118,6 +118,14 @@ it("updates the Layout canvas for a changed Page Format without rewriting saved 
   expect(ports.write).not.toHaveBeenCalled();
 });
 
+it("opens starter Layouts for a very small Page without invalid Slot sizes", async () => {
+  const small = createAlbum({ name: "Small", dimensions: { widthMm: 20, heightMm: 30 }, safeZoneMm: { x: 0, y: 0 } }).pageFormat;
+  const { ports } = disk();
+  render(<Harness ports={ports} pageFormat={small} />);
+  expect((await cards()).length).toBeGreaterThan(0);
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
 async function cards() {
   return waitFor(() => {
     const found = library().getAllByRole("button");

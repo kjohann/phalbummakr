@@ -22,7 +22,7 @@ export function readPageChoice(form: FormData): PageDimensions {
   return { widthMm: choice.widthMm, heightMm: choice.heightMm };
 }
 
-/** Bleed and Safe Zone inputs for each axis, shared by the New Album forms and Album settings. */
+/** Bleed and Safe Zone inputs for each axis. */
 function MarginFields({
   bleedMm = { x: DEFAULT_BLEED_MM, y: DEFAULT_BLEED_MM },
   safeZoneMm = { x: DEFAULT_SAFE_ZONE_MM, y: DEFAULT_SAFE_ZONE_MM },

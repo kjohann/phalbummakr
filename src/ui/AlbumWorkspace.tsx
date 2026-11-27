@@ -5,7 +5,7 @@ import {
 } from "../core";
 import AlbumView from "./AlbumView";
 import ExportDialog from "./ExportDialog";
-import { PageFormatChoices, PrintSettingsFields, readPageChoice, readPrintSettings } from "./MarginFields";
+import { PageFormatChoices, PrintSettingsFields, readPageChoice, readPrintSettings } from "./AlbumFormatFields";
 import ModalDialog from "./ModalDialog";
 import { tauriPageExportPorts, type PageExportPorts } from "./pageExport";
 import { tauriAlbumPorts } from "./tauriAlbumPorts";
@@ -455,7 +455,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
                     <label className="dimension-operation"><input type="radio" name="dimensionMode" checked={dimensionMode === "boundary"}
                       onChange={() => setDimensionMode("boundary")} /> Adjust page boundary</label>
                     <p>Independent dimensions preserve Slot positions and sizes. Prepare every Page and the current Safe Zone first.</p>
-                    <label>Page width (cm)<input type="number" min="0.000001" step="any" required value={dimensionWidth}
+                    <label>Page width (cm)<input type="number" min="0" step="any" required value={dimensionWidth}
                       onChange={(event) => {
                         const value = event.target.value;
                         setDimensionWidth(value);
@@ -464,7 +464,7 @@ export default function AlbumWorkspace({ root, ports = tauriAlbumPorts, photoPor
                           setDimensionHeight(Number(value) > 0 ? String(Number((Number(value) * heightMm / widthMm).toPrecision(12))) : "");
                         }
                       }} /></label>
-                    <label>Page height (cm)<input type="number" min="0.000001" step="any" required value={dimensionHeight}
+                    <label>Page height (cm)<input type="number" min="0" step="any" required value={dimensionHeight}
                       onChange={(event) => {
                         const value = event.target.value;
                         setDimensionHeight(value);

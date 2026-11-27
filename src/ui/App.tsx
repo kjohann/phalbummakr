@@ -9,7 +9,7 @@ import { createAlbum, copyPhotosToFolder, deserializeAlbum, clampZoom, renameFol
 import AlbumWorkspace, { type AlbumCommand, type AlbumCommandName, type CommandBarLink, type HistoryState, type PhotoMoveRunner } from "./AlbumWorkspace";
 import CommandBar, { type BarCommand } from "./CommandBar";
 import LayoutWorkspace, { type LayoutBarLink, type LayoutBarState, type LayoutCommand, type LayoutCommandName } from "./LayoutWorkspace";
-import { PageFormatChoices, PrintSettingsFields, readPageChoice, readPrintSettings } from "./MarginFields";
+import { PageFormatChoices, PrintSettingsFields, readPageChoice, readPrintSettings } from "./AlbumFormatFields";
 import type { Mode } from "./modes";
 import PhotoBrowser, { type SortCommandName, type SortLink } from "./PhotoBrowser";
 import SidePane, { clampPaneWidth, DEFAULT_SIDE_PANE, type PaneModes, type SidePaneSettings } from "./SidePane";

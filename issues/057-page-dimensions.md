@@ -1,6 +1,6 @@
 # 057 - Built-in Page dimensions and controlled dimension changes
 
-Status: doing · Type: feature · Depends on: 004, 011, 012, 016, 022, 055
+Status: done · Type: feature · Depends on: 004, 011, 012, 016, 022, 055
 
 ## What
 
@@ -113,7 +113,7 @@ change.
 - Album and UI tests cover built-in dimensions, legacy files, scaling, boundary
   gates, confirmation, undo/redo, autosave, resolution warnings and Layouts.
 - Export tests check all seven dimensions with per-axis Bleed.
-- The full test suite, typecheck, lint and production build pass.
+- The full test suite (569 tests), typecheck, lint and production build pass.
 
 ## Earlier considerations reviewed
 
@@ -129,6 +129,14 @@ change.
 - The remaining earlier considerations concern separate workflows, native
   checks, performance or general Reflow, and remain deferred. No inbox notes
   were resolved by this issue.
+
+## Review
+
+- Standards and spec review used the implementation diff against `872897d`.
+  The shared format fields were named for their broader purpose.
+- Fixed invalid starter Layout geometry on very small Pages and keyboard focus
+  cycling into hidden settings during confirmation; both have regression tests.
+- No remaining non-blocking review findings.
 
 ## Future considerations (low priority)
 

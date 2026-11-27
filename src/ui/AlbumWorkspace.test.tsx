@@ -1293,6 +1293,9 @@ it("confirms proportional dimension changes and undoes format and text together"
   expect((screen.getByLabelText("Page height (cm)") as HTMLInputElement).value).toBe("42");
   fireEvent.click(screen.getByRole("button", { name: "Apply print settings" }));
   expect(pageDimensions((changed.mock.lastCall![0] as Album).pageFormat)).toEqual({ widthMm: 297, heightMm: 210 });
+  screen.getByRole("button", { name: "Cancel dimension change" }).focus();
+  fireEvent.keyDown(document, { key: "Tab" });
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "Confirm dimension change" }));
   fireEvent.click(screen.getByRole("button", { name: "Cancel dimension change" }));
   expect(pageDimensions((changed.mock.lastCall![0] as Album).pageFormat)).toEqual({ widthMm: 297, heightMm: 210 });
   fireEvent.click(screen.getByRole("button", { name: "Apply print settings" }));

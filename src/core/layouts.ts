@@ -292,8 +292,10 @@ const DEFAULT_TEXT_STYLE: TextStyle = {
 
 function starterLayouts(format: PageFormat): { retained: Layout[]; mosaics: Layout[] } {
   const { widthMm, heightMm } = pageDimensions(format);
-  const inset = Math.max(LAYOUT_MIN_INSET_MM, DEFAULT_SAFE_ZONE_MM);
-  const gap = LAYOUT_GAP_MM;
+  // Shrink starter spacing and text on small Pages so all starter Slots stay positive.
+  const scale = Math.min(1, widthMm / 100, heightMm / 100);
+  const inset = Math.max(LAYOUT_MIN_INSET_MM, DEFAULT_SAFE_ZONE_MM) * scale;
+  const gap = LAYOUT_GAP_MM * scale;
   const left = inset;
   const top = inset;
   const contentWidth = widthMm - 2 * inset;
@@ -306,14 +308,14 @@ function starterLayouts(format: PageFormat): { retained: Layout[]; mosaics: Layo
   const text = (x: number, y: number, width: number, fontSize: number): LayoutSlot => ({
     id: `slot-${++slotNumber}`, type: "text",
     x: x / widthMm, y: y / heightMm, width: width / widthMm,
-    height: fontSize * TEXT_LINE_HEIGHT / POINTS_PER_MM / heightMm,
-    text: "", placeholder: DEFAULT_PLACEHOLDER, style: { ...DEFAULT_TEXT_STYLE, fontSize },
+    height: fontSize * scale * TEXT_LINE_HEIGHT / POINTS_PER_MM / heightMm,
+    text: "", placeholder: DEFAULT_PLACEHOLDER, style: { ...DEFAULT_TEXT_STYLE, fontSize: fontSize * scale },
   });
   const grid = (rows: number, columns: number, x = left, y = top, width = contentWidth, height = contentHeight) =>
     photoGrid(columns, rows, { x, y, width, height }, gap, photo);
   const largeWidth = (contentWidth - gap) * 0.6;
-  const captionHeight = 18 * TEXT_LINE_HEIGHT / POINTS_PER_MM;
-  const titleHeight = 36 * TEXT_LINE_HEIGHT / POINTS_PER_MM;
+  const captionHeight = 18 * scale * TEXT_LINE_HEIGHT / POINTS_PER_MM;
+  const titleHeight = 36 * scale * TEXT_LINE_HEIGHT / POINTS_PER_MM;
   const bleed = DEFAULT_BLEED_MM;
   const aspectRatio = pageAspectRatio(format);
   const layout = (id: string, slotsOf: () => LayoutSlot[]): Layout => {

@@ -17,7 +17,7 @@ export default function ModalDialog({ label, children, onClose, closeDisabled = 
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const focusable = () => Array.from(dialog.querySelectorAll<HTMLElement>(
       "button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])",
-    ));
+    )).filter((element) => !element.closest("[hidden]"));
     const focusFirst = () => (focusable()[0] ?? dialog).focus();
     const focusInside = (event: FocusEvent) => {
       if (event.target instanceof Node && !dialog.contains(event.target)) focusFirst();
